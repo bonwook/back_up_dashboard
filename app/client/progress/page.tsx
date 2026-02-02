@@ -2603,7 +2603,12 @@ function TaskDialogContent({
             {getStatusLabel(task.status, task)}
           </Badge>
           <span className="text-xs text-muted-foreground">
-            요청자: <span className="font-medium text-foreground">{task.assigned_by_name || task.assigned_by_email}</span>
+            작업 요청자: <span className="font-medium text-foreground">{task.assigned_by_name || task.assigned_by_email}</span>
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {task.due_date
+              ? `시작일 ${formatDateShort(task.created_at)} ~ 마감일 ${formatDateShort(task.due_date)}`
+              : `시작일 ${formatDateShort(task.created_at)}`}
           </span>
         </div>
       </div>
@@ -2618,38 +2623,31 @@ function TaskDialogContent({
           </div>
         )}
         <div className="space-y-3 text-sm">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-muted-foreground">시작일</p>
-              <p className="font-medium">{formatDateShort(task.created_at)}</p>
-            </div>
-            {userRole !== 'client' && (
-              <div>
-                <p className="text-muted-foreground mb-1">마감일</p>
-                <DueDateEditor 
-                  taskId={task.id}
-                  dueDate={task.due_date}
-                  onUpdate={onTaskUpdate}
-                  userRole={userRole}
-                />
-              </div>
-            )}
-            {userRole === 'client' && task.due_date && (
-              <div>
-                <p className="text-muted-foreground">마감일</p>
-                <p className="font-medium">{formatDateShort(task.due_date)}</p>
-              </div>
-            )}
-          </div>
-          {task.completed_at && (
-            <div>
-              <p className="text-muted-foreground">종료일</p>
-              <p className="font-medium">{formatDateShort(task.completed_at)}</p>
+          {(userRole !== 'client' || task.completed_at) && (
+            <div className="grid grid-cols-2 gap-4">
+              {userRole !== 'client' && (
+                <div>
+                  <p className="text-muted-foreground mb-1">마감일</p>
+                  <DueDateEditor 
+                    taskId={task.id}
+                    dueDate={task.due_date}
+                    onUpdate={onTaskUpdate}
+                    userRole={userRole}
+                  />
+                </div>
+              )}
+              {task.completed_at && (
+                <div>
+                  <p className="text-muted-foreground">종료일</p>
+                  <p className="font-medium">{formatDateShort(task.completed_at)}</p>
+                </div>
+              )}
             </div>
           )}
         </div>
         {task.content && (
           <div>
+            <p className="text-muted-foreground mb-2">요청자 내용</p>
             <div 
               ref={(el) => {
                 if (el) {
@@ -2706,8 +2704,8 @@ function TaskDialogContent({
           </div>
         )}
         {comment && (
-          <div>
-            <p className="text-muted-foreground mb-2">내용</p>
+            <div>
+            <p className="text-muted-foreground mb-2">담당자 내용</p>
             <div 
               ref={(el) => {
                 if (el) {
@@ -2800,15 +2798,18 @@ function TaskDialogContent({
                 commentResolvedFileKeys.map((resolved, index) => {
                   const expiry = calculateFileExpiry(resolved.uploadedAt || task.updated_at)
                   return (
-                    <div key={index} className="flex items-center gap-2">
+                    <div
+                      key={index}
+                      role="button"
+                      tabIndex={0}
+                      className="flex items-center gap-2 cursor-pointer"
+                      onClick={() => handleDownloadWithProgress(resolved.s3Key, resolved.fileName)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleDownloadWithProgress(resolved.s3Key, resolved.fileName)}
+                    >
                       <FileText className="h-4 w-4 shrink-0" />
-                      <button
-                        type="button"
-                        className="text-blue-600 hover:text-blue-800 underline text-left"
-                        onClick={() => handleDownloadWithProgress(resolved.s3Key, resolved.fileName)}
-                      >
+                      <span className="max-w-[200px] truncate text-muted-foreground" title={resolved.fileName}>
                         {resolved.fileName}
-                      </button>
+                      </span>
                       <span className={`text-xs shrink-0 ${expiry.isExpired ? 'text-red-500' : expiry.daysRemaining <= 2 ? 'text-orange-500' : 'text-muted-foreground'}`}>
                         ({expiry.expiryText})
                       </span>
