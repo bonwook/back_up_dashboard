@@ -637,6 +637,31 @@ export default function ClientProgressPage() {
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-6 min-w-0 max-w-full">
+                {!workTaskId ? (
+                  <div
+                    className="min-h-[420px] rounded-lg border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center gap-3 p-8 text-center bg-muted/20"
+                    style={{
+                      backgroundImage: 'repeating-linear-gradient(-45deg, transparent, transparent 10px, rgba(0,0,0,.04) 10px, rgba(0,0,0,.04) 20px)',
+                    }}
+                  >
+                    <p className="text-muted-foreground font-medium max-w-md leading-relaxed">
+                      이쪽에 드래그하거나, 태스크를 클릭한 뒤 <strong>작성</strong> 버튼을 눌러 내용을 작성하세요.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                  {/* 단일/공동 업무 표시 */}
+                  {(() => {
+                    const currentTask = tasks.find(t => t.id === workTaskId)
+                    const isMulti = currentTask?.is_multi_assign === true
+                    return (
+                      <div className="flex items-center gap-2 pb-2 border-b">
+                        <Badge variant={isMulti ? "secondary" : "outline"} className="text-sm shrink-0">
+                          {isMulti ? "공동 업무" : "단일 업무"}
+                        </Badge>
+                      </div>
+                    )
+                  })()}
                 {/* 제목을 comment와 동일한 너비로 설정 */}
                 <div className="grid grid-cols-2 gap-4 min-w-0 max-w-full">
                   <div className="space-y-2 min-w-0 max-w-full">
@@ -1890,7 +1915,6 @@ export default function ClientProgressPage() {
                     </>
                   )})()}
                 </div>
-              </div>
               {workTaskId && (
                 <div className="flex justify-end gap-2 pt-4 border-t">
                   {isUploadingWork && (
@@ -2045,6 +2069,9 @@ export default function ClientProgressPage() {
                   </Button>
                 </div>
               )}
+                  </>
+                )}
+              </div>
             </CardContent>
           </Card>
         </>
