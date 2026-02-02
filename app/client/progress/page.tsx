@@ -851,10 +851,10 @@ export default function ClientProgressPage() {
                         </div>
                       )}
                       
-                      {/* 본문 첨부파일 표시 */}
+                      {/* 요청자 첨부파일 표시 */}
                       {workResolvedFileKeys.length > 0 && (
                         <div className="space-y-2">
-                          <Label className="text-sm font-semibold">본문 첨부파일</Label>
+                          <Label className="text-sm font-semibold">요청자 첨부파일</Label>
                           <div className="flex flex-wrap gap-2 p-2 border border-transparent rounded-md bg-transparent">
                             {workResolvedFileKeys.map((resolved, idx) => (
                               <div key={`main-resolved-${idx}`} className="flex items-center gap-2 px-2 py-1 bg-transparent rounded border text-sm">
@@ -1414,10 +1414,10 @@ export default function ClientProgressPage() {
                         </div>
                       )}
                       
-                      {/* 본문 첨부파일 표시 */}
+                      {/* 요청자 첨부파일 표시 */}
                       {workResolvedFileKeys.length > 0 && (
                         <div className="space-y-2 mt-2">
-                          <Label className="text-sm font-semibold">본문 첨부파일</Label>
+                          <Label className="text-sm font-semibold">요청자 첨부파일</Label>
                           <div className="flex flex-wrap gap-2 p-2 border border-transparent rounded-md bg-transparent">
                             {workResolvedFileKeys.map((resolved, idx) => (
                               <div key={`multi-resolved-${idx}`} className="flex items-center gap-2 px-2 py-1 bg-transparent rounded border text-sm">
@@ -2763,7 +2763,7 @@ function TaskDialogContent({
         )}
         {task.file_keys && task.file_keys.length > 0 && (
           <div>
-            <p className="text-muted-foreground mb-2">본문 첨부 파일</p>
+            <p className="text-muted-foreground mb-2">요청자 첨부파일</p>
             <div className="space-y-2 text-sm">
               {resolvedFileKeys.length > 0 ? (
                 resolvedFileKeys.map((resolved, index) => {
@@ -2790,36 +2790,64 @@ function TaskDialogContent({
             </div>
           </div>
         )}
-        {task.comment_file_keys && task.comment_file_keys.length > 0 && (
-          <div>
-            <p className="text-muted-foreground mb-2">작성자 첨부 파일</p>
-            <div className="space-y-2 text-sm">
-              {commentResolvedFileKeys.length > 0 ? (
-                commentResolvedFileKeys.map((resolved, index) => {
-                  const expiry = calculateFileExpiry(resolved.uploadedAt || task.updated_at)
-                  return (
-                    <div
-                      key={index}
-                      role="button"
-                      tabIndex={0}
-                      className="flex items-center gap-2 cursor-pointer"
-                      onClick={() => handleDownloadWithProgress(resolved.s3Key, resolved.fileName)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleDownloadWithProgress(resolved.s3Key, resolved.fileName)}
-                    >
-                      <FileText className="h-4 w-4 shrink-0" />
-                      <span className="max-w-[200px] truncate text-muted-foreground" title={resolved.fileName}>
-                        {resolved.fileName}
-                      </span>
-                      <span className={`text-xs shrink-0 ${expiry.isExpired ? 'text-red-500' : expiry.daysRemaining <= 2 ? 'text-orange-500' : 'text-muted-foreground'}`}>
-                        ({expiry.expiryText})
-                      </span>
-                    </div>
-                  )
-                })
-              ) : (
-                <div className="text-muted-foreground">파일 정보를 불러오는 중...</div>
-              )}
+        {task.comment_file_keys && task.comment_file_keys.length > 0 && (() => {
+          // 담당자(assigned_to)가 올린 첨부파일만 표시
+          const assigneeFileKeys = commentResolvedFileKeys.filter(
+            (r) => r.userId === task.assigned_to
+          )
+          // 로딩 중이거나 담당자 파일이 있을 때만 섹션 표시
+          const showSection = commentResolvedFileKeys.length === 0 || assigneeFileKeys.length > 0
+          if (!showSection) return null
+          return (
+            <div>
+              <p className="text-muted-foreground mb-2">담당자 첨부파일</p>
+              <div className="space-y-2 text-sm">
+                {commentResolvedFileKeys.length === 0 ? (
+                  <div className="text-muted-foreground">파일 정보를 불러오는 중...</div>
+                ) : (
+                  assigneeFileKeys.map((resolved, index) => {
+                    const expiry = calculateFileExpiry(resolved.uploadedAt || task.updated_at)
+                    return (
+                      <div
+                        key={index}
+                        role="button"
+                        tabIndex={0}
+                        className="flex items-center gap-2 cursor-pointer"
+                        onClick={() => handleDownloadWithProgress(resolved.s3Key, resolved.fileName)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleDownloadWithProgress(resolved.s3Key, resolved.fileName)}
+                      >
+                        <FileText className="h-4 w-4 shrink-0" />
+                        <span
+                          className="max-w-[200px] truncate text-blue-600 hover:text-blue-800 underline text-left cursor-pointer"
+                          title={resolved.fileName}
+                        >
+                          {resolved.fileName}
+                        </span>
+                        <span className={`text-xs shrink-0 ${expiry.isExpired ? 'text-red-500' : expiry.daysRemaining <= 2 ? 'text-orange-500' : 'text-muted-foreground'}`}>
+                          ({expiry.expiryText})
+                        </span>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
             </div>
+          )
+        })()}
+        {threadComments.length > 0 && (
+          <div className="pt-4 border-t">
+            <p className="text-muted-foreground font-medium mb-3">댓글</p>
+            <ul className="space-y-3 text-sm">
+              {threadComments.map((c) => (
+                <li key={c.id} className="flex flex-col gap-1 p-3 rounded-md bg-muted/50 border border-border/50">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-foreground">{c.full_name ?? "알 수 없음"}</span>
+                    <span className="text-xs text-muted-foreground shrink-0">{formatDateShort(c.created_at)}</span>
+                  </div>
+                  <p className="text-foreground whitespace-pre-wrap wrap-break-word word-break break-all">{c.content}</p>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </div>

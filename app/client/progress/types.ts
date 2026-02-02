@@ -31,6 +31,7 @@ export interface ResolvedFileKey {
   s3Key: string
   fileName: string
   uploadedAt?: string | null
+  userId?: string | null
 }
 
 export interface EditorState {

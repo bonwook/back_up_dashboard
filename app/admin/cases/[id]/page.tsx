@@ -1001,9 +1001,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         }
       `}</style>
 
-      {/* 댓글 - 메신저 스타일 */}
+      {/* 댓글 - 말풍선 스타일 */}
       <div className="mb-6 rounded-xl border bg-muted/20 overflow-hidden flex flex-col" style={{ minHeight: "280px" }}>
-        <div className="flex-1 max-h-[320px] overflow-y-auto p-3 space-y-2 custom-scrollbar">
+        <div className="flex-1 max-h-[320px] overflow-y-auto p-4 space-y-4 custom-scrollbar">
           {comments.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">아직 댓글이 없습니다.</p>
           ) : (
@@ -1032,7 +1032,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   className={`flex ${isMe ? "justify-end" : "justify-start"}`}
                 >
                   <div className={`flex flex-col max-w-[85%] sm:max-w-[75%] ${isMe ? "items-end" : "items-start"}`}>
-                    <div className={`flex items-center gap-2 px-2 mb-0.5 ${isMe ? "flex-row-reverse" : ""}`}>
+                    <div className={`flex items-center gap-2 px-2 mb-1 ${isMe ? "flex-row-reverse" : ""}`}>
                       <span className="text-[11px] font-medium text-foreground/90">
                         {c.full_name || "사용자"}
                       </span>
@@ -1047,12 +1047,10 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       </span>
                     </div>
                     <div
-                      className={`rounded-2xl px-4 py-2.5 shadow-sm ${bubbleClass} ${
-                        isMe ? "rounded-br-md" : "rounded-bl-md"
-                      }`}
+                      className={`rounded-2xl px-4 py-3 shadow-md ${bubbleClass}`}
                     >
                       <div className="flex items-end gap-2">
-                        <div className="text-sm break-words text-inherit [&_p]:my-0 [&_pre]:whitespace-pre-wrap [&_a]:underline">
+                        <div className="text-sm wrap-break-word word-break break-all text-inherit [&_p]:my-0 [&_pre]:whitespace-pre-wrap [&_a]:underline">
                           <SafeHtml
                             html={c.content || ""}
                             className="prose prose-sm max-w-none prose-p:my-0 [&_table]:w-max [&_pre]:whitespace-pre-wrap [&_code]:break-all prose-inherit"
