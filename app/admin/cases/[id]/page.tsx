@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Loader2, Calendar as CalendarIcon, FileText, X } from "lucide-react"
+import { ArrowLeft, Loader2, Calendar as CalendarIcon, FileText, X, Send } from "lucide-react"
 import Link from "next/link"
 import { SafeHtml } from "@/components/safe-html"
 import { sanitizeHtml } from "@/lib/utils/sanitize"
@@ -31,7 +31,6 @@ import {
   type ResolvedSubtaskFile,
 } from "@/lib/utils/fileKeyHelpers"
 import { getStatusBadge, getStatusColor, getStatusBorderColor, getPriorityBadge } from "@/lib/utils/taskStatusHelpers"
-import { getCommentColorScheme } from "@/lib/utils/commentColorHelpers"
 import { FileListItem } from "./components/FileListItem"
 import { StaffSessionBlock } from "./components/StaffSessionBlock"
 import { useSubtaskCompletion } from "@/lib/hooks/useSubtaskCompletion"
@@ -557,6 +556,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     return null
   }
 
+  // 수정 권한: 요청자(assigned_by) 또는 admin만. 할당받은 staff(assigned_to)는 수정 불가
+  const canEditTask = userRole === "admin" || me?.id === task.assigned_by
+
   return (
     <div className="mx-auto max-w-7xl p-6">
       <div className="mb-6">
@@ -587,59 +589,61 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             <div className="flex items-center gap-1.5">
               <span className="text-muted-foreground">마감</span>
               <span className="font-medium">{selectedDueDate ? format(selectedDueDate, "yy.MM.dd", { locale: ko }) : "미정"}</span>
-              <Popover open={isDuePopoverOpen} onOpenChange={setIsDuePopoverOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-5 w-5 p-0 hover:bg-muted"
-                    disabled={isUpdatingDueDate || task.status === "completed"}
-                  >
-                    <CalendarIcon className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={selectedDueDate || undefined}
-                    classNames={{
-                      today:
-                        "bg-transparent text-foreground rounded-md border border-muted-foreground/30 data-[selected=true]:border-primary data-[selected=true]:bg-primary data-[selected=true]:text-primary-foreground",
-                    }}
-                    onSelect={async (date) => {
-                      if (task.status === "completed") return
-                      if (!date) {
-                        setSelectedDueDate(null)
-                        return
-                      }
+              {canEditTask && (
+                <Popover open={isDuePopoverOpen} onOpenChange={setIsDuePopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 p-0 hover:bg-muted"
+                      disabled={isUpdatingDueDate || task.status === "completed"}
+                    >
+                      <CalendarIcon className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={selectedDueDate || undefined}
+                      classNames={{
+                        today:
+                          "bg-transparent text-foreground rounded-md border border-muted-foreground/30 data-[selected=true]:border-primary data-[selected=true]:bg-primary data-[selected=true]:text-primary-foreground",
+                      }}
+                      onSelect={async (date) => {
+                        if (task.status === "completed") return
+                        if (!date) {
+                          setSelectedDueDate(null)
+                          return
+                        }
 
-                      if (selectedDueDate && format(selectedDueDate, "yyyy-MM-dd") === format(date, "yyyy-MM-dd")) {
-                        setSelectedDueDate(null)
-                        return
-                      }
+                        if (selectedDueDate && format(selectedDueDate, "yyyy-MM-dd") === format(date, "yyyy-MM-dd")) {
+                          setSelectedDueDate(null)
+                          return
+                        }
 
-                      setSelectedDueDate(date)
-                    }}
-                    initialFocus
-                  />
-                  {task.status !== "completed" && (
-                    <div className="p-3 border-t">
-                      <Button
-                        variant="default"
-                        size="sm"
-                        className="w-full"
-                        onClick={async () => {
-                          const ok = await applyDueDate(selectedDueDate)
-                          if (ok) setIsDuePopoverOpen(false)
-                        }}
-                        disabled={isUpdatingDueDate}
-                      >
-                        적용
-                      </Button>
-                    </div>
-                  )}
-                </PopoverContent>
-              </Popover>
+                        setSelectedDueDate(date)
+                      }}
+                      initialFocus
+                    />
+                    {task.status !== "completed" && (
+                      <div className="p-3 border-t">
+                        <Button
+                          variant="default"
+                          size="sm"
+                          className="w-full"
+                          onClick={async () => {
+                            const ok = await applyDueDate(selectedDueDate)
+                            if (ok) setIsDuePopoverOpen(false)
+                          }}
+                          disabled={isUpdatingDueDate}
+                        >
+                          적용
+                        </Button>
+                      </div>
+                    )}
+                  </PopoverContent>
+                </Popover>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -925,6 +929,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                             isCompleting={isCompletingSubtask}
                             onSelect={() => setSelectedSubtask(selectedSubtask?.id === subtask.id ? null : subtask)}
                             onComplete={completeSubtask}
+                            canCompleteSubtask={canEditTask}
                           />
                         ))}
                       </div>
@@ -996,96 +1001,122 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         }
       `}</style>
 
-      {/* 댓글 */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle>댓글</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="border rounded-md bg-background">
-              <div className="max-h-[260px] overflow-y-auto p-3 space-y-3 custom-scrollbar">
-                {comments.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">아직 댓글이 없습니다.</p>
-                ) : (
-                  comments.map((c) => {
-                    const canDelete = (me?.id && c.user_id === me.id) || userRole === "admin"
-                    
-                    // 댓글 작성자에 따른 색상 지정
-                    const colorScheme = getCommentColorScheme({
-                      commentUserId: c.user_id,
-                      requesterId: task?.assigned_by || null,
-                      assigneeId: task?.assigned_to || null,
-                      subtasks,
-                    })
-                    
-                    return (
-                      <div
-                        key={c.id}
-                        className={`flex ${me?.id && c.user_id === me.id ? "justify-end" : "justify-start"}`}
-                      >
-                        <div className={`w-full max-w-[360px] rounded-lg border-2 p-3 ${colorScheme.bg} ${colorScheme.border}`}>
-                          <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground mb-2">
-                            <span className="font-medium text-foreground/90 truncate">{c.full_name || "사용자"}</span>
-                            <div className="flex items-center gap-1 shrink-0">
-                              <span>{new Date(c.created_at).toLocaleString("ko-KR")}</span>
-                              {canDelete && (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6"
-                                  onClick={() => handleDeleteComment(c.id)}
-                                  title="댓글 삭제"
-                                >
-                                  <X className="h-4 w-4" />
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-                          <div className="pr-1">
-                            <SafeHtml
-                              html={c.content || ""}
-                              className="prose prose-sm max-w-none dark:prose-invert wrap-break-word preserve-whitespace [&_table]:w-max [&_table]:min-w-full [&_pre]:overflow-x-auto [&_pre]:whitespace-pre [&_code]:wrap-break-word"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-            </div>
+      {/* 댓글 - 메신저 스타일 */}
+      <div className="mb-6 rounded-xl border bg-muted/20 overflow-hidden flex flex-col" style={{ minHeight: "280px" }}>
+        <div className="flex-1 max-h-[320px] overflow-y-auto p-3 space-y-2 custom-scrollbar">
+          {comments.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">아직 댓글이 없습니다.</p>
+          ) : (
+            comments.map((c) => {
+              const canDelete = (me?.id && c.user_id === me.id) || userRole === "admin"
+              const isMe = me?.id && c.user_id === me.id
 
-            {/* client 역할은 client/progress에서만 댓글 입력 가능 */}
-            {userRole !== "client" && (
-              <div className="space-y-2">
-                <div className="text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground/90">{me?.full_name || "작성자"}</span>
+              // 공동사용자별 말풍선 색 (등장 순서로 고정)
+              const userOrder = Array.from(new Set(comments.map((x) => x.user_id)))
+              const userIndex = userOrder.indexOf(c.user_id)
+              const bubbleColors = [
+                "bg-blue-500 text-white",
+                "bg-green-500 text-white",
+                "bg-purple-500 text-white",
+                "bg-orange-500 text-white",
+                "bg-pink-500 text-white",
+                "bg-cyan-500 text-white",
+              ]
+              const bubbleClass = isMe
+                ? "bg-primary text-primary-foreground"
+                : bubbleColors[userIndex % bubbleColors.length]
+
+              return (
+                <div
+                  key={c.id}
+                  className={`flex ${isMe ? "justify-end" : "justify-start"}`}
+                >
+                  <div className={`flex flex-col max-w-[85%] sm:max-w-[75%] ${isMe ? "items-end" : "items-start"}`}>
+                    <div className={`flex items-center gap-2 px-2 mb-0.5 ${isMe ? "flex-row-reverse" : ""}`}>
+                      <span className="text-[11px] font-medium text-foreground/90">
+                        {c.full_name || "사용자"}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {new Date(c.created_at).toLocaleString("ko-KR", {
+                          year: "numeric",
+                          month: "numeric",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    </div>
+                    <div
+                      className={`rounded-2xl px-4 py-2.5 shadow-sm ${bubbleClass} ${
+                        isMe ? "rounded-br-md" : "rounded-bl-md"
+                      }`}
+                    >
+                      <div className="flex items-end gap-2">
+                        <div className="text-sm break-words text-inherit [&_p]:my-0 [&_pre]:whitespace-pre-wrap [&_a]:underline">
+                          <SafeHtml
+                            html={c.content || ""}
+                            className="prose prose-sm max-w-none prose-p:my-0 [&_table]:w-max [&_pre]:whitespace-pre-wrap [&_code]:break-all prose-inherit"
+                          />
+                        </div>
+                        {canDelete && (
+                          <div className="shrink-0 self-end">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-white hover:text-white hover:bg-white/20"
+                              onClick={() => handleDeleteComment(c.id)}
+                              title="댓글 삭제"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div className="rounded-md border bg-background p-3">
-                  <Textarea
-                    value={newComment}
-                    onChange={(e) => setNewComment(e.target.value)}
-                    placeholder="댓글을 입력하세요..."
-                    className="min-h-[56px] max-h-[120px] overflow-y-auto resize-none border-0 p-0 focus-visible:ring-0"
-                  />
-                </div>
-                <div className="flex justify-end">
-                  <Button onClick={handlePostComment} disabled={isPostingComment || newComment.trim().length === 0}>
-                    {isPostingComment ? "저장 중..." : "댓글 등록"}
-                  </Button>
-                </div>
-              </div>
-            )}
-            {userRole === "client" && (
-              <div className="rounded-md border bg-muted/30 p-4 text-center text-sm text-muted-foreground">
-                댓글은 작업 진행 페이지에서만 작성할 수 있습니다
-              </div>
-            )}
+              )
+            })
+          )}
+        </div>
+
+        {userRole !== "client" && (
+          <div className="border-t bg-background p-2 flex gap-2 items-end">
+            <Textarea
+              value={newComment}
+              onChange={(e) => setNewComment(e.target.value)}
+              placeholder="댓글을 입력하세요..."
+              className="min-h-[44px] max-h-[120px] resize-none py-3 px-4 rounded-2xl border-0 focus-visible:ring-2 bg-muted/50"
+              rows={1}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault()
+                  if (newComment.trim()) handlePostComment()
+                }
+              }}
+            />
+            <Button
+              size="icon"
+              className="h-11 w-11 rounded-full shrink-0"
+              onClick={handlePostComment}
+              disabled={isPostingComment || newComment.trim().length === 0}
+              title="전송"
+            >
+              {isPostingComment ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <Send className="h-5 w-5" />
+              )}
+            </Button>
           </div>
-        </CardContent>
-      </Card>
+        )}
+        {userRole === "client" && (
+          <div className="border-t bg-muted/30 p-4 text-center text-sm text-muted-foreground">
+            댓글은 작업 진행 페이지에서만 작성할 수 있습니다
+          </div>
+        )}
+      </div>
 
       {/* 첨부파일 */}
       <Card className="mb-6">
@@ -1180,9 +1211,10 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         </CardContent>
       </Card>
 
-      {/* 완료대기이거나 모든 서브태스크가 완료된 경우: 작업완료 버튼 표시 */}
-      {(userRole === "admin" || userRole === "staff") && 
-       (task.status === "awaiting_completion" || (subtasks.length > 0 && allSubtasksCompleted)) && 
+      {/* 완료대기이거나 모든 서브태스크가 완료된 경우: 작업완료 버튼 표시 (요청자 또는 admin만) */}
+      {canEditTask &&
+       (userRole === "admin" || userRole === "staff") &&
+       (task.status === "awaiting_completion" || (subtasks.length > 0 && allSubtasksCompleted)) &&
        task.status !== "completed" && (
         <div className="mt-10 flex justify-center">
           <Button onClick={handleFinalizeTask} disabled={isFinalizing} className="min-w-[180px] cursor-pointer">

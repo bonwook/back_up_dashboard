@@ -309,9 +309,19 @@ export async function PATCH(
     const userRole = userRoleRes && userRoleRes.length > 0 ? userRoleRes[0].role : null
     const isAdminOrStaff = userRole === "admin" || userRole === "staff"
 
-    // due_date는 staff/admin만 수정 가능, 그 외 필드는 assigned_to만 수정 가능
-    if (due_date !== undefined && !isAdminOrStaff) {
-      return NextResponse.json({ error: "마감일은 staff만 수정할 수 있습니다" }, { status: 403 })
+    // due_date는 요청자(assigned_by) 또는 admin만 수정 가능. 할당받은 staff(assigned_to)는 마감일 수정 불가
+    if (due_date !== undefined) {
+      if (!isAdminOrStaff) {
+        return NextResponse.json({ error: "마감일은 staff만 수정할 수 있습니다" }, { status: 403 })
+      }
+      const isAssigner = decoded.id === task.assigned_by
+      const isAdmin = userRole === "admin"
+      if (!isAssigner && !isAdmin) {
+        return NextResponse.json(
+          { error: "마감일은 업무를 준 사람(요청자) 또는 관리자만 수정할 수 있습니다" },
+          { status: 403 }
+        )
+      }
     }
 
     if (task.assigned_to !== decoded.id && !isAdminOrStaff) {
@@ -337,6 +347,18 @@ export async function PATCH(
       const validStatuses = ['pending', 'in_progress', 'on_hold', 'awaiting_completion', 'completed']
       if (!validStatuses.includes(status)) {
         return NextResponse.json({ error: "유효하지 않은 상태입니다" }, { status: 400 })
+      }
+
+      // 완료대기 → 작업끝내기(completed): 업무를 준 사람(assigned_by) 또는 admin만 가능. 담당자(assigned_to)는 임의 완료 불가
+      if (status === 'completed' && oldStatus === 'awaiting_completion') {
+        const isAssigner = decoded.id === task.assigned_by
+        const isAdmin = userRole === 'admin'
+        if (!isAssigner && !isAdmin) {
+          return NextResponse.json(
+            { error: "완료대기에서 작업 끝내기는 업무를 준 사람(요청자)만 할 수 있습니다" },
+            { status: 403 }
+          )
+        }
       }
       
       // 상태가 변경되었는지 확인

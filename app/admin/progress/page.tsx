@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, use } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
-import { Loader2, CheckCircle2, Clock, Pause, FileText, AlertCircle, Check, X, Trash2, Bold, Italic, Underline, Minus, Grid3x3 as TableIcon, Upload, Edit, Download } from "lucide-react"
+import { Loader2, CheckCircle2, Clock, Pause, FileText, AlertCircle, Check, X, Bold, Italic, Underline, Minus, Grid3x3 as TableIcon, Upload, Edit, Download } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -2128,8 +2128,6 @@ function TaskDialogContent({
   const [isSavingComment, setIsSavingComment] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
-  const [showDeleteTaskDialog, setShowDeleteTaskDialog] = useState(false)
-  const [isDeletingTask, setIsDeletingTask] = useState(false)
   const [user, setUser] = useState<any>(null)
   const [commentResolvedFileKeys, setCommentResolvedFileKeys] = useState<ResolvedFileKey[]>([])
   const [subtasks, setSubtasks] = useState<any[]>([])
@@ -2325,36 +2323,6 @@ function TaskDialogContent({
     }
   }
 
-  const handleDeleteTaskFromDB = async () => {
-    setIsDeletingTask(true)
-    try {
-      const response = await fetch(`/api/tasks/${task.id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Task 삭제 실패')
-      }
-
-      toast({
-        title: '성공',
-        description: 'Task가 삭제되었습니다',
-      })
-      setShowDeleteTaskDialog(false)
-      onTaskUpdate()
-    } catch (error: any) {
-      toast({
-        title: '오류',
-        description: error.message || 'Task 삭제에 실패했습니다',
-        variant: 'destructive',
-      })
-    } finally {
-      setIsDeletingTask(false)
-    }
-  }
-
   return (
     <>
       <DialogHeader className="pr-8">
@@ -2366,14 +2334,6 @@ function TaskDialogContent({
               <span className="text-muted-foreground text-sm ml-2">({task.subtitle})</span>
             )}
           </span>
-          <Button
-            onClick={() => setShowDeleteTaskDialog(true)}
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 ml-auto shrink-0 cursor-pointer"
-          >
-            <Trash2 className="h-3 w-3" />
-          </Button>
         </DialogTitle>
       </DialogHeader>
       <div className="flex items-center gap-2 flex-wrap mt-2 mb-4">
@@ -2690,7 +2650,8 @@ function TaskDialogContent({
             작성
           </Button>
         )}
-        {(task.status === 'awaiting_completion' || (subtasks.length > 0 && allSubtasksCompleted)) && (
+        {(task.status === 'awaiting_completion' || (subtasks.length > 0 && allSubtasksCompleted)) &&
+         (user?.id === task.assigned_by || user?.role === 'admin') && (
           <Button
             onClick={() => setShowDeleteDialog(true)}
             variant="default"
@@ -2727,33 +2688,6 @@ function TaskDialogContent({
                 '확인'
               )}
             </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <AlertDialog open={showDeleteTaskDialog} onOpenChange={setShowDeleteTaskDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Task를 제거하시겠습니까?</AlertDialogTitle>
-            <AlertDialogDescription>
-              이 작업을 완전히 삭제합니다. 이 작업은 되돌릴 수 없으며, 데이터베이스에서 영구적으로 제거됩니다.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction
-              onClick={handleDeleteTaskFromDB}
-              disabled={isDeletingTask}
-              className="bg-red-600 hover:bg-red-700"
-            >
-              {isDeletingTask ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  삭제 중...
-                </>
-              ) : (
-                '제거'
-              )}
-            </AlertDialogAction>
-            <AlertDialogCancel disabled={isDeletingTask}>취소</AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

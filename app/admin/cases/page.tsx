@@ -44,9 +44,25 @@ export default function WorklistPage() {
   const [activeTab, setActiveTab] = useState<"worklist" | "completed">("worklist")
   const [completedReports, setCompletedReports] = useState<any[]>([])
   const [isLoadingCompleted, setIsLoadingCompleted] = useState(false)
+  const [me, setMe] = useState<{ id: string; role?: string } | null>(null)
   const router = useRouter()
   const searchParams = useSearchParams()
   const { toast } = useToast()
+
+  useEffect(() => {
+    const loadMe = async () => {
+      try {
+        const res = await fetch("/api/auth/me", { credentials: "include" })
+        if (res.ok) {
+          const data = await res.json()
+          setMe(data)
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadMe()
+  }, [])
 
   const loadTasks = async () => {
     setIsLoading(true)
@@ -391,15 +407,17 @@ export default function WorklistPage() {
                               {task.due_date ? formatDate(task.due_date) : "-"}
                             </TableCell>
                             <TableCell>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={(e) => handleDeleteTask(task.id, e)}
-                                className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                title="작업 삭제"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
+                              {(me?.id === task.assigned_by || me?.role === "admin") && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={(e) => handleDeleteTask(task.id, e)}
+                                  className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                  title="작업 삭제"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              )}
                             </TableCell>
                           </TableRow>
                         )
@@ -475,15 +493,17 @@ export default function WorklistPage() {
                               {r.completed_at ? new Date(r.completed_at).toLocaleString("ko-KR") : "-"}
                             </TableCell>
                             <TableCell>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={(e) => handleDeleteTask(r.id, e)}
-                                className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                title="작업 삭제"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
+                              {(me?.id === r.assigned_by || me?.role === "admin") && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={(e) => handleDeleteTask(r.id, e)}
+                                  className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                  title="작업 삭제"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              )}
                             </TableCell>
                           </TableRow>
                         )

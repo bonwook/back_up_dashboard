@@ -28,6 +28,8 @@ interface StaffSessionBlockProps {
   isCompleting: boolean
   onSelect: () => void
   onComplete: (subtaskId: string) => void
+  /** 요청자(assigned_by) 또는 admin만 true. 할당받은 staff는 작업끝내기 비활성화를 위해 false */
+  canCompleteSubtask?: boolean
 }
 
 /**
@@ -42,13 +44,22 @@ export function StaffSessionBlock({
   isCompleting,
   onSelect,
   onComplete,
+  canCompleteSubtask = true,
 }: StaffSessionBlockProps) {
   const isCompleted = subtask.status === "completed"
   const isAwaitingCompletion = subtask.status === "awaiting_completion"
 
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          onSelect()
+        }
+      }}
       className={`w-full text-left p-2 rounded-md border-2 transition-all cursor-pointer hover:bg-muted/50 ${
         isSelected
           ? "ring-2 ring-primary ring-offset-1 shadow-sm"
@@ -77,8 +88,8 @@ export function StaffSessionBlock({
           </div>
         )}
         
-        {/* 작업끝내기 버튼 - 완료대기 상태일 때만 표시 */}
-        {isAwaitingCompletion && (
+        {/* 작업끝내기 버튼 - 완료대기 상태이고 요청자/admin만 표시 (할당받은 staff는 비활성화) */}
+        {isAwaitingCompletion && canCompleteSubtask && (
           <div className="mt-1 pt-1 border-t border-muted/50" onClick={(e) => e.stopPropagation()}>
             <Button
               size="sm"
@@ -101,6 +112,6 @@ export function StaffSessionBlock({
           </div>
         )}
       </div>
-    </button>
+    </div>
   )
 }

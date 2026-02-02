@@ -89,6 +89,8 @@ ${files.length ? `<h3>첨부파일</h3><ul>${files.map((k) => `<li>${escapeHtml(
             r.created_at as report_created_at,
             ta.created_at,
             ta.completed_at,
+            ta.assigned_by,
+            ta.assigned_to,
             p_assigned_by.full_name as assigned_by_name,
             p_assigned_to.full_name as assigned_to_name
           FROM task_assignments ta
@@ -112,6 +114,8 @@ ${files.length ? `<h3>첨부파일</h3><ul>${files.map((k) => `<li>${escapeHtml(
             NULL as report_created_at,
             ta.created_at,
             ta.completed_at,
+            ta.assigned_by,
+            ta.assigned_to,
             p_assigned_by.full_name as assigned_by_name,
             p_assigned_to.full_name as assigned_to_name
           FROM task_assignments ta
@@ -140,6 +144,8 @@ ${files.length ? `<h3>첨부파일</h3><ul>${files.map((k) => `<li>${escapeHtml(
             r.created_at as report_created_at,
             ta.created_at,
             ta.completed_at,
+            ta.assigned_by,
+            ta.assigned_to,
             p_assigned_by.full_name as assigned_by_name,
             p_assigned_to.full_name as assigned_to_name
           FROM task_assignments ta
@@ -164,6 +170,8 @@ ${files.length ? `<h3>첨부파일</h3><ul>${files.map((k) => `<li>${escapeHtml(
             NULL as report_created_at,
             ta.created_at,
             ta.completed_at,
+            ta.assigned_by,
+            ta.assigned_to,
             p_assigned_by.full_name as assigned_by_name,
             p_assigned_to.full_name as assigned_to_name
           FROM task_assignments ta
