@@ -644,7 +644,7 @@ export default function ClientProgressPage() {
                       backgroundImage: 'repeating-linear-gradient(-45deg, transparent, transparent 10px, rgba(0,0,0,.04) 10px, rgba(0,0,0,.04) 20px)',
                     }}
                   >
-                    <p className="text-muted-foreground font-medium max-w-md leading-relaxed">
+                    <p className="text-muted-foreground font-medium text-sm whitespace-nowrap">
                       이쪽에 드래그하거나, 태스크를 클릭한 뒤 <strong>작성</strong> 버튼을 눌러 내용을 작성하세요.
                     </p>
                   </div>
@@ -822,7 +822,8 @@ export default function ClientProgressPage() {
                               minHeight: '250px',
                               overflowY: 'auto',
                               userSelect: 'text',
-                              whiteSpace: 'pre-wrap'
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word'
                             }}
                             ref={(el) => {
                               if (el) {
@@ -1384,7 +1385,8 @@ export default function ClientProgressPage() {
                               userSelect: 'none',
                               cursor: 'default',
                               opacity: 0.7,
-                              whiteSpace: 'pre-wrap'
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word'
                             }}
                             ref={(el) => {
                               if (el) {
@@ -2662,20 +2664,16 @@ function TaskDialogContent({
                   })
                 }
               }}
-              className="text-sm bg-muted/50 p-3 rounded-md border border-border/50 wrap-break-word word-break break-all overflow-x-auto prose prose-sm max-w-none task-detail-prose"
+              className="text-sm bg-muted/50 p-3 rounded-md border border-border/50 wrap-break-word word-break break-all overflow-x-auto prose prose-sm max-w-none"
               dangerouslySetInnerHTML={{ __html: sanitizeHtml(task.content) }}
               style={{
                 maxHeight: '400px',
                 overflowY: 'auto',
-                whiteSpace: 'pre-wrap'
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word'
               }}
             />
             <style jsx global>{`
-              /* task 클릭 상세에서 사용자가 만든 개행/스페이스(공백) 레이아웃을 그대로 유지 */
-              .task-detail-prose,
-              .task-detail-prose :where(p, div, span, li, td, th, pre, code) {
-                white-space: pre-wrap;
-              }
               .prose table {
                 border-collapse: collapse;
                 width: 100%;
@@ -2702,7 +2700,7 @@ function TaskDialogContent({
               }
               .prose hr {
                 border: none;
-                border-top: 2px solid #9ca3af;
+                border-top: 2px solid #6b7280;
                 margin: 10px 0;
               }
             `}</style>
@@ -2724,12 +2722,13 @@ function TaskDialogContent({
                   })
                 }
               }}
-              className="text-sm bg-muted/50 p-3 rounded-md border border-border/50 wrap-break-word word-break break-all overflow-x-auto prose prose-sm max-w-none task-detail-prose"
+              className="text-sm bg-muted/50 p-3 rounded-md border border-border/50 wrap-break-word word-break break-all overflow-x-auto prose prose-sm max-w-none"
               dangerouslySetInnerHTML={{ __html: sanitizeHtml(comment) }}
               style={{
                 maxHeight: '400px',
                 overflowY: 'auto',
-                whiteSpace: 'pre-wrap'
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word'
               }}
             />
             <style jsx global>{`

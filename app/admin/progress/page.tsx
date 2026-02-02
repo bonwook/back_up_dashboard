@@ -1056,6 +1056,15 @@ export default function ClientProgressPage() {
               <p className="text-sm text-muted-foreground mt-2">업무블록을 드래그하여 사용하세요</p>
             </CardHeader>
             <CardContent className="space-y-6">
+              {!workTaskId ? (
+                <div
+                  className="min-h-[280px] flex items-center justify-center border-2 border-dashed rounded-lg bg-muted/20 text-center px-4"
+                  style={{ backgroundImage: 'repeating-linear-gradient(-45deg, transparent, transparent 8px, rgba(0,0,0,.06) 8px, rgba(0,0,0,.06) 16px)' }}
+                >
+                  <p className="text-sm text-muted-foreground" dangerouslySetInnerHTML={{ __html: '이쪽에 드래그하거나, 태스크를 클릭한 뒤 <strong>작성</strong> 버튼을 눌러 내용을 작성하세요.' }} />
+                </div>
+              ) : (
+              <>
               <div className="space-y-6 min-w-0 max-w-full">
                 {/* 제목을 comment와 동일한 너비로 설정 */}
                 <div className="grid grid-cols-2 gap-4 min-w-0 max-w-full">
@@ -1196,7 +1205,8 @@ export default function ClientProgressPage() {
                               minHeight: '250px',
                               overflowY: 'auto',
                               userSelect: 'text',
-                              whiteSpace: 'pre-wrap'
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word'
                             }}
                             ref={(el) => {
                               if (el) {
@@ -1316,7 +1326,8 @@ export default function ClientProgressPage() {
                               userSelect: 'none',
                               cursor: 'default',
                               opacity: 0.7,
-                              whiteSpace: 'pre-wrap'
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word'
                             }}
                             ref={(el) => {
                               if (el) {
@@ -1958,6 +1969,8 @@ export default function ClientProgressPage() {
                   )}
                 </div>
               )}
+              </>
+              )}
             </CardContent>
           </Card>
         </>
@@ -2326,7 +2339,7 @@ function TaskDialogContent({
   return (
     <>
       <DialogHeader className="pr-8">
-        <DialogTitle className="flex items-center gap-2 break-words word-break break-all">
+        <DialogTitle className="flex items-center gap-2 wrap-break-word word-break break-all">
           {getStatusIcon(task.status)}
           <span className="min-w-0">
             {task.title}
@@ -2385,12 +2398,13 @@ function TaskDialogContent({
                   })
                 }
               }}
-              className="text-sm bg-muted/50 p-3 rounded-md border border-border/50 break-words word-break break-all overflow-x-auto prose prose-sm max-w-none"
+              className="text-sm bg-muted/50 p-3 rounded-md border border-border/50 wrap-break-word word-break break-all overflow-x-auto prose prose-sm max-w-none"
               dangerouslySetInnerHTML={{ __html: sanitizeHtml(task.content) }}
               style={{
                 maxHeight: '400px',
                 overflowY: 'auto',
-                whiteSpace: 'pre-wrap'
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word'
               }}
             />
             <style jsx global>{`
@@ -2442,11 +2456,13 @@ function TaskDialogContent({
                   })
                 }
               }}
-              className="text-sm bg-muted/50 p-3 rounded-md border border-border/50 break-words word-break break-all overflow-x-auto prose prose-sm max-w-none"
+              className="text-sm bg-muted/50 p-3 rounded-md border border-border/50 wrap-break-word word-break break-all overflow-x-auto prose prose-sm max-w-none"
               dangerouslySetInnerHTML={{ __html: sanitizeHtml(comment) }}
               style={{
                 maxHeight: '400px',
-                overflowY: 'auto'
+                overflowY: 'auto',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word'
               }}
             />
             <style jsx global>{`
