@@ -56,13 +56,22 @@ export default function ClientAnalyticsPage() {
   const prioritySelectRef = useRef<HTMLButtonElement>(null)
   const [prioritySelectWidth, setPrioritySelectWidth] = useState<number | null>(null)
   
-  // 에디터 state
+  // 에디터 state (굵게/기울임/밑줄 툴바 활성 표시용)
   const [editorState, setEditorState] = useState({
     bold: false,
     italic: false,
     underline: false,
   })
   const [tableGridHover, setTableGridHover] = useState<TableGridHover>({ row: 0, col: 0, show: false })
+
+  // contentEditable 선택 상태를 툴바에 반영 (queryCommandState → 로컬 state)
+  const syncEditorToolbarState = () => {
+    setEditorState({
+      bold: document.queryCommandState('bold'),
+      italic: document.queryCommandState('italic'),
+      underline: document.queryCommandState('underline'),
+    })
+  }
 
   // 공동 할당 관련 상태
   const [isUserSelectDialogOpen, setIsUserSelectDialogOpen] = useState(false)
@@ -451,7 +460,7 @@ export default function ClientAnalyticsPage() {
                             editor.focus()
                             // eslint-disable-next-line deprecation/deprecation
                             document.execCommand('bold', false)
-                            updateEditorState()
+                            syncEditorToolbarState()
                           }
                         }}
                         title="굵게 (Ctrl+B)"
@@ -470,7 +479,7 @@ export default function ClientAnalyticsPage() {
                             editor.focus()
                             // eslint-disable-next-line deprecation/deprecation
                             document.execCommand('italic', false)
-                            updateEditorState()
+                            syncEditorToolbarState()
                           }
                         }}
                         title="기울임 (Ctrl+I)"
@@ -489,7 +498,7 @@ export default function ClientAnalyticsPage() {
                             editor.focus()
                             // eslint-disable-next-line deprecation/deprecation
                             document.execCommand('underline', false)
-                            updateEditorState()
+                            syncEditorToolbarState()
                           }
                         }}
                         title="밑줄"
@@ -606,9 +615,10 @@ export default function ClientAnalyticsPage() {
                       const html = e.currentTarget.innerHTML
                       setAssignForm({ ...assignForm, content: html })
                       updateEditorState()
+                      setEditorState({ bold: false, italic: false, underline: false })
                     }}
-                    onMouseUp={updateEditorState}
-                    onKeyUp={updateEditorState}
+                    onMouseUp={syncEditorToolbarState}
+                    onKeyUp={syncEditorToolbarState}
                     className="resize-none text-base leading-relaxed w-full max-w-full min-w-0 overflow-y-auto p-3 focus:outline-none focus:ring-0 bg-background flex-1"
                     style={{ 
                       whiteSpace: 'pre-wrap',
@@ -807,7 +817,7 @@ export default function ClientAnalyticsPage() {
                                 editor.focus()
                                 // eslint-disable-next-line deprecation/deprecation
                                 document.execCommand('bold', false)
-                                updateEditorState()
+                                syncEditorToolbarState()
                               }
                             }}
                             title="굵게 (Ctrl+B)"
@@ -826,7 +836,7 @@ export default function ClientAnalyticsPage() {
                                 editor.focus()
                                 // eslint-disable-next-line deprecation/deprecation
                                 document.execCommand('italic', false)
-                                updateEditorState()
+                                syncEditorToolbarState()
                               }
                             }}
                             title="기울임 (Ctrl+I)"
@@ -845,7 +855,7 @@ export default function ClientAnalyticsPage() {
                                 editor.focus()
                                 // eslint-disable-next-line deprecation/deprecation
                                 document.execCommand('underline', false)
-                                updateEditorState()
+                                syncEditorToolbarState()
                               }
                             }}
                             title="밑줄"
@@ -1066,9 +1076,10 @@ export default function ClientAnalyticsPage() {
                           const html = e.currentTarget.innerHTML
                           setSubContent(html)
                           updateEditorState()
+                          setEditorState({ bold: false, italic: false, underline: false })
                         }}
-                        onMouseUp={updateEditorState}
-                        onKeyUp={updateEditorState}
+                        onMouseUp={syncEditorToolbarState}
+                        onKeyUp={syncEditorToolbarState}
                         className="resize-none text-base leading-relaxed w-full max-w-full min-w-0 overflow-y-auto p-3 focus:outline-none focus:ring-0 bg-background flex-1"
                         style={{ 
                           whiteSpace: 'pre-wrap',
