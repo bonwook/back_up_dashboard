@@ -1,0 +1,1202 @@
+"use client"
+
+import { useState, useEffect, useCallback, useMemo } from "react"
+import { useRouter } from "next/navigation"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { ArrowLeft, Loader2, Calendar as CalendarIcon, FileText, X } from "lucide-react"
+import Link from "next/link"
+import { SafeHtml } from "@/components/safe-html"
+import { sanitizeHtml } from "@/lib/utils/sanitize"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Calendar } from "@/components/ui/calendar"
+import { format, addDays } from "date-fns"
+import { ko } from "date-fns/locale"
+import { useToast } from "@/hooks/use-toast"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
+import { Progress } from "@/components/ui/progress"
+import { downloadWithProgress } from "@/lib/utils/download-with-progress"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  filterValidFileKeys,
+  extractFileName,
+  resolveFileKeys,
+  mapResolvedKeys,
+  classifyFilesByUploader,
+  resolveSubtaskFileKeys,
+  type SubtaskFileKeyItem,
+  type ResolvedFileKey,
+  type ResolvedSubtaskFile,
+} from "@/lib/utils/fileKeyHelpers"
+import { getStatusBadge, getStatusColor, getStatusBorderColor, getPriorityBadge } from "@/lib/utils/taskStatusHelpers"
+import { getCommentColorScheme } from "@/lib/utils/commentColorHelpers"
+import { FileListItem } from "./components/FileListItem"
+import { StaffSessionBlock } from "./components/StaffSessionBlock"
+import { useSubtaskCompletion } from "@/lib/hooks/useSubtaskCompletion"
+
+interface Task {
+  id: string
+  assigned_to: string
+  assigned_by: string
+  assigned_by_name?: string
+  assigned_by_email?: string
+  assigned_to_name?: string
+  assigned_to_email?: string
+  title: string
+  content: string | null
+  description: string | null
+  comment?: string | null
+  priority: 'low' | 'medium' | 'high' | 'urgent'
+  status: 'pending' | 'in_progress' | 'on_hold' | 'awaiting_completion' | 'completed'
+  file_keys: string[]
+  comment_file_keys?: string[]
+  due_date?: string | null
+  created_at: string
+  updated_at: string
+  completed_at: string | null
+}
+
+interface Subtask {
+  id: string
+  task_id: string
+  subtitle: string
+  assigned_to: string
+  assigned_to_name?: string
+  assigned_to_email?: string
+  content: string | null
+  comment?: string | null
+  status: 'pending' | 'in_progress' | 'on_hold' | 'awaiting_completion' | 'completed'
+  file_keys: string[]
+  comment_file_keys?: string[]
+  created_at: string
+  updated_at: string
+  completed_at: string | null
+}
+
+export default function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const [task, setTask] = useState<Task | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const router = useRouter()
+  const [taskId, setTaskId] = useState<string | null>(null)
+  const { toast } = useToast()
+  const [me, setMe] = useState<any>(null)
+  const [userRole, setUserRole] = useState<string | null>(null)
+  const [selectedDueDate, setSelectedDueDate] = useState<Date | null>(null)
+  const [isUpdatingDueDate, setIsUpdatingDueDate] = useState(false)
+  const [isDuePopoverOpen, setIsDuePopoverOpen] = useState(false)
+  const [resolvedFileKeys, setResolvedFileKeys] = useState<ResolvedFileKey[]>([])
+  const [resolvedCommentFileKeys, setResolvedCommentFileKeys] = useState<ResolvedFileKey[]>([])
+  const [resolvedSubtaskFileKeys, setResolvedSubtaskFileKeys] = useState<ResolvedSubtaskFile[]>([])
+  const [isResolvingFiles, setIsResolvingFiles] = useState(false)
+  const [isResolvingCommentFiles, setIsResolvingCommentFiles] = useState(false)
+  const [downloadProgress, setDownloadProgress] = useState<number>(0)
+  const [isDownloading, setIsDownloading] = useState(false)
+  const [downloadingFileName, setDownloadingFileName] = useState<string>("")
+  const [isFinalizing, setIsFinalizing] = useState(false)
+  const [comments, setComments] = useState<Array<{ id: string; content: string; created_at: string; user_id: string; full_name: string | null }>>([])
+  const [newComment, setNewComment] = useState("")
+  const [isPostingComment, setIsPostingComment] = useState(false)
+  const [subtasks, setSubtasks] = useState<Subtask[]>([])
+  const [selectedSubtask, setSelectedSubtask] = useState<Subtask | null>(null)
+  const [isLoadingSubtasks, setIsLoadingSubtasks] = useState(false)
+  
+  // 서브태스크 완료 처리 hook
+  const { completeSubtask, isCompleting: isCompletingSubtask } = useSubtaskCompletion({
+    onSuccess: () => {
+      loadSubtasks()
+      reloadTask()
+    }
+  })
+
+  useEffect(() => {
+    params.then((p) => {
+      setTaskId(p.id)
+    })
+  }, [params])
+
+  // 현재 사용자 역할 로드 (staff/admin만 완료 처리 버튼 노출)
+  useEffect(() => {
+    const loadMe = async () => {
+      try {
+        const res = await fetch("/api/auth/me", { credentials: "include" })
+        if (res.ok) {
+          const me = await res.json()
+          setMe(me)
+          setUserRole(me.role || null)
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadMe()
+  }, [])
+
+  useEffect(() => {
+    if (!taskId) return
+
+    const loadTask = async () => {
+      setIsLoading(true)
+      try {
+        const response = await fetch(`/api/tasks/${taskId}`, {
+          credentials: "include",
+        })
+
+        if (!response.ok) {
+          if (response.status === 404) {
+            router.push("/admin/cases")
+            return
+          }
+          throw new Error("Failed to load task")
+        }
+
+        const data = await response.json()
+        setTask(data.task)
+        if (data.task.due_date) {
+          setSelectedDueDate(new Date(data.task.due_date))
+        } else {
+          setSelectedDueDate(null)
+        }
+      } catch (error) {
+        console.error("Failed to load task:", error)
+        router.push("/admin/cases")
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadTask()
+  }, [taskId, router])
+
+  // 첨부파일 resolve + 업로더 기준으로 분리(기존 데이터에서 file_keys에 섞여 있는 사용자 파일도 분리)
+  useEffect(() => {
+    const run = async () => {
+      const rawFileKeys = Array.isArray(task?.file_keys) ? task!.file_keys : []
+      const rawCommentKeys = Array.isArray(task?.comment_file_keys) ? task!.comment_file_keys : []
+
+      // 유효한 문자열 키만 필터링
+      const fileKeys = filterValidFileKeys(rawFileKeys)
+      const commentKeys = filterValidFileKeys(rawCommentKeys)
+
+      if (fileKeys.length === 0 && commentKeys.length === 0) {
+        setResolvedFileKeys([])
+        setResolvedCommentFileKeys([])
+        return
+      }
+
+      const allKeys = Array.from(new Set([...fileKeys, ...commentKeys]))
+      setIsResolvingFiles(true)
+      setIsResolvingCommentFiles(true)
+      
+      try {
+        const res = await fetch("/api/storage/resolve-file-keys", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ fileKeys: allKeys }),
+        })
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.error || "첨부파일 정보를 불러오지 못했습니다.")
+        }
+
+        const data = await res.json()
+        const resolvedKeys = Array.isArray(data.resolvedKeys) ? data.resolvedKeys : []
+        
+        // API 응답을 Map으로 변환
+        const resolvedKeyMap = mapResolvedKeys(resolvedKeys)
+        
+        // 파일 분류
+        const { adminFiles, userFiles } = classifyFilesByUploader({
+          allKeys,
+          resolvedKeyMap,
+          clientId: (task as any)?.assigned_to || null,
+          preferUserKeys: commentKeys,
+        })
+
+        setResolvedFileKeys(adminFiles)
+        setResolvedCommentFileKeys(userFiles)
+      } catch {
+        // fallback: 원본 배열 기준으로만 분리
+        setResolvedFileKeys(resolveFileKeys(fileKeys))
+        setResolvedCommentFileKeys(resolveFileKeys(commentKeys))
+      } finally {
+        setIsResolvingFiles(false)
+        setIsResolvingCommentFiles(false)
+      }
+    }
+
+    run()
+  }, [task?.file_keys, task?.comment_file_keys, task?.assigned_to])
+
+  const handleDownload = useCallback(async (s3Key: string, fileName?: string) => {
+    try {
+      const name = fileName || extractFileName(s3Key, "download")
+      setIsDownloading(true)
+      setDownloadingFileName(name)
+      setDownloadProgress(0)
+      await downloadWithProgress({
+        url: `/api/storage/download?path=${encodeURIComponent(s3Key)}`,
+        fileName: name,
+        withCredentials: true,
+        onProgress: (p) => setDownloadProgress(p.percent),
+      })
+    } catch (e: any) {
+      toast({
+        title: "다운로드 실패",
+        description: e?.message || "다운로드 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDownloading(false)
+      setDownloadingFileName("")
+      setDownloadProgress(0)
+    }
+  }, [toast])
+
+  const reloadTask = useCallback(async () => {
+    if (!taskId) return
+    const res = await fetch(`/api/tasks/${taskId}`, { credentials: "include" })
+    if (res.ok) {
+      const data = await res.json()
+      setTask(data.task)
+    }
+  }, [taskId])
+
+  const loadComments = useCallback(async () => {
+    if (!taskId) return
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/comments`, { credentials: "include" })
+      if (!res.ok) return
+      const data = await res.json()
+      setComments(Array.isArray(data.comments) ? data.comments : [])
+    } catch {
+      // ignore
+    }
+  }, [taskId])
+
+  const handleDeleteComment = useCallback(async (commentId: string) => {
+    if (!taskId) return
+    const ok = confirm("이 댓글을 삭제할까요?")
+    if (!ok) return
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/comments?commentId=${encodeURIComponent(commentId)}`, {
+        method: "DELETE",
+        credentials: "include",
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error || "댓글 삭제 실패")
+      }
+      await loadComments()
+    } catch (e: any) {
+      toast({
+        title: "댓글 삭제 실패",
+        description: e?.message || "댓글을 삭제하는 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
+    }
+  }, [taskId, loadComments, toast])
+
+  useEffect(() => {
+    if (!taskId) return
+    loadComments()
+  }, [taskId, loadComments])
+
+  // 서브태스크 로드
+  const loadSubtasks = useCallback(async () => {
+    if (!taskId) return
+    setIsLoadingSubtasks(true)
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/subtasks`, { credentials: "include" })
+      if (!res.ok) return
+      const data = await res.json()
+      setSubtasks(Array.isArray(data.subtasks) ? data.subtasks : [])
+    } catch {
+      // ignore
+    } finally {
+      setIsLoadingSubtasks(false)
+    }
+  }, [taskId])
+
+  useEffect(() => {
+    if (!taskId) return
+    loadSubtasks()
+  }, [taskId, loadSubtasks])
+
+  // subtask 첨부파일 resolve
+  useEffect(() => {
+    const run = async () => {
+      // 모든 subtask의 comment_file_keys 수집
+      const subtaskFileKeys: SubtaskFileKeyItem[] = []
+      
+      subtasks.forEach((subtask) => {
+        if (subtask.comment_file_keys && subtask.comment_file_keys.length > 0) {
+          const validKeys = filterValidFileKeys(subtask.comment_file_keys)
+          validKeys.forEach((key) => {
+            subtaskFileKeys.push({
+              key,
+              subtaskId: subtask.id,
+              assignedToName: subtask.assigned_to_name || subtask.assigned_to_email || "담당자"
+            })
+          })
+        }
+      })
+
+      if (subtaskFileKeys.length === 0) {
+        setResolvedSubtaskFileKeys([])
+        return
+      }
+
+      try {
+        const allKeys = subtaskFileKeys.map(item => item.key)
+        const res = await fetch("/api/storage/resolve-file-keys", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ fileKeys: allKeys }),
+        })
+
+        if (!res.ok) {
+          throw new Error("subtask 첨부파일 정보를 불러오지 못했습니다.")
+        }
+
+        const data = await res.json()
+        const resolvedKeys = Array.isArray(data.resolvedKeys) ? data.resolvedKeys : []
+        
+        // API 응답을 Map으로 변환 (userId 필드는 제외)
+        const resolvedKeyMap = new Map<string, { s3Key: string; fileName: string; uploadedAt?: string | null }>()
+        resolvedKeys.forEach((k: any) => {
+          if (typeof k === "object" && k !== null && "originalKey" in k) {
+            resolvedKeyMap.set(String(k.originalKey), {
+              s3Key: k.s3Key,
+              fileName: k.fileName,
+              uploadedAt: k.uploadedAt ?? null
+            })
+          }
+        })
+        
+        // 서브태스크 파일 키 resolve
+        const resolved = resolveSubtaskFileKeys(subtaskFileKeys, resolvedKeyMap)
+        setResolvedSubtaskFileKeys(resolved)
+      } catch (error) {
+        console.error("subtask 첨부파일 resolve 오류:", error)
+        setResolvedSubtaskFileKeys([])
+      }
+    }
+
+    run()
+  }, [subtasks])
+
+  // 서브태스크를 subtitle(작업명)별로 그룹화
+  const groupedSubtasks = useMemo(() => {
+    const groups = new Map<string, Subtask[]>()
+    subtasks.forEach((subtask) => {
+      const key = subtask.subtitle
+      if (!groups.has(key)) {
+        groups.set(key, [])
+      }
+      groups.get(key)!.push(subtask)
+    })
+    return Array.from(groups.entries()).map(([subtitle, tasks]) => ({
+      subtitle,
+      tasks,
+    }))
+  }, [subtasks])
+
+  const applyDueDate = useCallback(async (next: Date | null): Promise<boolean> => {
+    if (!taskId) return false
+    try {
+      setIsUpdatingDueDate(true)
+      const dueDateValue = next ? format(next, "yyyy-MM-dd") : null
+      const response = await fetch(`/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ due_date: dueDateValue }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || "마감일 업데이트 실패")
+      }
+
+      toast({
+        title: dueDateValue ? "마감일이 적용되었습니다" : "마감일이 제거되었습니다",
+        description: dueDateValue ? format(next as Date, "yyyy년 MM월 dd일", { locale: ko }) : undefined,
+      })
+
+      await reloadTask()
+      return true
+    } catch (error: any) {
+      toast({
+        title: "마감일 업데이트 실패",
+        description: error.message || "마감일을 업데이트하는 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
+      // 실패 시 원래 값으로 복원
+      setSelectedDueDate(task?.due_date ? new Date(task.due_date) : null)
+      return false
+    } finally {
+      setIsUpdatingDueDate(false)
+    }
+  }, [taskId, toast, reloadTask, task?.due_date])
+
+  // 모든 서브태스크가 완료되었는지 확인
+  const allSubtasksCompleted = useMemo(() => {
+    if (subtasks.length === 0) return false
+    return subtasks.every(st => st.status === "completed")
+  }, [subtasks])
+
+  const handlePostComment = useCallback(async () => {
+    if (!taskId) return
+    const content = newComment.trim()
+    if (!content) return
+    setIsPostingComment(true)
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ content }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error || "댓글 저장 실패")
+      }
+      setNewComment("")
+      await loadComments()
+    } catch (e: any) {
+      toast({
+        title: "댓글 작성 실패",
+        description: e?.message || "댓글을 저장하는 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsPostingComment(false)
+    }
+  }, [taskId, newComment, loadComments, toast])
+
+  const handleFinalizeTask = useCallback(async () => {
+    if (!taskId || !task) return
+    if (!(userRole === "admin" || userRole === "staff")) return
+    
+    // awaiting_completion 이거나, 모든 서브태스크가 완료된 경우 완료 가능
+    const canFinalize = task.status === "awaiting_completion" || 
+                        (subtasks.length > 0 && allSubtasksCompleted)
+    
+    if (!canFinalize) return
+
+    setIsFinalizing(true)
+    try {
+      // 1) 상태를 completed로 변경 (completed_at 자동 설정)
+      const updateRes = await fetch(`/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ status: "completed" }),
+      })
+
+      if (!updateRes.ok) {
+        const err = await updateRes.json().catch(() => ({}))
+        throw new Error(err.error || "작업 완료 처리 실패")
+      }
+
+      // 2) Report 생성 (staff/admin도 가능하도록 서버 권한 확장)
+      const reportRes = await fetch(`/api/tasks/${taskId}/create-report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      })
+      if (!reportRes.ok) {
+        const err = await reportRes.json().catch(() => ({}))
+        throw new Error(err.error || "Report 생성 실패")
+      }
+
+      toast({
+        title: "완료 처리됨",
+        description: "작업이 완료 처리되었고 Report가 저장되었습니다.",
+      })
+
+      await reloadTask()
+    } catch (e: any) {
+      toast({
+        title: "완료 처리 실패",
+        description: e?.message || "완료 처리 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsFinalizing(false)
+    }
+  }, [taskId, task, userRole, toast, reloadTask, subtasks, allSubtasksCompleted])
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString)
+    return date.toLocaleDateString('ko-KR', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
+  if (isLoading) {
+    return (
+      <div className="mx-auto max-w-7xl p-6">
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </div>
+    )
+  }
+
+  if (!task) {
+    return null
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl p-6">
+      <div className="mb-6">
+        <Button variant="ghost" onClick={() => router.back()}>
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          뒤로가기
+        </Button>
+      </div>
+
+      <Card className="mb-6">
+        <CardHeader className="pb-0.5 pt-3">
+          <CardTitle className="text-xl font-bold mb-1">{task.title}</CardTitle>
+          {/* 중요도, 상태, 생성일, 마감일 */}
+          <div className="flex items-center gap-3 text-xs mb-1">
+            {/* 중요도 */}
+            {getPriorityBadge(task.priority)}
+            
+            {/* 상태 */}
+            {getStatusBadge(task.status)}
+            
+            {/* 생성일 */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-muted-foreground">생성</span>
+              <span className="font-medium">{format(new Date(task.created_at), "yy.MM.dd", { locale: ko })}</span>
+            </div>
+            
+            {/* 마감일 */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-muted-foreground">마감</span>
+              <span className="font-medium">{selectedDueDate ? format(selectedDueDate, "yy.MM.dd", { locale: ko }) : "미정"}</span>
+              <Popover open={isDuePopoverOpen} onOpenChange={setIsDuePopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5 p-0 hover:bg-muted"
+                    disabled={isUpdatingDueDate || task.status === "completed"}
+                  >
+                    <CalendarIcon className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={selectedDueDate || undefined}
+                    classNames={{
+                      today:
+                        "bg-transparent text-foreground rounded-md border border-muted-foreground/30 data-[selected=true]:border-primary data-[selected=true]:bg-primary data-[selected=true]:text-primary-foreground",
+                    }}
+                    onSelect={async (date) => {
+                      if (task.status === "completed") return
+                      if (!date) {
+                        setSelectedDueDate(null)
+                        return
+                      }
+
+                      if (selectedDueDate && format(selectedDueDate, "yyyy-MM-dd") === format(date, "yyyy-MM-dd")) {
+                        setSelectedDueDate(null)
+                        return
+                      }
+
+                      setSelectedDueDate(date)
+                    }}
+                    initialFocus
+                  />
+                  {task.status !== "completed" && (
+                    <div className="p-3 border-t">
+                      <Button
+                        variant="default"
+                        size="sm"
+                        className="w-full"
+                        onClick={async () => {
+                          const ok = await applyDueDate(selectedDueDate)
+                          if (ok) setIsDuePopoverOpen(false)
+                        }}
+                        disabled={isUpdatingDueDate}
+                      >
+                        적용
+                      </Button>
+                    </div>
+                  )}
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
+        </CardHeader>
+        
+        <CardContent className="pt-0 pb-3">
+          {/* 담당자 정보 */}
+          {groupedSubtasks.length === 0 ? (
+            <div className="flex items-center gap-6 text-sm mb-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">요청자</span>
+                <span className="font-medium">{task.assigned_by_name || task.assigned_by_email || "Unknown"}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">담당자</span>
+                <span className="font-medium">{task.assigned_to_name || task.assigned_to_email || "Unknown"}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-6 text-sm mb-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">요청자</span>
+                <span className="font-medium">{task.assigned_by_name || task.assigned_by_email || "Unknown"}</span>
+              </div>
+              <div className="flex items-center gap-2 flex-1">
+                <span className="text-muted-foreground">담당자</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {Array.from(new Set(subtasks.map(st => st.assigned_to))).map((userId, idx) => {
+                    const subtask = subtasks.find(st => st.assigned_to === userId)
+                    return (
+                      <span key={userId || idx} className="text-xs font-medium">
+                        {subtask?.assigned_to_name || subtask?.assigned_to_email || "담당자"}
+                        {idx < Array.from(new Set(subtasks.map(st => st.assigned_to))).length - 1 && ", "}
+                      </span>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* 첨부파일 정보 */}
+          {(resolvedFileKeys.length > 0 || resolvedCommentFileKeys.length > 0) && (
+            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+              {resolvedFileKeys.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <FileText className="h-3.5 w-3.5" />
+                  <span>{task.assigned_by_name || "요청자"} 첨부: {resolvedFileKeys.length}개</span>
+                </div>
+              )}
+              {resolvedCommentFileKeys.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <FileText className="h-3.5 w-3.5" />
+                  <span>{task.assigned_to_name || "담당자"} 등록: {resolvedCommentFileKeys.length}개</span>
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* 완료일 */}
+          {task.completed_at && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1.5">
+              <CalendarIcon className="h-3.5 w-3.5" />
+              <span>완료일:</span>
+              <span className="font-medium text-foreground">{format(new Date(task.completed_at), "yyyy년 MM월 dd일 HH:mm", { locale: ko })}</span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {task.description && (
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>설명</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm whitespace-pre-wrap">{task.description}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 개별 할당: subtasks가 없을 때 */}
+      {subtasks.length === 0 && (
+        <div className="space-y-6 mb-6">
+          {/* 요청자 내용 - 항상 표시 */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">{task.assigned_by_name || task.assigned_by_email} 내용</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {task.content ? (
+                <div
+                  className="border rounded-md overflow-hidden bg-background"
+                  style={{
+                    height: "300px",
+                    minHeight: "300px",
+                    maxHeight: "300px",
+                    display: "flex",
+                    flexDirection: "column",
+                  }}
+                >
+                  <div
+                    id="worklist-content-display"
+                    className="text-sm bg-muted/50 p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 dark:prose-invert custom-scrollbar"
+                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(task.content) }}
+                    style={{
+                      userSelect: "none",
+                      cursor: "default",
+                      whiteSpace: "pre-wrap",
+                    }}
+                  />
+                </div>
+              ) : (
+                <div
+                  className="border rounded-md bg-muted/30 p-4 text-center text-muted-foreground"
+                  style={{
+                    height: "300px",
+                    minHeight: "300px",
+                    maxHeight: "300px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  내용이 없습니다
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* 담당자 내용 - 항상 표시 */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">{task.assigned_to_name || task.assigned_to_email} 내용</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {task.comment && task.comment.trim() ? (
+                <div
+                  className="border rounded-md overflow-hidden bg-background"
+                  style={{
+                    height: "300px",
+                    minHeight: "300px",
+                    maxHeight: "300px",
+                    display: "flex",
+                    flexDirection: "column",
+                  }}
+                >
+                  <div
+                    className="text-sm bg-muted/50 p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 dark:prose-invert custom-scrollbar"
+                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(task.comment.startsWith('\n') ? task.comment.substring(1) : task.comment) }}
+                    style={{
+                      userSelect: "none",
+                      cursor: "default",
+                      whiteSpace: "pre-wrap",
+                    }}
+                  />
+                </div>
+              ) : (
+                <div
+                  className="border rounded-md bg-muted/30 p-4 text-center text-muted-foreground"
+                  style={{
+                    height: "300px",
+                    minHeight: "300px",
+                    maxHeight: "300px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  내용이 없습니다
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* 공동 할당: subtasks가 있을 때 */}
+      {subtasks.length > 0 && (
+        <div className="space-y-6 mb-6">
+          {/* 요청자 내용 - 항상 표시 */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">요청자 내용</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {task.content ? (
+                <div
+                  className="border rounded-md overflow-hidden bg-background"
+                  style={{
+                    height: "300px",
+                    minHeight: "300px",
+                    maxHeight: "300px",
+                    display: "flex",
+                    flexDirection: "column",
+                  }}
+                >
+                  <div
+                    id="worklist-content-display-joint"
+                    className="text-sm bg-muted/50 p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 dark:prose-invert custom-scrollbar"
+                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(task.content) }}
+                    style={{
+                      userSelect: "none",
+                      cursor: "default",
+                      whiteSpace: "pre-wrap",
+                    }}
+                  />
+                </div>
+              ) : (
+                <div
+                  className="border rounded-md bg-muted/30 p-4 text-center text-muted-foreground"
+                  style={{
+                    height: "300px",
+                    minHeight: "300px",
+                    maxHeight: "300px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  내용이 없습니다
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* 분담내용 (서브태스크) */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">
+                분담내용 {selectedSubtask && <span className="text-sm text-muted-foreground ml-2">- {selectedSubtask.assigned_to_name || selectedSubtask.assigned_to_email}</span>}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="border rounded-md overflow-hidden" style={{ height: "500px", display: "flex", gap: "8px" }}>
+                {/* 분담내용 영역 */}
+                <div className="flex-1 overflow-hidden flex flex-col min-w-0">
+                  {selectedSubtask ? (
+                    /* 담당자가 작성한 내용 (comment) - 전체 영역 사용 */
+                    <div className="h-full overflow-y-auto custom-scrollbar">
+                      {selectedSubtask.comment && selectedSubtask.comment.trim() ? (
+                        <div
+                          id="worklist-subtask-content"
+                          className="text-sm bg-muted/50 p-4 prose prose-sm max-w-none dark:prose-invert h-full"
+                          dangerouslySetInnerHTML={{ __html: sanitizeHtml(selectedSubtask.comment.startsWith('\n') ? selectedSubtask.comment.substring(1) : selectedSubtask.comment) }}
+                          style={{
+                            userSelect: "none",
+                            cursor: "default",
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-word",
+                            overflowWrap: "break-word",
+                          }}
+                        />
+                      ) : (
+                        <div className="bg-muted/30 p-4 text-center text-muted-foreground h-full flex items-center justify-center">
+                          담당자가 작성한 내용이 없습니다
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="bg-muted/30 p-4 text-center text-muted-foreground h-full flex items-center justify-center">
+                      서브태스크를 선택하세요
+                    </div>
+                  )}
+                </div>
+
+                {/* 서브태스크 목록 스택 */}
+                <div className="w-[240px] bg-muted/30 overflow-y-auto custom-scrollbar p-2 space-y-3">
+                  {isLoadingSubtasks ? (
+                    <div className="flex items-center justify-center h-full">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : (
+                    groupedSubtasks.map((group) => (
+                      <div key={group.subtitle} className="border-2 border-muted rounded-lg p-2 bg-background/50 space-y-1.5">
+                        <div className="text-[11px] font-semibold text-foreground/80 mb-1 px-1">
+                          {group.subtitle}
+                        </div>
+                        {group.tasks.map((subtask) => (
+                          <StaffSessionBlock
+                            key={subtask.id}
+                            subtask={subtask}
+                            isSelected={selectedSubtask?.id === subtask.id}
+                            isCompleting={isCompletingSubtask}
+                            onSelect={() => setSelectedSubtask(selectedSubtask?.id === subtask.id ? null : subtask)}
+                            onComplete={completeSubtask}
+                          />
+                        ))}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* 스타일 */}
+      <style jsx global>{`
+        #worklist-content-display table,
+        #worklist-content-display-joint table,
+        #worklist-subtask-content table {
+          border-collapse: collapse;
+          width: 100%;
+          margin: 10px 0;
+          border: 2px solid #6b7280;
+        }
+        #worklist-content-display table td,
+        #worklist-content-display table th,
+        #worklist-content-display-joint table td,
+        #worklist-content-display-joint table th,
+        #worklist-subtask-content table td,
+        #worklist-subtask-content table th {
+          border: 2px solid #6b7280;
+          padding: 8px;
+          cursor: default !important;
+          pointer-events: none;
+          user-select: none;
+        }
+        #worklist-content-display hr,
+        #worklist-content-display-joint hr,
+        #worklist-subtask-content hr {
+          border: none;
+          border-top: 2px solid #9ca3af;
+          margin: 10px 0;
+        }
+        
+        /* 스크롤바 스타일 */
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 8px;
+          height: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: rgba(0, 0, 0, 0.05);
+          border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(0, 0, 0, 0.2);
+          border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(0, 0, 0, 0.3);
+        }
+        
+        /* 다크모드 스크롤바 */
+        .dark .custom-scrollbar::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.05);
+        }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.2);
+        }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.3);
+        }
+      `}</style>
+
+      {/* 댓글 */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>댓글</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <div className="border rounded-md bg-background">
+              <div className="max-h-[260px] overflow-y-auto p-3 space-y-3 custom-scrollbar">
+                {comments.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">아직 댓글이 없습니다.</p>
+                ) : (
+                  comments.map((c) => {
+                    const canDelete = (me?.id && c.user_id === me.id) || userRole === "admin"
+                    
+                    // 댓글 작성자에 따른 색상 지정
+                    const colorScheme = getCommentColorScheme({
+                      commentUserId: c.user_id,
+                      requesterId: task?.assigned_by || null,
+                      assigneeId: task?.assigned_to || null,
+                      subtasks,
+                    })
+                    
+                    return (
+                      <div
+                        key={c.id}
+                        className={`flex ${me?.id && c.user_id === me.id ? "justify-end" : "justify-start"}`}
+                      >
+                        <div className={`w-full max-w-[360px] rounded-lg border-2 p-3 ${colorScheme.bg} ${colorScheme.border}`}>
+                          <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground mb-2">
+                            <span className="font-medium text-foreground/90 truncate">{c.full_name || "사용자"}</span>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span>{new Date(c.created_at).toLocaleString("ko-KR")}</span>
+                              {canDelete && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={() => handleDeleteComment(c.id)}
+                                  title="댓글 삭제"
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="pr-1">
+                            <SafeHtml
+                              html={c.content || ""}
+                              className="prose prose-sm max-w-none dark:prose-invert wrap-break-word preserve-whitespace [&_table]:w-max [&_table]:min-w-full [&_pre]:overflow-x-auto [&_pre]:whitespace-pre [&_code]:wrap-break-word"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* client 역할은 client/progress에서만 댓글 입력 가능 */}
+            {userRole !== "client" && (
+              <div className="space-y-2">
+                <div className="text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground/90">{me?.full_name || "작성자"}</span>
+                </div>
+                <div className="rounded-md border bg-background p-3">
+                  <Textarea
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    placeholder="댓글을 입력하세요..."
+                    className="min-h-[56px] max-h-[120px] overflow-y-auto resize-none border-0 p-0 focus-visible:ring-0"
+                  />
+                </div>
+                <div className="flex justify-end">
+                  <Button onClick={handlePostComment} disabled={isPostingComment || newComment.trim().length === 0}>
+                    {isPostingComment ? "저장 중..." : "댓글 등록"}
+                  </Button>
+                </div>
+              </div>
+            )}
+            {userRole === "client" && (
+              <div className="rounded-md border bg-muted/30 p-4 text-center text-sm text-muted-foreground">
+                댓글은 작업 진행 페이지에서만 작성할 수 있습니다
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 첨부파일 */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>첨부파일</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {isDownloading && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span className="truncate">다운로드 중: {downloadingFileName}</span>
+                  <span className="shrink-0">{downloadProgress}%</span>
+                </div>
+                <Progress value={downloadProgress} />
+              </div>
+            )}
+            
+            {/* 요청자 첨부파일 */}
+            <div className="space-y-2">
+              <h4 className="text-sm font-semibold text-foreground/90">요청자 첨부파일</h4>
+              {resolvedFileKeys.length > 0 ? (
+                <div className="space-y-2 pl-2">
+                  {resolvedFileKeys.map((f, index) => (
+                    <FileListItem
+                      key={`admin-${index}`}
+                      fileName={f.fileName}
+                      s3Key={f.s3Key}
+                      uploadedAt={f.uploadedAt}
+                      fallbackDate={task.created_at}
+                      onDownload={handleDownload}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground pl-2">첨부파일이 없습니다</p>
+              )}
+            </div>
+            
+            {/* 담당자 첨부파일 (개별 - 메인 태스크) */}
+            {subtasks.length === 0 && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold text-foreground/90">담당자 첨부파일</h4>
+                {resolvedCommentFileKeys.length > 0 ? (
+                  <div className="space-y-2 pl-2">
+                    {resolvedCommentFileKeys.map((f, index) => (
+                      <FileListItem
+                        key={`user-${index}`}
+                        fileName={f.fileName}
+                        s3Key={f.s3Key}
+                        uploadedAt={f.uploadedAt}
+                        fallbackDate={task.updated_at}
+                        onDownload={handleDownload}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground pl-2">첨부파일이 없습니다</p>
+                )}
+              </div>
+            )}
+            
+            {/* 담당자 첨부파일 (공동 - 서브태스크별) */}
+            {subtasks.length > 0 && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold text-foreground/90">담당자 첨부파일</h4>
+                {resolvedSubtaskFileKeys.length > 0 ? (
+                  <div className="space-y-2 pl-2">
+                    {resolvedSubtaskFileKeys.map((f, index) => (
+                      <FileListItem
+                        key={`subtask-${index}`}
+                        fileName={f.fileName}
+                        s3Key={f.s3Key}
+                        uploadedAt={f.uploadedAt}
+                        fallbackDate={task.updated_at}
+                        assignedToName={f.assignedToName}
+                        onDownload={handleDownload}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground pl-2">첨부파일이 없습니다</p>
+                )}
+              </div>
+            )}
+            
+            {(resolvedFileKeys.length > 0 || resolvedCommentFileKeys.length > 0 || resolvedSubtaskFileKeys.length > 0) && (
+              <p className="text-xs text-muted-foreground mt-3 pt-3 border-t">
+              </p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 완료대기이거나 모든 서브태스크가 완료된 경우: 작업완료 버튼 표시 */}
+      {(userRole === "admin" || userRole === "staff") && 
+       (task.status === "awaiting_completion" || (subtasks.length > 0 && allSubtasksCompleted)) && 
+       task.status !== "completed" && (
+        <div className="mt-10 flex justify-center">
+          <Button onClick={handleFinalizeTask} disabled={isFinalizing} className="min-w-[180px] cursor-pointer">
+            {isFinalizing ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                처리 중...
+              </>
+            ) : (
+              "작업완료"
+            )}
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}

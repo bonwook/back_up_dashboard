@@ -1,0 +1,94 @@
+import { type NextRequest, NextResponse } from "next/server"
+import { verifyToken } from "@/lib/auth"
+import { query } from "@/lib/db/mysql"
+
+// GET /api/tasks/[id]/subtasks - 특정 Task의 Subtask 목록 조회
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const token = request.cookies.get("auth-token")?.value
+    if (!token) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    const decoded = verifyToken(token)
+    if (!decoded) {
+      return NextResponse.json({ error: "Invalid token" }, { status: 401 })
+    }
+
+    const { id } = await params
+    const taskId = id
+
+    // 사용자 역할 확인
+    const userRoleRes = await query(
+      `SELECT role FROM profiles WHERE id = ?`,
+      [decoded.id]
+    )
+    const userRole = userRoleRes && userRoleRes.length > 0 ? userRoleRes[0].role : null
+    const isAdminOrStaff = userRole === "admin" || userRole === "staff"
+
+    // Task 확인 및 권한 체크
+    const [task] = await query(
+      "SELECT id, assigned_to, assigned_by, assignment_type FROM task_assignments WHERE id = ?",
+      [taskId]
+    )
+
+    if (!task) {
+      return NextResponse.json({ error: "Task를 찾을 수 없습니다" }, { status: 404 })
+    }
+
+    // 권한 확인: admin/staff는 모든 task의 subtask 조회 가능, 그 외는 자신의 task만
+    if (!isAdminOrStaff && task.assigned_to !== decoded.id && task.assigned_by !== decoded.id) {
+      return NextResponse.json({ error: "권한이 없습니다" }, { status: 403 })
+    }
+
+    // Subtask 목록 가져오기
+    const subtasks = await query(`
+      SELECT 
+        ts.*,
+        p_assigned_to.full_name as assigned_to_name,
+        p_assigned_to.email as assigned_to_email
+      FROM task_subtasks ts
+      LEFT JOIN profiles p_assigned_to ON ts.assigned_to = p_assigned_to.id
+      WHERE ts.task_id = ?
+      ORDER BY ts.created_at ASC
+    `, [taskId])
+
+    // Parse JSON file_keys, comment_file_keys
+    const parsedSubtasks = subtasks.map((subtask: any) => {
+      try {
+        const fileKeys = typeof subtask.file_keys === 'string' 
+          ? JSON.parse(subtask.file_keys) 
+          : subtask.file_keys || []
+        const commentFileKeys = typeof subtask.comment_file_keys === 'string'
+          ? JSON.parse(subtask.comment_file_keys)
+          : subtask.comment_file_keys || []
+        
+        return {
+          ...subtask,
+          file_keys: fileKeys,
+          comment_file_keys: commentFileKeys,
+        }
+      } catch {
+        return {
+          ...subtask,
+          file_keys: [],
+          comment_file_keys: [],
+        }
+      }
+    })
+
+    return NextResponse.json({ 
+      subtasks: parsedSubtasks,
+      assignment_type: task.assignment_type || 'individual'
+    })
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Internal server error"
+    return NextResponse.json(
+      { error: errorMessage },
+      { status: 500 }
+    )
+  }
+}

@@ -1,0 +1,35 @@
+name: TypeScript CI with pnpm
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 소스 코드 가져오기
+        uses: actions/checkout@v4
+
+      - name: pnpm 설치
+        uses: pnpm/action-setup@v3
+        with:
+          version: 10 # 사용 중인 pnpm 버전에 맞춰 수정 가능
+
+      - name: Node.js 설정
+        uses: actions/setup-node@v4
+        with:
+          node-version: '25'
+          cache: 'pnpm' # pnpm 캐시 기능을 사용해 설치 속도 향상
+
+      - name: 의존성 설치
+        run: pnpm install --frozen-lockfile # npm ci와 같은 역할입니다.
+
+      - name: 타입 체크 (TSC)
+        run: pnpm run tsc
+
+      - name: 빌드 테스트
+        run: pnpm run build
