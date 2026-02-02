@@ -1015,12 +1015,12 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               const userOrder = Array.from(new Set(comments.map((x) => x.user_id)))
               const userIndex = userOrder.indexOf(c.user_id)
               const bubbleColors = [
-                "bg-blue-500 text-white",
-                "bg-green-500 text-white",
-                "bg-purple-500 text-white",
-                "bg-orange-500 text-white",
-                "bg-pink-500 text-white",
-                "bg-cyan-500 text-white",
+                "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200",
+                "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200",
+                "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200",
+                "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200",
+                "bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-200",
+                "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-200",
               ]
               const bubbleClass = isMe
                 ? "bg-primary text-primary-foreground"
@@ -1062,7 +1062,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                               type="button"
                               variant="ghost"
                               size="icon"
-                              className="h-6 w-6 text-white hover:text-white hover:bg-white/20"
+                              className="h-6 w-6 text-current opacity-80 hover:opacity-100 hover:bg-black/10"
                               onClick={() => handleDeleteComment(c.id)}
                               title="댓글 삭제"
                             >

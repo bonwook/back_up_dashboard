@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { sanitizeHtml } from "@/lib/utils/sanitize"
+import { SafeHtml } from "@/components/safe-html"
 import { Calendar } from "@/components/ui/calendar"
 import { Progress } from "@/components/ui/progress"
 import { format } from "date-fns"
@@ -2834,22 +2835,80 @@ function TaskDialogContent({
             </div>
           )
         })()}
-        {threadComments.length > 0 && (
-          <div className="pt-4 border-t">
-            <p className="text-muted-foreground font-medium mb-3">댓글</p>
-            <ul className="space-y-3 text-sm">
-              {threadComments.map((c) => (
-                <li key={c.id} className="flex flex-col gap-1 p-3 rounded-md bg-muted/50 border border-border/50">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium text-foreground">{c.full_name ?? "알 수 없음"}</span>
-                    <span className="text-xs text-muted-foreground shrink-0">{formatDateShort(c.created_at)}</span>
+        {/* 댓글 - 말풍선 스타일 (staff와 동일) */}
+        <div className="pt-4 border-t">
+          <p className="text-muted-foreground font-medium mb-3">댓글</p>
+          <div className="max-h-[320px] overflow-y-auto p-1 space-y-4 rounded-lg">
+            {threadComments.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">아직 댓글이 없습니다.</p>
+            ) : (
+              threadComments.map((c) => {
+                const canDelete = (user?.id && c.user_id === user.id) || userRole === "admin"
+                const isMe = user?.id && c.user_id === user.id
+                const userOrder = Array.from(new Set(threadComments.map((x) => x.user_id)))
+                const userIndex = userOrder.indexOf(c.user_id)
+                const bubbleColors = [
+                  "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200",
+                  "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200",
+                  "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200",
+                  "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200",
+                  "bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-200",
+                  "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-200",
+                ]
+                const bubbleClass = isMe
+                  ? "bg-primary text-primary-foreground"
+                  : bubbleColors[userIndex % bubbleColors.length]
+                return (
+                  <div
+                    key={c.id}
+                    className={`flex ${isMe ? "justify-end" : "justify-start"}`}
+                  >
+                    <div className={`flex flex-col max-w-[85%] sm:max-w-[75%] ${isMe ? "items-end" : "items-start"}`}>
+                      <div className={`flex items-center gap-2 px-2 mb-1 ${isMe ? "flex-row-reverse" : ""}`}>
+                        <span className="text-[11px] font-medium text-foreground/90">
+                          {c.full_name ?? "사용자"}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {new Date(c.created_at).toLocaleString("ko-KR", {
+                            year: "numeric",
+                            month: "numeric",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
+                      <div className={`rounded-2xl px-4 py-3 shadow-md ${bubbleClass}`}>
+                        <div className="flex items-end gap-2">
+                          <div className="text-sm wrap-break-word word-break break-all text-inherit [&_p]:my-0 [&_pre]:whitespace-pre-wrap [&_a]:underline">
+                            <SafeHtml
+                              html={c.content || ""}
+                              className="prose prose-sm max-w-none prose-p:my-0 [&_table]:w-max [&_pre]:whitespace-pre-wrap [&_code]:break-all prose-inherit"
+                            />
+                          </div>
+                          {canDelete && (
+                            <div className="shrink-0 self-end">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-current opacity-80 hover:opacity-100 hover:bg-black/10"
+                                onClick={() => handleDeleteThreadComment(c.id)}
+                                title="댓글 삭제"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <p className="text-foreground whitespace-pre-wrap wrap-break-word word-break break-all">{c.content}</p>
-                </li>
-              ))}
-            </ul>
+                )
+              })
+            )}
           </div>
-        )}
+        </div>
       </div>
       <div className="flex justify-end mt-4 pt-4 border-t">
         {onEditTask && task.status !== 'awaiting_completion' && (
