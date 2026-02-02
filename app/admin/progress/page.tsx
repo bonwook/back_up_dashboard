@@ -7,7 +7,6 @@ import { useToast } from "@/hooks/use-toast"
 import { Loader2, CheckCircle2, Clock, Pause, FileText, AlertCircle, Check, X, Bold, Italic, Underline, Minus, Grid3x3 as TableIcon, Upload, Edit, Download } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -20,6 +19,7 @@ import { uploadWithProgress } from "@/lib/utils/upload-with-progress"
 import { calculateFileExpiry, formatDateShort } from "@/lib/utils/dateHelpers"
 import { Task, TaskStatus, Profile, ResolvedFileKey } from "./types"
 import TaskBlock from "./components/TaskBoard/TaskBlock"
+import { TaskCommentSection, TaskDetailDialog } from "@/components/task"
 
 export default function ClientProgressPage() {
   const [tasks, setTasks] = useState<Task[]>([])
@@ -1969,6 +1969,12 @@ export default function ClientProgressPage() {
                   )}
                 </div>
               )}
+              <TaskCommentSection
+                taskId={workTaskId}
+                me={user ? { id: user.id, role: user.role } : null}
+                allowWrite={true}
+                allowDelete={true}
+              />
               </>
               )}
             </CardContent>
@@ -1976,738 +1982,100 @@ export default function ClientProgressPage() {
         </>
       )}
 
-      {/* Task 상세 정보 Dialog */}
-      <Dialog open={!!selectedTask} onOpenChange={(open) => {
-        if (!open) {
+      {/* Task 상세 정보 Dialog - progress와 동일한 UI/기능 */}
+      <TaskDetailDialog
+        task={selectedTask}
+        open={!!selectedTask}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedTask(null)
+            setResolvedFileKeys([])
+          }
+        }}
+        onTaskUpdate={() => {
+          loadTasks()
           setSelectedTask(null)
           setResolvedFileKeys([])
-        }
-      }}>
-        <DialogContent className="max-h-[80vh] overflow-y-auto overflow-x-hidden" style={{ width: 'calc((1280px - 48px - 16px) * 7/10)', maxWidth: '851px' }}>
-          {selectedTask && (
-            <TaskDialogContent 
-              task={selectedTask}
-              resolvedFileKeys={resolvedFileKeys}
-              setResolvedFileKeys={setResolvedFileKeys}
-              getStatusIcon={getStatusIcon}
-              getPriorityColor={getPriorityColor}
-              getStatusLabel={getStatusLabel}
-              toast={toast}
-              onTaskUpdate={() => {
-                loadTasks()
-                setSelectedTask(null)
-                setResolvedFileKeys([])
-              }}
-              finalizedTaskIds={finalizedTaskIds}
-              setFinalizedTaskIds={setFinalizedTaskIds}
-              onEditTask={async (task) => {
-                // subtask인 경우, main task 가져오기
-                let mainTaskContent = task.content || ""
-                let mainTaskFileKeys: string[] = task.file_keys || []
-                
-                if (task.is_subtask && task.task_id) {
-                  try {
-                    const mainTaskRes = await fetch(`/api/tasks/${task.task_id}`, { credentials: "include" })
-                    if (mainTaskRes.ok) {
-                      const mainTaskData = await mainTaskRes.json()
-                      mainTaskContent = mainTaskData.task?.content || ""
-                      mainTaskFileKeys = mainTaskData.task?.file_keys || []
-                    }
-                  } catch (error) {
-                    console.error('main task 로드 오류:', error)
-                  }
-                }
-                
-                // 작업공간에 task 정보 표시 (읽기 전용)
-                setWorkForm({
-                  title: task.title || "",
-                  content: mainTaskContent, // main task의 content
-                  priority: task.priority || "medium",
-                })
-                setWorkTaskId(task.id)
-                setWorkTaskIsSubtask(task.is_subtask || false)
-                setIsWorkAreaReadOnly(true) // 수정 버튼으로 추가한 경우 읽기 전용
+        }}
+        finalizedTaskIds={finalizedTaskIds}
+        setFinalizedTaskIds={setFinalizedTaskIds}
+        userRole={user?.role}
+        showDueDateEditor={false}
+        onEditTask={async (task) => {
+          let mainTaskContent = task.content || ""
+          let mainTaskFileKeys: string[] = task.file_keys || []
 
-                // 본문 첨부파일 resolve (main task의 file_keys)
-                if (mainTaskFileKeys.length > 0) {
-                  fetch('/api/storage/resolve-file-keys', {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                    },
-                    credentials: 'include',
-                    body: JSON.stringify({ fileKeys: mainTaskFileKeys }),
-                  })
-                    .then(response => response.json())
-                    .then(data => {
-                      setWorkResolvedFileKeys(data.resolvedKeys || [])
-                    })
-                    .catch(error => {
-                      console.error('파일 키 resolve 오류:', error)
-                      setWorkResolvedFileKeys([])
-                    })
-                } else {
-                  setWorkResolvedFileKeys([])
-                }
+          if (task.is_subtask && (task as Task).task_id) {
+            try {
+              const mainTaskRes = await fetch(`/api/tasks/${(task as Task).task_id}`, { credentials: "include" })
+              if (mainTaskRes.ok) {
+                const mainTaskData = await mainTaskRes.json()
+                mainTaskContent = mainTaskData.task?.content || ""
+                mainTaskFileKeys = mainTaskData.task?.file_keys || []
+              }
+            } catch (error) {
+              console.error("main task 로드 오류:", error)
+            }
+          }
 
-                // comment 첨부파일이 있으면 resolve
-                if (task.comment_file_keys && task.comment_file_keys.length > 0) {
-                  fetch('/api/storage/resolve-file-keys', {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                    },
-                    credentials: 'include',
-                    body: JSON.stringify({ fileKeys: task.comment_file_keys }),
-                  })
-                    .then(response => response.json())
-                    .then(data => {
-                      setWorkCommentResolvedFileKeys(data.resolvedKeys || [])
-                    })
-                    .catch(error => {
-                      console.error('comment 파일 키 resolve 오류:', error)
-                      setWorkCommentResolvedFileKeys([])
-                    })
-                } else {
-                  setWorkCommentResolvedFileKeys([])
-                }
+          setWorkForm({
+            title: task.title || "",
+            content: mainTaskContent,
+            priority: task.priority || "medium",
+          })
+          setWorkTaskId(task.id)
+          setWorkTaskIsSubtask(task.is_subtask || false)
+          setIsWorkAreaReadOnly(true)
 
-                // contentEditable에 내용 설정
-                setTimeout(() => {
-                  const editor = document.getElementById('work-content')
-                  if (editor && mainTaskContent) {
-                    editor.innerHTML = mainTaskContent
-                  }
-                  
-                  // comment 에디터에 내용 설정
-                  const commentEditor = document.getElementById('work-comment-content')
-                  if (commentEditor) {
-                    // subtask인 경우: subtask의 content를 표시
-                    // main task인 경우: comment 컬럼 내용 표시
-                    let contentToShow = ""
-                    if (task.is_subtask) {
-                      contentToShow = task.content || ""
-                    } else {
-                      const commentText = (task.comment as string) || ""
-                      contentToShow = commentText.startsWith('\n') ? commentText.substring(1) : commentText
-                    }
-                    commentEditor.innerHTML = contentToShow
-                    setWorkCommentContent(contentToShow)
-                  }
-                }, 0)
+          if (mainTaskFileKeys.length > 0) {
+            fetch("/api/storage/resolve-file-keys", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({ fileKeys: mainTaskFileKeys }),
+            })
+              .then((r) => r.json())
+              .then((data) => setWorkResolvedFileKeys(data.resolvedKeys || []))
+              .catch(() => setWorkResolvedFileKeys([]))
+          } else {
+            setWorkResolvedFileKeys([])
+          }
 
-                // Dialog 닫기
-                setSelectedTask(null)
-                setResolvedFileKeys([])
-              }}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+          if (task.comment_file_keys?.length) {
+            fetch("/api/storage/resolve-file-keys", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({ fileKeys: task.comment_file_keys }),
+            })
+              .then((r) => r.json())
+              .then((data) => setWorkCommentResolvedFileKeys(data.resolvedKeys || []))
+              .catch(() => setWorkCommentResolvedFileKeys([]))
+          } else {
+            setWorkCommentResolvedFileKeys([])
+          }
+
+          setTimeout(() => {
+            const editor = document.getElementById("work-content")
+            if (editor && mainTaskContent) editor.innerHTML = mainTaskContent
+            const commentEditor = document.getElementById("work-comment-content")
+            if (commentEditor) {
+              let contentToShow = ""
+              if (task.is_subtask) {
+                contentToShow = task.content || ""
+              } else {
+                const commentText = (task.comment ?? "").toString()
+                contentToShow = commentText.startsWith("\n") ? commentText.substring(1) : commentText
+              }
+              commentEditor.innerHTML = contentToShow
+              setWorkCommentContent(contentToShow)
+            }
+          }, 0)
+          setSelectedTask(null)
+          setResolvedFileKeys([])
+        }}
+      />
     </div>
-  )
-}
-
-interface TaskDialogContentProps {
-  task: Task
-  resolvedFileKeys: ResolvedFileKey[]
-  setResolvedFileKeys: React.Dispatch<React.SetStateAction<ResolvedFileKey[]>>
-  getStatusIcon: (status: Task['status']) => React.ReactElement | null
-  getPriorityColor: (priority: Task['priority']) => string
-  getStatusLabel: (status: Task['status'], task?: Task) => string
-  toast: ReturnType<typeof useToast>['toast']
-  onTaskUpdate: () => void
-  finalizedTaskIds: Set<string>
-  setFinalizedTaskIds: React.Dispatch<React.SetStateAction<Set<string>>>
-  onEditTask?: (task: Task) => void
-}
-
-function TaskDialogContent({
-  task,
-  resolvedFileKeys,
-  setResolvedFileKeys,
-  getStatusIcon,
-  getPriorityColor,
-  getStatusLabel,
-  toast,
-  onTaskUpdate,
-  finalizedTaskIds,
-  setFinalizedTaskIds,
-  onEditTask
-}: TaskDialogContentProps) {
-  // comment 컬럼에서 첫 줄 개행 제거하여 표시
-  const existingComment = task.comment ? (task.comment.startsWith('\n') ? task.comment.substring(1) : task.comment) : ''
-  const [comment, setComment] = useState(existingComment)
-  const [isSavingComment, setIsSavingComment] = useState(false)
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
-  const [isDeleting, setIsDeleting] = useState(false)
-  const [user, setUser] = useState<any>(null)
-  const [commentResolvedFileKeys, setCommentResolvedFileKeys] = useState<ResolvedFileKey[]>([])
-  const [subtasks, setSubtasks] = useState<any[]>([])
-  const [isLoadingSubtasks, setIsLoadingSubtasks] = useState(false)
-
-  // 서브태스크 로드
-  useEffect(() => {
-    const loadSubtasks = async () => {
-      setIsLoadingSubtasks(true)
-      try {
-        const res = await fetch(`/api/tasks/${task.id}/subtasks`, { credentials: "include" })
-        if (!res.ok) return
-        const data = await res.json()
-        setSubtasks(Array.isArray(data.subtasks) ? data.subtasks : [])
-      } catch {
-        // ignore
-      } finally {
-        setIsLoadingSubtasks(false)
-      }
-    }
-    loadSubtasks()
-  }, [task.id])
-
-  // 모든 서브태스크가 완료되었는지 확인
-  const allSubtasksCompleted = useMemo(() => {
-    if (subtasks.length === 0) return false
-    return subtasks.every((st: any) => st.status === "completed")
-  }, [subtasks])
-
-  useEffect(() => {
-    const loadUser = async () => {
-      try {
-        const res = await fetch("/api/auth/me", { credentials: "include" })
-        if (!res.ok) return
-        const me = await res.json()
-        setUser(me)
-      } catch (error) {
-        console.error('사용자 로드 오류:', error)
-      }
-    }
-    loadUser()
-  }, [])
-
-  // Dialog가 열릴 때 file_keys를 resolve
-  useEffect(() => {
-    if (task.file_keys && task.file_keys.length > 0 && resolvedFileKeys.length === 0) {
-      const resolveFileKeys = async () => {
-        try {
-          const response = await fetch('/api/storage/resolve-file-keys', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-            body: JSON.stringify({ fileKeys: task.file_keys }),
-          })
-          if (response.ok) {
-            const data = await response.json()
-            setResolvedFileKeys(data.resolvedKeys || [])
-          }
-        } catch (error) {
-          console.error('파일 키 resolve 오류:', error)
-        }
-      }
-      resolveFileKeys()
-    }
-  }, [task.file_keys, resolvedFileKeys.length, setResolvedFileKeys])
-
-  // Dialog가 열릴 때 comment_file_keys를 resolve
-  useEffect(() => {
-    if (task.comment_file_keys && task.comment_file_keys.length > 0 && commentResolvedFileKeys.length === 0) {
-      const resolveCommentFileKeys = async () => {
-        try {
-          const response = await fetch('/api/storage/resolve-file-keys', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-            body: JSON.stringify({ fileKeys: task.comment_file_keys }),
-          })
-          if (response.ok) {
-            const data = await response.json()
-            setCommentResolvedFileKeys(data.resolvedKeys || [])
-          }
-        } catch (error) {
-          console.error('comment 파일 키 resolve 오류:', error)
-        }
-      }
-      resolveCommentFileKeys()
-    }
-  }, [task.comment_file_keys, commentResolvedFileKeys.length])
-
-  const handleSaveComment = async () => {
-    setIsSavingComment(true)
-    try {
-      // comment 컬럼에 저장 (첫 줄에 개행 포함)
-      const formattedComment = comment.trim() ? `\n${comment.trim()}` : null
-
-      const response = await fetch(`/api/tasks/${task.id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({ comment: formattedComment }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || '댓글 저장 실패')
-      }
-
-      toast({
-        title: '성공',
-        description: '댓글이 저장되었습니다',
-      })
-      onTaskUpdate()
-    } catch (error: any) {
-      toast({
-        title: '오류',
-        description: error.message || '댓글 저장에 실패했습니다',
-        variant: 'destructive',
-      })
-    } finally {
-      setIsSavingComment(false)
-    }
-  }
-
-  const handleDeleteTask = async () => {
-    setIsDeleting(true)
-    try {
-      // comment 컬럼에 저장 (첫 줄에 개행 포함)
-      const formattedComment = comment.trim() ? `\n${comment.trim()}` : null
-
-      // comment 업데이트 및 status를 completed로 변경
-      // status가 completed로 변경되면 API에서 자동으로 cases로 이동
-      const updateResponse = await fetch(`/api/tasks/${task.id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({ 
-          comment: formattedComment,
-          status: 'completed'
-        }),
-      })
-
-      if (!updateResponse.ok) {
-        const errorData = await updateResponse.json()
-        throw new Error(errorData.error || '작업 완료 처리 실패')
-      }
-
-      // Report 생성
-      const reportResponse = await fetch(`/api/tasks/${task.id}/create-report`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-      })
-
-      if (!reportResponse.ok) {
-        let errorMessage = 'Report 생성 실패'
-        try {
-          const errorData = await reportResponse.json()
-          errorMessage = errorData.error || errorData.message || errorMessage
-          console.error('[Progress] Report 생성 실패:', errorData)
-        } catch (parseError) {
-          const errorText = await reportResponse.text()
-          console.error('[Progress] Report 생성 실패 (응답 파싱 오류):', errorText)
-          errorMessage = errorText || errorMessage
-        }
-        // Report 생성 실패해도 작업 완료는 유지 (조용히 실패)
-        console.warn('[Progress] Report 생성은 실패했지만 작업 완료는 정상 처리되었습니다:', errorMessage)
-      }
-
-      toast({
-        title: '성공',
-        description: '작업이 완료되었습니다. Reports에서 확인할 수 있습니다.',
-      })
-      setShowDeleteDialog(false)
-      onTaskUpdate()
-    } catch (error: any) {
-      toast({
-        title: '오류',
-        description: error.message || '작업 완료 처리에 실패했습니다',
-        variant: 'destructive',
-      })
-    } finally {
-      setIsDeleting(false)
-    }
-  }
-
-  return (
-    <>
-      <DialogHeader className="pr-8">
-        <DialogTitle className="flex items-center gap-2 wrap-break-word word-break break-all">
-          {getStatusIcon(task.status)}
-          <span className="min-w-0">
-            {task.title}
-            {task.subtitle && task.is_subtask && (
-              <span className="text-muted-foreground text-sm ml-2">({task.subtitle})</span>
-            )}
-          </span>
-        </DialogTitle>
-      </DialogHeader>
-      <div className="flex items-center gap-2 flex-wrap mt-2 mb-4">
-        <Badge className={getPriorityColor(task.priority)}>
-          {task.priority === 'urgent' ? '긴급' : 
-           task.priority === 'high' ? '높음' : 
-           task.priority === 'medium' ? '보통' : '낮음'}
-        </Badge>
-        <Badge variant="outline">
-          {getStatusLabel(task.status, task)}
-        </Badge>
-        <span className="text-xs text-muted-foreground">
-          요청자: <span className="font-medium text-foreground">{task.assigned_by_name || task.assigned_by_email}</span>
-        </span>
-      </div>
-      <div className="space-y-4 mt-4">
-        <div className="space-y-3 text-sm">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-muted-foreground">시작일</p>
-              <p className="font-medium">{formatDateShort(task.created_at)}</p>
-            </div>
-            {task.due_date && (
-              <div>
-                <p className="text-muted-foreground">마감일</p>
-                <p className="font-medium">{formatDateShort(task.due_date)}</p>
-              </div>
-            )}
-          </div>
-          {task.completed_at && (
-            <div>
-              <p className="text-muted-foreground">종료일</p>
-              <p className="font-medium">{formatDateShort(task.completed_at)}</p>
-            </div>
-          )}
-        </div>
-        {task.content && (
-          <div>
-            <div 
-              ref={(el) => {
-                if (el) {
-                  // 테이블 셀의 contentEditable을 false로 설정
-                  const tables = el.querySelectorAll('table')
-                  tables.forEach((table) => {
-                    const cells = table.querySelectorAll('td, th')
-                    cells.forEach((cell) => {
-                      (cell as HTMLElement).contentEditable = 'false'
-                    })
-                  })
-                }
-              }}
-              className="text-sm bg-muted/50 p-3 rounded-md border border-border/50 wrap-break-word word-break break-all overflow-x-auto prose prose-sm max-w-none"
-              dangerouslySetInnerHTML={{ __html: sanitizeHtml(task.content) }}
-              style={{
-                maxHeight: '400px',
-                overflowY: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word'
-              }}
-            />
-            <style jsx global>{`
-              .prose table {
-                border-collapse: collapse;
-                width: 100%;
-                margin: 10px 0;
-                border: 2px solid #6b7280; /* Darker border */
-              }
-              .prose table td,
-              .prose table th {
-                border: 2px solid #6b7280; /* Darker border */
-                padding: 8px;
-                position: relative;
-                cursor: default !important; /* Prevent cursor change */
-              }
-              .prose table td[contenteditable="true"],
-              .prose table th[contenteditable="true"] {
-                pointer-events: none; /* Prevent editing */
-                user-select: none; /* Prevent selection */
-                cursor: default !important;
-              }
-              .prose table td *,
-              .prose table th * {
-                cursor: default !important; /* Ensure children also have default cursor */
-                pointer-events: none; /* Ensure children are not interactive */
-              }
-              .prose hr {
-                border: none;
-                border-top: 2px solid #6b7280; /* Darker separator */
-                margin: 10px 0;
-              }
-            `}</style>
-          </div>
-        )}
-        {comment && (
-          <div>
-            <p className="text-muted-foreground mb-2">완료 코멘트</p>
-            <div 
-              ref={(el) => {
-                if (el) {
-                  // 테이블 셀의 contentEditable을 false로 설정
-                  const tables = el.querySelectorAll('table')
-                  tables.forEach((table) => {
-                    const cells = table.querySelectorAll('td, th')
-                    cells.forEach((cell) => {
-                      (cell as HTMLElement).contentEditable = 'false'
-                    })
-                  })
-                }
-              }}
-              className="text-sm bg-muted/50 p-3 rounded-md border border-border/50 wrap-break-word word-break break-all overflow-x-auto prose prose-sm max-w-none"
-              dangerouslySetInnerHTML={{ __html: sanitizeHtml(comment) }}
-              style={{
-                maxHeight: '400px',
-                overflowY: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word'
-              }}
-            />
-            <style jsx global>{`
-              .prose table {
-                border-collapse: collapse;
-                width: 100%;
-                margin: 10px 0;
-                border: 2px solid #6b7280;
-              }
-              .prose table td,
-              .prose table th {
-                border: 2px solid #6b7280;
-                padding: 8px;
-                position: relative;
-                cursor: default !important;
-              }
-              .prose table td[contenteditable="true"],
-              .prose table th[contenteditable="true"] {
-                pointer-events: none;
-                user-select: none;
-                cursor: default !important;
-              }
-              .prose table td *,
-              .prose table th * {
-                cursor: default !important;
-                pointer-events: none;
-              }
-              .prose hr {
-                border: none;
-                border-top: 2px solid #6b7280;
-                margin: 10px 0;
-              }
-            `}</style>
-          </div>
-        )}
-        {task.file_keys && task.file_keys.length > 0 && (
-          <div>
-            <p className="text-muted-foreground mb-2">본문 첨부 파일</p>
-            <div className="space-y-2 text-sm">
-              {resolvedFileKeys.length > 0 ? (
-                resolvedFileKeys.map((resolved, index: number) => {
-                  const expiry = calculateFileExpiry(task.created_at)
-                  return (
-                    <div key={index} className="flex items-center gap-2">
-                      <FileText className="h-4 w-4 shrink-0" />
-                      <a
-                        href={`/api/storage/signed-url?path=${encodeURIComponent(resolved.s3Key)}&expiresIn=604800`}
-                        onClick={async (e) => {
-                          e.preventDefault()
-                          try {
-                            const response = await fetch(`/api/storage/signed-url?path=${encodeURIComponent(resolved.s3Key)}&expiresIn=604800`, {
-                              credentials: 'include',
-                            })
-                            if (!response.ok) {
-                              const errorData = await response.json().catch(() => ({}))
-                              const errorMessage = errorData.error || '다운로드 URL 생성 실패'
-                              // NoSuchKey 에러 메시지 확인
-                              if (errorMessage.includes('존재하지 않') || errorMessage.includes('기간이 지났') || response.status === 404) {
-                                throw new Error('파일이 존재하지 않거나 다운로드 기간이 지났습니다.')
-                              }
-                              throw new Error(errorMessage)
-                            }
-                            const data = await response.json()
-                            if (data.signedUrl) {
-                              // 이미지 파일인지 확인
-                              const fileName = resolved.fileName || 
-                                (typeof resolved.s3Key === 'string' ? resolved.s3Key.split('/').pop() : null) || 
-                                ''
-                              const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg']
-                              const fileExtension = fileName.toLowerCase().split('.').pop() || ''
-                              const isImage = imageExtensions.includes(fileExtension)
-                              
-                              if (isImage) {
-                                // 이미지 파일은 다운로드
-                                const a = document.createElement('a')
-                                a.href = data.signedUrl
-                                a.download = fileName
-                                document.body.appendChild(a)
-                                a.click()
-                                document.body.removeChild(a)
-                              } else {
-                                // 다른 파일은 새 창에서 열기
-                                window.open(data.signedUrl, '_blank')
-                              }
-                            } else {
-                              throw new Error('서명된 URL을 받을 수 없습니다')
-                            }
-                          } catch (error: any) {
-                            console.error('파일 다운로드 오류:', error)
-                            toast({
-                              title: '오류',
-                              description: error.message || '파일 다운로드에 실패했습니다. 파일이 존재하지 않거나 다운로드 기간이 지났습니다.',
-                              variant: 'destructive',
-                            })
-                          }
-                        }}
-                        className="text-blue-600 hover:text-blue-800 underline"
-                      >
-                        {resolved.fileName}
-                      </a>
-                      <span className={`text-xs shrink-0 ${expiry.isExpired ? 'text-red-500' : expiry.daysRemaining <= 2 ? 'text-orange-500' : 'text-muted-foreground'}`}>
-                        ({expiry.expiryText})
-                      </span>
-                    </div>
-                  )
-                })
-              ) : (
-                <div className="text-muted-foreground">파일 정보를 불러오는 중...</div>
-              )}
-            </div>
-          </div>
-        )}
-        {task.comment_file_keys && task.comment_file_keys.length > 0 && (
-          <div>
-            <p className="text-muted-foreground mb-2">작성자 첨부 파일</p>
-            <div className="space-y-2 text-sm">
-              {commentResolvedFileKeys.length > 0 ? (
-                commentResolvedFileKeys.map((resolved, index: number) => {
-                  const expiry = calculateFileExpiry(task.created_at)
-                  return (
-                    <div key={index} className="flex items-center gap-2">
-                      <FileText className="h-4 w-4 shrink-0" />
-                      <a
-                        href={`/api/storage/signed-url?path=${encodeURIComponent(resolved.s3Key)}&expiresIn=604800`}
-                        onClick={async (e) => {
-                          e.preventDefault()
-                          try {
-                            const response = await fetch(`/api/storage/signed-url?path=${encodeURIComponent(resolved.s3Key)}&expiresIn=604800`, {
-                              credentials: 'include',
-                            })
-                            if (!response.ok) {
-                              const errorData = await response.json().catch(() => ({}))
-                              const errorMessage = errorData.error || '다운로드 URL 생성 실패'
-                              // NoSuchKey 에러 메시지 확인
-                              if (errorMessage.includes('존재하지 않') || errorMessage.includes('기간이 지났') || response.status === 404) {
-                                throw new Error('파일이 존재하지 않거나 다운로드 기간이 지났습니다.')
-                              }
-                              throw new Error(errorMessage)
-                            }
-                            const data = await response.json()
-                            if (data.signedUrl) {
-                              // 이미지 파일인지 확인
-                              const fileName = resolved.fileName || 
-                                (typeof resolved.s3Key === 'string' ? resolved.s3Key.split('/').pop() : null) || 
-                                ''
-                              const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg']
-                              const fileExtension = fileName.toLowerCase().split('.').pop() || ''
-                              const isImage = imageExtensions.includes(fileExtension)
-                              
-                              if (isImage) {
-                                // 이미지 파일은 다운로드
-                                const a = document.createElement('a')
-                                a.href = data.signedUrl
-                                a.download = fileName
-                                document.body.appendChild(a)
-                                a.click()
-                                document.body.removeChild(a)
-                              } else {
-                                // 다른 파일은 새 창에서 열기
-                                window.open(data.signedUrl, '_blank')
-                              }
-                            } else {
-                              throw new Error('서명된 URL을 받을 수 없습니다')
-                            }
-                          } catch (error: any) {
-                            console.error('파일 다운로드 오류:', error)
-                            toast({
-                              title: '오류',
-                              description: error.message || '파일 다운로드에 실패했습니다. 파일이 존재하지 않거나 다운로드 기간이 지났습니다.',
-                              variant: 'destructive',
-                            })
-                          }
-                        }}
-                        className="text-blue-600 hover:text-blue-800 underline"
-                      >
-                        {resolved.fileName}
-                      </a>
-                      <span className={`text-xs shrink-0 ${expiry.isExpired ? 'text-red-500' : expiry.daysRemaining <= 2 ? 'text-orange-500' : 'text-muted-foreground'}`}>
-                        ({expiry.expiryText})
-                      </span>
-                    </div>
-                  )
-                })
-              ) : (
-                <div className="text-muted-foreground">파일 정보를 불러오는 중...</div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-      <div className="flex justify-end mt-4 pt-4 border-t">
-        {onEditTask && task.status !== 'awaiting_completion' && (
-          <Button
-            onClick={() => {
-              onEditTask(task)
-            }}
-            variant="outline"
-            className="gap-2 cursor-pointer"
-          >
-            <Edit className="h-4 w-4" />
-            작성
-          </Button>
-        )}
-        {(task.status === 'awaiting_completion' || (subtasks.length > 0 && allSubtasksCompleted)) &&
-         (user?.id === task.assigned_by || user?.role === 'admin') && (
-          <Button
-            onClick={() => setShowDeleteDialog(true)}
-            variant="default"
-            className="gap-2 cursor-pointer"
-          >
-            <Check className="h-4 w-4" />
-            작업 끝내기
-          </Button>
-        )}
-      </div>
-      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>작업을 끝내시겠습니까?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {comment.trim() && comment !== existingComment
-                ? '작성하신 댓글이 저장되고 작업이 완료 처리되어 Reports로 이동합니다. 이 작업은 되돌릴 수 없습니다.'
-                : '이 작업을 완료 처리하고 Reports로 이동시킵니다. 이 작업은 되돌릴 수 없습니다.'}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>취소</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteTask}
-              disabled={isDeleting}
-              className="bg-green-600 hover:bg-green-700"
-            >
-              {isDeleting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  처리 중...
-                </>
-              ) : (
-                '확인'
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
   )
 }
 

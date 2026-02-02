@@ -7,7 +7,6 @@ import { useToast } from "@/hooks/use-toast"
 import { Loader2, CheckCircle2, Clock, Pause, FileText, AlertCircle, Check, X, Trash2, Bold, Italic, Underline, Minus, Grid3x3 as TableIcon, Upload, Edit, Download, Calendar as CalendarIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -23,8 +22,8 @@ import { uploadWithProgress } from "@/lib/utils/upload-with-progress"
 import { downloadWithProgress } from "@/lib/utils/download-with-progress"
 import { calculateFileExpiry, formatDateShort } from "@/lib/utils/dateHelpers"
 import { Task, TaskStatus, ResolvedFileKey } from "./types"
-import { DueDateEditor } from "./components/TaskDialog/DueDateEditor"
 import { TaskBlock } from "./components/TaskBoard/TaskBlock"
+import { TaskCommentSection, TaskDetailDialog } from "@/components/task"
 import { useWorkEditor } from "./hooks/useWorkEditor"
 import { useCommentEditor } from "./hooks/useCommentEditor"
 
@@ -2071,6 +2070,12 @@ export default function ClientProgressPage() {
                   </Button>
                 </div>
               )}
+                  <TaskCommentSection
+                    taskId={workTaskId}
+                    me={user ? { id: user.id, role: userRole ?? user.role } : null}
+                    allowWrite={true}
+                    allowDelete={true}
+                  />
                   </>
                 )}
               </div>
@@ -2079,918 +2084,101 @@ export default function ClientProgressPage() {
         </>
       )}
 
-      {/* Task 상세 정보 Dialog */}
-      <Dialog open={!!selectedTask} onOpenChange={(open) => {
-        if (!open) {
+      {/* Task 상세 정보 Dialog - progress와 동일한 UI/기능 */}
+      <TaskDetailDialog
+        task={selectedTask}
+        open={!!selectedTask}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedTask(null)
+            setResolvedFileKeys([])
+          }
+        }}
+        onTaskUpdate={() => {
+          loadTasks()
           setSelectedTask(null)
           setResolvedFileKeys([])
-        }
-      }}>
-        <DialogContent className="max-h-[80vh] overflow-y-auto overflow-x-hidden" style={{ width: 'calc((1280px - 48px - 16px) * 7/10)', maxWidth: '851px' }}>
-          {selectedTask && (
-            <TaskDialogContent 
-              task={selectedTask}
-              resolvedFileKeys={resolvedFileKeys}
-              setResolvedFileKeys={setResolvedFileKeys}
-              getStatusIcon={getStatusIcon}
-              getPriorityColor={getPriorityColor}
-              getStatusLabel={getStatusLabel}
-              toast={toast}
-              onTaskUpdate={() => {
-                loadTasks()
-                setSelectedTask(null)
-                setResolvedFileKeys([])
-              }}
-              finalizedTaskIds={finalizedTaskIds}
-              setFinalizedTaskIds={setFinalizedTaskIds}
-              userRole={userRole}
-              onEditTask={async (task) => {
-                // subtask인 경우, main task 가져오기
-                let mainTaskContent = task.content || ""
-                let mainTaskFileKeys: string[] = task.file_keys || []
-                
-                if (task.is_subtask && task.task_id) {
-                  try {
-                    const mainTaskRes = await fetch(`/api/tasks/${task.task_id}`, { credentials: "include" })
-                    if (mainTaskRes.ok) {
-                      const mainTaskData = await mainTaskRes.json()
-                      mainTaskContent = mainTaskData.task?.content || ""
-                      mainTaskFileKeys = mainTaskData.task?.file_keys || []
-                    }
-                  } catch (error) {
-                    console.error('main task 로드 오류:', error)
-                  }
-                }
-                
-                // 작업공간에 task 정보 표시 (읽기 전용)
-                setWorkForm({
-                  title: task.title || "",
-                  content: mainTaskContent, // main task의 content
-                  priority: task.priority || "medium",
-                })
-                setWorkTaskId(task.id)
-                setWorkTaskIsSubtask(task.is_subtask || false)
-                setIsWorkAreaReadOnly(true) // 수정 버튼으로 추가한 경우 읽기 전용
+        }}
+        finalizedTaskIds={finalizedTaskIds}
+        setFinalizedTaskIds={setFinalizedTaskIds}
+        userRole={userRole ?? user?.role}
+        showDeleteTaskButton={true}
+        showDueDateEditor={true}
+        onEditTask={async (task) => {
+          let mainTaskContent = task.content || ""
+          let mainTaskFileKeys: string[] = task.file_keys || []
 
-                // 본문 첨부파일 resolve (main task의 file_keys)
-                if (mainTaskFileKeys.length > 0) {
-                  fetch('/api/storage/resolve-file-keys', {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                    },
-                    credentials: 'include',
-                    body: JSON.stringify({ fileKeys: mainTaskFileKeys }),
-                  })
-                    .then(response => response.json())
-                    .then(data => {
-                      setWorkResolvedFileKeys(data.resolvedKeys || [])
-                    })
-                    .catch(error => {
-                      console.error('파일 키 resolve 오류:', error)
-                      setWorkResolvedFileKeys([])
-                    })
-                } else {
-                  setWorkResolvedFileKeys([])
-                }
+          if (task.is_subtask && (task as Task).task_id) {
+            try {
+              const mainTaskRes = await fetch(`/api/tasks/${(task as Task).task_id}`, { credentials: "include" })
+              if (mainTaskRes.ok) {
+                const mainTaskData = await mainTaskRes.json()
+                mainTaskContent = mainTaskData.task?.content || ""
+                mainTaskFileKeys = mainTaskData.task?.file_keys || []
+              }
+            } catch (error) {
+              console.error("main task 로드 오류:", error)
+            }
+          }
 
-                // comment 첨부파일이 있으면 resolve
-                if (task.comment_file_keys && task.comment_file_keys.length > 0) {
-                  fetch('/api/storage/resolve-file-keys', {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                    },
-                    credentials: 'include',
-                    body: JSON.stringify({ fileKeys: task.comment_file_keys }),
-                  })
-                    .then(response => response.json())
-                    .then(data => {
-                      setWorkCommentResolvedFileKeys(data.resolvedKeys || [])
-                    })
-                    .catch(error => {
-                      console.error('comment 파일 키 resolve 오류:', error)
-                      setWorkCommentResolvedFileKeys([])
-                    })
-                } else {
-                  setWorkCommentResolvedFileKeys([])
-                }
+          setWorkForm({
+            title: task.title || "",
+            content: mainTaskContent,
+            priority: task.priority || "medium",
+          })
+          setWorkTaskId(task.id)
+          setWorkTaskIsSubtask(task.is_subtask || false)
+          setIsWorkAreaReadOnly(true)
 
-                // contentEditable에 내용 설정
-                setTimeout(() => {
-                  const editor = document.getElementById('work-content')
-                  if (editor && mainTaskContent) {
-                    editor.innerHTML = mainTaskContent
-                  }
-                  
-                  // comment 에디터에 내용 설정
-                  const commentEditor = document.getElementById('work-comment-content')
-                  if (commentEditor) {
-                    // subtask인 경우: subtask의 content를 표시
-                    // main task인 경우: comment 컬럼 내용 표시
-                    let contentToShow = ""
-                    if (task.is_subtask) {
-                      contentToShow = task.content || ""
-                    } else {
-                      const commentText = (task.comment as string) || ""
-                      contentToShow = commentText.startsWith('\n') ? commentText.substring(1) : commentText
-                    }
-                    const commentEditorEl = document.getElementById('work-comment-content')
-                    if (commentEditorEl) commentEditorEl.innerHTML = contentToShow
-                    setWorkCommentContent(contentToShow)
-                  }
-                }, 0)
+          if (mainTaskFileKeys.length > 0) {
+            fetch("/api/storage/resolve-file-keys", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({ fileKeys: mainTaskFileKeys }),
+            })
+              .then((r) => r.json())
+              .then((data) => setWorkResolvedFileKeys(data.resolvedKeys || []))
+              .catch(() => setWorkResolvedFileKeys([]))
+          } else {
+            setWorkResolvedFileKeys([])
+          }
 
-                // Dialog 닫기
-                setSelectedTask(null)
-                setResolvedFileKeys([])
-              }}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+          if (task.comment_file_keys?.length) {
+            fetch("/api/storage/resolve-file-keys", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({ fileKeys: task.comment_file_keys }),
+            })
+              .then((r) => r.json())
+              .then((data) => setWorkCommentResolvedFileKeys(data.resolvedKeys || []))
+              .catch(() => setWorkCommentResolvedFileKeys([]))
+          } else {
+            setWorkCommentResolvedFileKeys([])
+          }
+
+          setTimeout(() => {
+            const editor = document.getElementById("work-content")
+            if (editor && mainTaskContent) editor.innerHTML = mainTaskContent
+            const commentEditorEl = document.getElementById("work-comment-content")
+            if (commentEditorEl) {
+              let contentToShow = ""
+              if (task.is_subtask) {
+                contentToShow = task.content || ""
+              } else {
+                const commentText = (task.comment ?? "").toString()
+                contentToShow = commentText.startsWith("\n") ? commentText.substring(1) : commentText
+              }
+              commentEditorEl.innerHTML = contentToShow
+              setWorkCommentContent(contentToShow)
+            }
+          }, 0)
+          setSelectedTask(null)
+          setResolvedFileKeys([])
+        }}
+      />
     </div>
-  )
-}
-
-interface TaskDialogContentProps {
-  task: Task
-  resolvedFileKeys: ResolvedFileKey[]
-  setResolvedFileKeys: React.Dispatch<React.SetStateAction<ResolvedFileKey[]>>
-  getStatusIcon: (status: Task['status']) => React.ReactElement | null
-  getPriorityColor: (priority: Task['priority']) => string
-  getStatusLabel: (status: Task['status'], task?: Task) => string
-  toast: ReturnType<typeof useToast>['toast']
-  onTaskUpdate: () => void
-  finalizedTaskIds: Set<string>
-  setFinalizedTaskIds: React.Dispatch<React.SetStateAction<Set<string>>>
-  userRole?: string | null
-  onEditTask?: (task: Task) => void
-}
-
-function TaskDialogContent({
-  task,
-  resolvedFileKeys,
-  setResolvedFileKeys,
-  getStatusIcon,
-  getPriorityColor,
-  getStatusLabel,
-  toast,
-  onTaskUpdate,
-  finalizedTaskIds,
-  setFinalizedTaskIds,
-  userRole: propUserRole,
-  onEditTask
-}: TaskDialogContentProps) {
-  // comment 컬럼에서 첫 줄 개행 제거하여 표시
-  const existingComment = task.comment ? (task.comment.startsWith('\n') ? task.comment.substring(1) : task.comment) : ''
-  const [comment, setComment] = useState(existingComment)
-  const [isSavingComment, setIsSavingComment] = useState(false)
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
-  const [isDeleting, setIsDeleting] = useState(false)
-  const [showDeleteTaskDialog, setShowDeleteTaskDialog] = useState(false)
-  const [isDeletingTask, setIsDeletingTask] = useState(false)
-  const [user, setUser] = useState<any>(null)
-  const [userRole, setUserRole] = useState<string | null>(propUserRole || null)
-  const [commentResolvedFileKeys, setCommentResolvedFileKeys] = useState<ResolvedFileKey[]>([])
-  const [isDownloading, setIsDownloading] = useState(false)
-  const [downloadProgress, setDownloadProgress] = useState(0)
-  const [downloadingFileName, setDownloadingFileName] = useState("")
-
-  const handleDownloadWithProgress = async (s3Key: string, name?: string) => {
-    const fileName = name || 
-      (typeof s3Key === 'string' ? s3Key.split("/").pop() : null) || 
-      "download"
-    setIsDownloading(true)
-    setDownloadingFileName(fileName)
-    setDownloadProgress(0)
-    try {
-      await downloadWithProgress({
-        url: `/api/storage/download?path=${encodeURIComponent(s3Key)}`,
-        fileName,
-        withCredentials: true,
-        onProgress: (p) => setDownloadProgress(p.percent),
-      })
-    } catch (error: any) {
-      toast({
-        title: "다운로드 실패",
-        description: error?.message || "다운로드 중 오류가 발생했습니다.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsDownloading(false)
-      setDownloadingFileName("")
-      setDownloadProgress(0)
-    }
-  }
-
-  // Worklist/Progress 공통 댓글(누적) - task_comments 기반
-  const [threadComments, setThreadComments] = useState<Array<{ id: string; content: string; created_at: string; user_id: string; full_name: string | null }>>([])
-  const [newThreadComment, setNewThreadComment] = useState("")
-  const [isPostingThreadComment, setIsPostingThreadComment] = useState(false)
-  const [meName, setMeName] = useState<string>("")
-
-  // propUserRole이 변경되면 업데이트
-  useEffect(() => {
-    if (propUserRole !== undefined) {
-      setUserRole(propUserRole)
-    }
-  }, [propUserRole])
-
-  useEffect(() => {
-    const loadUser = async () => {
-      try {
-        const response = await fetch("/api/auth/me", { credentials: "include" })
-        if (!response.ok) return
-        const me = await response.json()
-        setUser(me)
-        setMeName(me.full_name || me.email || "")
-        if (!propUserRole) {
-          setUserRole(me.role || null)
-        }
-      } catch (error) {
-        console.error('사용자 로드 오류:', error)
-      }
-    }
-    loadUser()
-  }, [propUserRole])
-
-  // task 댓글(누적) 로드 (Worklist와 동일)
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await fetch(`/api/tasks/${task.id}/comments`, { credentials: "include" })
-        if (!res.ok) return
-        const data = await res.json()
-        setThreadComments(Array.isArray(data.comments) ? data.comments : [])
-      } catch {
-        // ignore
-      }
-    }
-    load()
-  }, [task.id])
-
-  const handlePostThreadComment = async () => {
-    const content = newThreadComment.trim()
-    if (!content) return
-    setIsPostingThreadComment(true)
-    try {
-      const res = await fetch(`/api/tasks/${task.id}/comments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ content }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.error || "댓글 저장 실패")
-      }
-      setNewThreadComment("")
-      const listRes = await fetch(`/api/tasks/${task.id}/comments`, { credentials: "include" })
-      if (listRes.ok) {
-        const data = await listRes.json()
-        setThreadComments(Array.isArray(data.comments) ? data.comments : [])
-      }
-    } catch (e: any) {
-      toast({
-        title: "댓글 작성 실패",
-        description: e?.message || "댓글을 저장하는 중 오류가 발생했습니다.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsPostingThreadComment(false)
-    }
-  }
-
-  const handleDeleteThreadComment = async (commentId: string) => {
-    const ok = confirm("이 댓글을 삭제할까요?")
-    if (!ok) return
-    try {
-      const res = await fetch(`/api/tasks/${task.id}/comments?commentId=${encodeURIComponent(commentId)}`, {
-        method: "DELETE",
-        credentials: "include",
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.error || "댓글 삭제 실패")
-      }
-      const listRes = await fetch(`/api/tasks/${task.id}/comments`, { credentials: "include" })
-      if (listRes.ok) {
-        const data = await listRes.json()
-        setThreadComments(Array.isArray(data.comments) ? data.comments : [])
-      }
-    } catch (e: any) {
-      toast({
-        title: "댓글 삭제 실패",
-        description: e?.message || "댓글을 삭제하는 중 오류가 발생했습니다.",
-        variant: "destructive",
-      })
-    }
-  }
-
-  // Dialog가 열릴 때 file_keys를 resolve
-  useEffect(() => {
-    if (task.file_keys && task.file_keys.length > 0 && resolvedFileKeys.length === 0) {
-      const resolveFileKeys = async () => {
-        try {
-          const response = await fetch('/api/storage/resolve-file-keys', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-            body: JSON.stringify({ fileKeys: task.file_keys }),
-          })
-          if (response.ok) {
-            const data = await response.json()
-            setResolvedFileKeys(data.resolvedKeys || [])
-          }
-        } catch (error) {
-          console.error('파일 키 resolve 오류:', error)
-        }
-      }
-      resolveFileKeys()
-    }
-  }, [task.file_keys, resolvedFileKeys.length, setResolvedFileKeys])
-
-  // Dialog가 열릴 때 comment_file_keys를 resolve
-  useEffect(() => {
-    if (task.comment_file_keys && task.comment_file_keys.length > 0 && commentResolvedFileKeys.length === 0) {
-      const resolveCommentFileKeys = async () => {
-        try {
-          const response = await fetch('/api/storage/resolve-file-keys', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-            body: JSON.stringify({ fileKeys: task.comment_file_keys }),
-          })
-          if (response.ok) {
-            const data = await response.json()
-            setCommentResolvedFileKeys(data.resolvedKeys || [])
-          }
-        } catch (error) {
-          console.error('comment 파일 키 resolve 오류:', error)
-        }
-      }
-      resolveCommentFileKeys()
-    }
-  }, [task.comment_file_keys, commentResolvedFileKeys.length])
-
-  const handleSaveComment = async () => {
-    setIsSavingComment(true)
-    try {
-      // comment 컬럼에 저장 (첫 줄에 개행 포함)
-      const formattedComment = comment.trim() ? `\n${comment.trim()}` : null
-
-      const response = await fetch(`/api/tasks/${task.id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({ comment: formattedComment }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || '댓글 저장 실패')
-      }
-
-      toast({
-        title: '성공',
-        description: '댓글이 저장되었습니다',
-      })
-      onTaskUpdate()
-    } catch (error: any) {
-      toast({
-        title: '오류',
-        description: error.message || '댓글 저장에 실패했습니다',
-        variant: 'destructive',
-      })
-    } finally {
-      setIsSavingComment(false)
-    }
-  }
-
-  const handleDeleteTask = async () => {
-    setIsDeleting(true)
-    try {
-      // comment 컬럼에 저장 (첫 줄에 개행 포함)
-      const formattedComment = comment.trim() ? `\n${comment.trim()}` : null
-
-      // comment 업데이트 및 status를 completed로 변경
-      // status가 completed로 변경되면 API에서 자동으로 cases로 이동
-      const updateResponse = await fetch(`/api/tasks/${task.id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({ 
-          comment: formattedComment,
-          status: 'completed'
-        }),
-      })
-
-      if (!updateResponse.ok) {
-        const errorData = await updateResponse.json()
-        throw new Error(errorData.error || '작업 완료 처리 실패')
-      }
-
-      // Report 생성
-      const reportResponse = await fetch(`/api/tasks/${task.id}/create-report`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-      })
-
-      if (!reportResponse.ok) {
-        let errorMessage = 'Report 생성 실패'
-        try {
-          const errorData = await reportResponse.json()
-          errorMessage = errorData.error || errorData.message || errorMessage
-          console.error('[Progress] Report 생성 실패:', errorData)
-        } catch (parseError) {
-          const errorText = await reportResponse.text()
-          console.error('[Progress] Report 생성 실패 (응답 파싱 오류):', errorText)
-          errorMessage = errorText || errorMessage
-        }
-        // Report 생성 실패해도 작업 완료는 유지 (조용히 실패)
-        console.warn('[Progress] Report 생성은 실패했지만 작업 완료는 정상 처리되었습니다:', errorMessage)
-      }
-
-      toast({
-        title: '성공',
-        description: '작업이 완료되었습니다. Reports에서 확인할 수 있습니다.',
-      })
-      setShowDeleteDialog(false)
-      onTaskUpdate()
-    } catch (error: any) {
-      toast({
-        title: '오류',
-        description: error.message || '작업 완료 처리에 실패했습니다',
-        variant: 'destructive',
-      })
-    } finally {
-      setIsDeleting(false)
-    }
-  }
-
-  const handleDeleteTaskFromDB = async () => {
-    setIsDeletingTask(true)
-    try {
-      const response = await fetch(`/api/tasks/${task.id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Task 삭제 실패')
-      }
-
-      toast({
-        title: '성공',
-        description: 'Task가 삭제되었습니다',
-      })
-      setShowDeleteTaskDialog(false)
-      onTaskUpdate()
-    } catch (error: any) {
-      toast({
-        title: '오류',
-        description: error.message || 'Task 삭제에 실패했습니다',
-        variant: 'destructive',
-      })
-    } finally {
-      setIsDeletingTask(false)
-    }
-  }
-
-  return (
-    <>
-      <DialogHeader className="pr-8 pb-3">
-        <div className="flex items-center gap-2 wrap-break-word word-break break-all">
-          {getStatusIcon(task.status)}
-          <DialogTitle className="min-w-0">
-            {task.title}
-            {task.subtitle && task.is_subtask && (
-              <span className="text-muted-foreground text-sm ml-2">({task.subtitle})</span>
-            )}
-          </DialogTitle>
-          {userRole !== 'client' && (
-            <Button
-              onClick={() => setShowDeleteTaskDialog(true)}
-              variant="ghost"
-              size="sm"
-              className="h-6 px-2 ml-auto shrink-0 cursor-pointer"
-            >
-              <Trash2 className="h-3 w-3" />
-            </Button>
-          )}
-        </div>
-      </DialogHeader>
-      <div className="flex items-center justify-between gap-4 pb-4 border-b">
-        <div className="flex items-center gap-2 flex-wrap">
-          <Badge className={getPriorityColor(task.priority)}>
-            {task.priority === 'urgent' ? '긴급' : 
-             task.priority === 'high' ? '높음' : 
-             task.priority === 'medium' ? '보통' : '낮음'}
-          </Badge>
-          <Badge variant="outline">
-            {getStatusLabel(task.status, task)}
-          </Badge>
-          <span className="text-xs text-muted-foreground">
-            작업 요청자: <span className="font-medium text-foreground">{task.assigned_by_name || task.assigned_by_email}</span>
-          </span>
-          <span className="text-xs text-muted-foreground">
-            {task.due_date
-              ? `시작일 ${formatDateShort(task.created_at)} ~ 마감일 ${formatDateShort(task.due_date)}`
-              : `시작일 ${formatDateShort(task.created_at)}`}
-          </span>
-        </div>
-      </div>
-      <div className="space-y-4 mt-4">
-        {isDownloading && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span className="truncate">다운로드 중: {downloadingFileName}</span>
-              <span className="shrink-0">{downloadProgress}%</span>
-            </div>
-            <Progress value={downloadProgress} />
-          </div>
-        )}
-        <div className="space-y-3 text-sm">
-          {(userRole !== 'client' || task.completed_at) && (
-            <div className="grid grid-cols-2 gap-4">
-              {userRole !== 'client' && (
-                <div>
-                  <p className="text-muted-foreground mb-1">마감일</p>
-                  <DueDateEditor 
-                    taskId={task.id}
-                    dueDate={task.due_date}
-                    onUpdate={onTaskUpdate}
-                    userRole={userRole}
-                  />
-                </div>
-              )}
-              {task.completed_at && (
-                <div>
-                  <p className="text-muted-foreground">종료일</p>
-                  <p className="font-medium">{formatDateShort(task.completed_at)}</p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        {task.content && (
-          <div>
-            <p className="text-muted-foreground mb-2">요청자 내용</p>
-            <div 
-              ref={(el) => {
-                if (el) {
-                  // 테이블 셀의 contentEditable을 false로 설정
-                  const tables = el.querySelectorAll('table')
-                  tables.forEach((table) => {
-                    const cells = table.querySelectorAll('td, th')
-                    cells.forEach((cell) => {
-                      (cell as HTMLElement).contentEditable = 'false'
-                    })
-                  })
-                }
-              }}
-              className="text-sm bg-muted/50 p-3 rounded-md border border-border/50 wrap-break-word word-break break-all overflow-x-auto prose prose-sm max-w-none"
-              dangerouslySetInnerHTML={{ __html: sanitizeHtml(task.content) }}
-              style={{
-                maxHeight: '400px',
-                overflowY: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word'
-              }}
-            />
-            <style jsx global>{`
-              .prose table {
-                border-collapse: collapse;
-                width: 100%;
-                margin: 10px 0;
-                border: 2px solid #6b7280; /* Darker border */
-              }
-              .prose table td,
-              .prose table th {
-                border: 2px solid #6b7280; /* Darker border */
-                padding: 8px;
-                position: relative;
-                cursor: default !important; /* Prevent cursor change */
-              }
-              .prose table td[contenteditable="true"],
-              .prose table th[contenteditable="true"] {
-                pointer-events: none; /* Prevent editing */
-                user-select: none; /* Prevent selection */
-                cursor: default !important;
-              }
-              .prose table td *,
-              .prose table th * {
-                cursor: default !important; /* Ensure children also have default cursor */
-                pointer-events: none; /* Ensure children are not interactive */
-              }
-              .prose hr {
-                border: none;
-                border-top: 2px solid #6b7280;
-                margin: 10px 0;
-              }
-            `}</style>
-          </div>
-        )}
-        {comment && (
-            <div>
-            <p className="text-muted-foreground mb-2">담당자 내용</p>
-            <div 
-              ref={(el) => {
-                if (el) {
-                  // 테이블 셀의 contentEditable을 false로 설정
-                  const tables = el.querySelectorAll('table')
-                  tables.forEach((table) => {
-                    const cells = table.querySelectorAll('td, th')
-                    cells.forEach((cell) => {
-                      (cell as HTMLElement).contentEditable = 'false'
-                    })
-                  })
-                }
-              }}
-              className="text-sm bg-muted/50 p-3 rounded-md border border-border/50 wrap-break-word word-break break-all overflow-x-auto prose prose-sm max-w-none"
-              dangerouslySetInnerHTML={{ __html: sanitizeHtml(comment) }}
-              style={{
-                maxHeight: '400px',
-                overflowY: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word'
-              }}
-            />
-            <style jsx global>{`
-              .prose table {
-                border-collapse: collapse;
-                width: 100%;
-                margin: 10px 0;
-                border: 2px solid #6b7280;
-              }
-              .prose table td,
-              .prose table th {
-                border: 2px solid #6b7280;
-                padding: 8px;
-                position: relative;
-                cursor: default !important;
-              }
-              .prose table td[contenteditable="true"],
-              .prose table th[contenteditable="true"] {
-                pointer-events: none;
-                user-select: none;
-                cursor: default !important;
-              }
-              .prose table td *,
-              .prose table th * {
-                cursor: default !important;
-                pointer-events: none;
-              }
-              .prose hr {
-                border: none;
-                border-top: 2px solid #9ca3af;
-                margin: 10px 0;
-              }
-            `}</style>
-          </div>
-        )}
-        {task.file_keys && task.file_keys.length > 0 && (
-          <div>
-            <p className="text-muted-foreground mb-2">요청자 첨부파일</p>
-            <div className="space-y-2 text-sm">
-              {resolvedFileKeys.length > 0 ? (
-                resolvedFileKeys.map((resolved, index) => {
-                  const expiry = calculateFileExpiry(resolved.uploadedAt || task.created_at)
-                  return (
-                    <div key={index} className="flex items-center gap-2">
-                      <FileText className="h-4 w-4 shrink-0" />
-                      <button
-                        type="button"
-                        className="text-blue-600 hover:text-blue-800 underline text-left cursor-pointer"
-                        onClick={() => handleDownloadWithProgress(resolved.s3Key, resolved.fileName)}
-                      >
-                        {resolved.fileName}
-                      </button>
-                      <span className={`text-xs shrink-0 ${expiry.isExpired ? 'text-red-500' : expiry.daysRemaining <= 2 ? 'text-orange-500' : 'text-muted-foreground'}`}>
-                        ({expiry.expiryText})
-                      </span>
-                    </div>
-                  )
-                })
-              ) : (
-                <div className="text-muted-foreground">파일 정보를 불러오는 중...</div>
-              )}
-            </div>
-          </div>
-        )}
-        {task.comment_file_keys && task.comment_file_keys.length > 0 && (() => {
-          // 담당자(assigned_to)가 올린 첨부파일만 표시
-          const assigneeFileKeys = commentResolvedFileKeys.filter(
-            (r) => r.userId === task.assigned_to
-          )
-          // 로딩 중이거나 담당자 파일이 있을 때만 섹션 표시
-          const showSection = commentResolvedFileKeys.length === 0 || assigneeFileKeys.length > 0
-          if (!showSection) return null
-          return (
-            <div>
-              <p className="text-muted-foreground mb-2">담당자 첨부파일</p>
-              <div className="space-y-2 text-sm">
-                {commentResolvedFileKeys.length === 0 ? (
-                  <div className="text-muted-foreground">파일 정보를 불러오는 중...</div>
-                ) : (
-                  assigneeFileKeys.map((resolved, index) => {
-                    const expiry = calculateFileExpiry(resolved.uploadedAt || task.updated_at)
-                    return (
-                      <div
-                        key={index}
-                        role="button"
-                        tabIndex={0}
-                        className="flex items-center gap-2 cursor-pointer"
-                        onClick={() => handleDownloadWithProgress(resolved.s3Key, resolved.fileName)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleDownloadWithProgress(resolved.s3Key, resolved.fileName)}
-                      >
-                        <FileText className="h-4 w-4 shrink-0" />
-                        <span
-                          className="max-w-[200px] truncate text-blue-600 hover:text-blue-800 underline text-left cursor-pointer"
-                          title={resolved.fileName}
-                        >
-                          {resolved.fileName}
-                        </span>
-                        <span className={`text-xs shrink-0 ${expiry.isExpired ? 'text-red-500' : expiry.daysRemaining <= 2 ? 'text-orange-500' : 'text-muted-foreground'}`}>
-                          ({expiry.expiryText})
-                        </span>
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-            </div>
-          )
-        })()}
-        {/* 댓글 - 말풍선 스타일 (staff와 동일) */}
-        <div className="pt-4 border-t">
-          <p className="text-muted-foreground font-medium mb-3">댓글</p>
-          <div className="max-h-[320px] overflow-y-auto p-1 space-y-4 rounded-lg">
-            {threadComments.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">아직 댓글이 없습니다.</p>
-            ) : (
-              threadComments.map((c) => {
-                const canDelete = (user?.id && c.user_id === user.id) || userRole === "admin"
-                const isMe = user?.id && c.user_id === user.id
-                const userOrder = Array.from(new Set(threadComments.map((x) => x.user_id)))
-                const userIndex = userOrder.indexOf(c.user_id)
-                const bubbleColors = [
-                  "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200",
-                  "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200",
-                  "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200",
-                  "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200",
-                  "bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-200",
-                  "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-200",
-                ]
-                const bubbleClass = isMe
-                  ? "bg-primary text-primary-foreground"
-                  : bubbleColors[userIndex % bubbleColors.length]
-                return (
-                  <div
-                    key={c.id}
-                    className={`flex ${isMe ? "justify-end" : "justify-start"}`}
-                  >
-                    <div className={`flex flex-col max-w-[85%] sm:max-w-[75%] ${isMe ? "items-end" : "items-start"}`}>
-                      <div className={`flex items-center gap-2 px-2 mb-1 ${isMe ? "flex-row-reverse" : ""}`}>
-                        <span className="text-[11px] font-medium text-foreground/90">
-                          {c.full_name ?? "사용자"}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground">
-                          {new Date(c.created_at).toLocaleString("ko-KR", {
-                            year: "numeric",
-                            month: "numeric",
-                            day: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </span>
-                      </div>
-                      <div className={`rounded-2xl px-4 py-3 shadow-md ${bubbleClass}`}>
-                        <div className="flex items-end gap-2">
-                          <div className="text-sm wrap-break-word word-break break-all text-inherit [&_p]:my-0 [&_pre]:whitespace-pre-wrap [&_a]:underline">
-                            <SafeHtml
-                              html={c.content || ""}
-                              className="prose prose-sm max-w-none prose-p:my-0 [&_table]:w-max [&_pre]:whitespace-pre-wrap [&_code]:break-all prose-inherit"
-                            />
-                          </div>
-                          {canDelete && (
-                            <div className="shrink-0 self-end">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6 text-current opacity-80 hover:opacity-100 hover:bg-black/10"
-                                onClick={() => handleDeleteThreadComment(c.id)}
-                                title="댓글 삭제"
-                              >
-                                <X className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )
-              })
-            )}
-          </div>
-        </div>
-      </div>
-      <div className="flex justify-end mt-4 pt-4 border-t">
-        {onEditTask && task.status !== 'awaiting_completion' && (
-          <Button
-            onClick={() => {
-              onEditTask(task)
-            }}
-            variant="outline"
-            className="gap-2 cursor-pointer"
-          >
-            <Edit className="h-4 w-4" />
-            작성
-          </Button>
-        )}
-        {task.status === 'awaiting_completion' && (userRole === 'admin' || userRole === 'staff') && (
-          <Button
-            onClick={() => setShowDeleteDialog(true)}
-            variant="default"
-            className="gap-2 cursor-pointer"
-          >
-            <Check className="h-4 w-4" />
-            작업 끝내기
-          </Button>
-        )}
-      </div>
-      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>작업을 끝내시겠습니까?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {comment.trim() && comment !== existingComment
-                ? '작성하신 댓글이 저장되고 작업이 완료 처리되어 Reports로 이동합니다. 이 작업은 되돌릴 수 없습니다.'
-                : '이 작업을 완료 처리하고 Reports로 이동시킵니다. 이 작업은 되돌릴 수 없습니다.'}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>취소</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteTask}
-              disabled={isDeleting}
-              className="bg-green-600 hover:bg-green-700"
-            >
-              {isDeleting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  처리 중...
-                </>
-              ) : (
-                '확인'
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <AlertDialog open={showDeleteTaskDialog} onOpenChange={setShowDeleteTaskDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Task를 제거하시겠습니까?</AlertDialogTitle>
-            <AlertDialogDescription>
-              이 작업을 완전히 삭제합니다. 이 작업은 되돌릴 수 없으며, 데이터베이스에서 영구적으로 제거됩니다.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction
-              onClick={handleDeleteTaskFromDB}
-              disabled={isDeletingTask}
-              className="bg-red-600 hover:bg-red-700"
-            >
-              {isDeletingTask ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  삭제 중...
-                </>
-              ) : (
-                '제거'
-              )}
-            </AlertDialogAction>
-            <AlertDialogCancel disabled={isDeletingTask}>취소</AlertDialogCancel>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
   )
 }
 

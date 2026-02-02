@@ -10,8 +10,8 @@ import { CalendarDay } from "@/components/calendar/CalendarDay"
 import { TaskStatusBadge } from "@/components/task/TaskBadge"
 import { getTaskStatusColor, isTaskOverdue, getPriorityBorderColor, getStatusBorderColor } from "@/lib/utils/taskHelpers"
 
-// 동적 import: TaskDialog는 사용자가 태스크 클릭 시에만 필요 (초기 번들 크기 감소)
-const TaskDialog = lazy(() => import("@/components/task/TaskDialog").then(mod => ({ default: mod.TaskDialog })))
+// 동적 import: TaskDetailDialog는 사용자가 태스크 클릭 시에만 필요 (progress와 동일 UI/기능)
+const TaskDetailDialog = lazy(() => import("@/components/task/TaskDetailDialog").then(mod => ({ default: mod.TaskDetailDialog })))
 
 export default function ClientDashboardPage() {
   const {
@@ -179,10 +179,11 @@ export default function ClientDashboardPage() {
       </Card>
 
       <Suspense fallback={null}>
-        <TaskDialog
+        <TaskDetailDialog
           task={selectedTask}
           open={!!selectedTask}
           onOpenChange={(open) => !open && setSelectedTask(null)}
+          onTaskUpdate={loadCalendarData}
         />
       </Suspense>
     </div>
