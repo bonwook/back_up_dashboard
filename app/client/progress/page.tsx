@@ -2015,8 +2015,10 @@ export default function ClientProgressPage() {
                           description: "댓글이 저장되었습니다.",
                         })
                         
-                        // 작업 목록 새로고침
-                        loadTasks()
+                        // 저장된 댓글 내용 유지용 (loadTasks 리렌더 이후 DOM 복원에 사용)
+                        const savedCommentContent = commentContent ?? ""
+                        setWorkCommentContent(savedCommentContent)
+                        setWorkCommentFiles([])
                         
                         // 새로 업로드한 파일을 workCommentResolvedFileKeys에 추가 (현재 시간을 uploadedAt으로 설정)
                         if (fileKeys.length > 0) {
@@ -2035,17 +2037,14 @@ export default function ClientProgressPage() {
                           setWorkCommentResolvedFileKeys([...workCommentResolvedFileKeys, ...newResolvedKeys])
                         }
                         
-                        // 댓글 초기화 (저장 후에는 초기화하지 않음 - 다시 불러올 때 복원되므로)
-                        // setWorkCommentContent("")
-                        // setWorkCommentFiles([])
-                        // setWorkCommentResolvedFileKeys([])
-                        // const commentEditorEl = document.getElementById('work-comment-content')
-                        // if (commentEditorEl) {
-                        //   commentEditorEl.innerHTML = ""
-                        // }
-                        
-                        // 새로 업로드한 파일만 초기화
-                        setWorkCommentFiles([])
+                        // 작업 목록 새로고침 후, 리렌더가 끝난 다음에 '내용' DOM에 저장된 댓글 다시 넣기
+                        await loadTasks()
+                        setTimeout(() => {
+                          const commentEditorEl = document.getElementById('work-comment-content')
+                          if (commentEditorEl) {
+                            commentEditorEl.innerHTML = savedCommentContent
+                          }
+                        }, 0)
                       } catch (error) {
                         console.error("댓글 저장 오류:", error)
                         toast({
