@@ -6,6 +6,7 @@ import { useCalendar } from "@/lib/hooks/useCalendar"
 import { CalendarHeader } from "./calendar/CalendarHeader"
 import { CalendarDay } from "./calendar/CalendarDay"
 import { CalendarTaskItem } from "./calendar/CalendarTaskItem"
+import { CalendarAssignedToMeToggle } from "./calendar/CalendarAssignedToMeToggle"
 import { TaskDialog } from "./task/TaskDialog"
 
 export function AdminCalendar() {
@@ -22,6 +23,7 @@ export function AdminCalendar() {
   } = useCalendar()
 
   const [selectedTask, setSelectedTask] = useState<any>(null)
+  const [showOnlyAssignedToMe, setShowOnlyAssignedToMe] = useState(false)
 
   // 유틸리티 함수들
   const getDueRangeKey = useCallback((task: any) => {
@@ -118,7 +120,14 @@ export function AdminCalendar() {
     <>
       <Card>
         <CardHeader>
-          <CalendarHeader date={calendarDate} onMonthChange={changeMonth} />
+          <div className="w-full">
+            <CalendarHeader date={calendarDate} onMonthChange={changeMonth}>
+              <CalendarAssignedToMeToggle
+                checked={showOnlyAssignedToMe}
+                onCheckedChange={setShowOnlyAssignedToMe}
+              />
+            </CalendarHeader>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="w-full">
@@ -147,23 +156,24 @@ export function AdminCalendar() {
                     holiday={holiday}
                   >
                     <div className="flex-1 flex flex-col items-center gap-1 overflow-y-auto">
-                      {filterTasks(tasks.assigned, dayStr).map((task: any, taskIndex: number) => (
-                        <CalendarTaskItem
-                          key={`assigned-${task.id}-${taskIndex}`}
-                          task={task}
-                          taskIndex={taskIndex}
-                          taskType="assigned"
-                          dayStr={dayStr}
-                          formatCalendarDate={formatCalendarDate}
-                          getDueRangeKey={getDueRangeKey}
-                          getDueRangeColor={getDueRangeColor}
-                          getPriorityBorderColor={getPriorityBorderColor}
-                          rgbWithAlpha={rgbWithAlpha}
-                          getDisplayTitle={getDisplayTitle}
-                          TASK_WIDTH={TASK_WIDTH}
-                          onClick={handleTaskClick}
-                        />
-                      ))}
+                      {!showOnlyAssignedToMe &&
+                        filterTasks(tasks.assigned, dayStr).map((task: any, taskIndex: number) => (
+                          <CalendarTaskItem
+                            key={`assigned-${task.id}-${taskIndex}`}
+                            task={task}
+                            taskIndex={taskIndex}
+                            taskType="assigned"
+                            dayStr={dayStr}
+                            formatCalendarDate={formatCalendarDate}
+                            getDueRangeKey={getDueRangeKey}
+                            getDueRangeColor={getDueRangeColor}
+                            getPriorityBorderColor={getPriorityBorderColor}
+                            rgbWithAlpha={rgbWithAlpha}
+                            getDisplayTitle={getDisplayTitle}
+                            TASK_WIDTH={TASK_WIDTH}
+                            onClick={handleTaskClick}
+                          />
+                        ))}
                       
                       {filterTasks(tasks.received, dayStr).map((task: any, taskIndex: number) => (
                         <CalendarTaskItem

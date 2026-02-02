@@ -102,7 +102,9 @@ export default function ClientDashboardPage() {
       {/* 하단: 캘린더 */}
       <Card>
         <div className="p-6">
-          <CalendarHeader date={calendarDate} onMonthChange={changeMonth} />
+          <div className="mb-4">
+            <CalendarHeader date={calendarDate} onMonthChange={changeMonth} />
+          </div>
 
           {/* 요일 헤더 */}
           <div className="grid grid-cols-7 gap-1 mb-2 mt-6">
@@ -131,26 +133,26 @@ export default function ClientDashboardPage() {
                   holiday={holiday}
                 >
                   <div className="flex-1 flex flex-col gap-1 overflow-y-auto">
-                    {/* 등록한 업무 (assign) */}
+                    {/* 등록한 업무 (assigned) */}
                     {filterTasks(tasks.assigned, dayStr).map((task: any, taskIndex: number) => {
-                      const overdue = isTaskOverdue(task)
-                      const statusColor = getTaskStatusColor(task.status, overdue)
-                      
-                      return (
-                        <div
-                          key={`assigned-${task.id}-${taskIndex}`}
-                          className={`text-[10px] px-2 py-1.5 rounded border-2 ${statusColor} truncate leading-tight font-medium shadow-sm shrink-0 cursor-pointer transition-colors w-[64%] mx-auto`}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleTaskClick(task, 'assigned')
-                          }}
-                        >
-                          {task.title}
-                        </div>
-                      )
-                    })}
+                        const overdue = isTaskOverdue(task)
+                        const statusColor = getTaskStatusColor(task.status, overdue)
+                        
+                        return (
+                          <div
+                            key={`assigned-${task.id}-${taskIndex}`}
+                            className={`text-[10px] px-2 py-1.5 rounded border-2 ${statusColor} truncate leading-tight font-medium shadow-sm shrink-0 cursor-pointer transition-colors w-[64%] mx-auto`}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleTaskClick(task, 'assigned')
+                            }}
+                          >
+                            {task.title}
+                          </div>
+                        )
+                      })}
                     
-                    {/* 지정받은 업무 (received) */}
+                    {/* 지정받은 업무 (received) - 단일/다중 할당 모두 포함 */}
                     {filterTasks(tasks.received, dayStr).map((task: any, taskIndex: number) => {
                       const overdue = isTaskOverdue(task)
                       const statusColor = getTaskStatusColor(task.status, overdue)

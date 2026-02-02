@@ -11,8 +11,9 @@ interface CalendarHeaderProps {
 export function CalendarHeader({ date, onMonthChange, children }: CalendarHeaderProps) {
   return (
     <div className="flex items-center justify-between">
-      <div>
+      <div className="flex flex-col gap-1">
         <h2 className="text-lg font-semibold">Calendar</h2>
+        {children}
       </div>
       <div className="flex items-center gap-2">
         <Button
@@ -35,7 +36,6 @@ export function CalendarHeader({ date, onMonthChange, children }: CalendarHeader
           <ChevronRight className="h-4 w-4" />
         </Button>
       </div>
-      {children}
     </div>
   )
 }

@@ -1,13 +1,25 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 
-// AWS SDK는 자동으로 다음 순서로 자격 증명을 찾습니다:
-// 1. 환경 변수 (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) - 로컬 환경에서 사용
-// 2. 자격 증명 파일 (~/.aws/credentials)
-// 3. IAM 역할 (EC2 인스턴스에 연결된 경우) - EC2 환경에서 사용
-const s3Client = new S3Client({
-  region: process.env.AWS_REGION,
-})
+// 로컬: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY 사용. 배포: IAM 역할 또는 동일 env 사용.
+function getS3ClientConfig() {
+  const region = process.env.AWS_REGION
+  const useEnvCredentials =
+    process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
+
+  if (useEnvCredentials) {
+    return {
+      region,
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+      },
+    }
+  }
+  return { region }
+}
+
+const s3Client = new S3Client(getS3ClientConfig())
 
 const BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME!
 

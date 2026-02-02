@@ -103,7 +103,8 @@ export async function GET(request: NextRequest) {
       `
       params = [userId, userId, userId, userId, userId, userId]
     } else {
-      // Client용: 모든 태스크 조회
+      // Client용: 모든 태스크 조회 (단일 할당 + 다중 할당 서브태스크 담당 포함)
+      // 3번째 UNION: 서브태스크로만 할당된 메인 태스크(다중 할당) — 메인 row에 본인이 없어도 서브태스크 담당이면 캘린더에 표시
       sql = `
         SELECT * FROM (
           SELECT
@@ -162,10 +163,41 @@ export async function GET(request: NextRequest) {
           LEFT JOIN profiles p_assigned_to ON ts.assigned_to = p_assigned_to.id
           LEFT JOIN profiles p_assigned_by ON ta.assigned_by = p_assigned_by.id
           WHERE ts.assigned_to = ?
+          
+          UNION ALL
+          
+          SELECT
+            ta.id,
+            ta.title,
+            ta.status,
+            ta.priority,
+            ta.assigned_by,
+            ta.assigned_to,
+            ta.content,
+            ta.file_keys,
+            ta.due_date,
+            ta.created_at,
+            ta.updated_at,
+            ta.completed_at,
+            (${TASK_DATETIME_SQL('ta')}) as task_datetime,
+            'received' as task_type,
+            p_assigned_to.full_name as assigned_to_name,
+            p_assigned_to.email as assigned_to_email,
+            p_assigned_by.full_name as assigned_by_name,
+            p_assigned_by.email as assigned_by_email,
+            FALSE as is_subtask,
+            NULL as parent_task_id,
+            NULL as subtitle
+          FROM task_assignments ta
+          LEFT JOIN profiles p_assigned_to ON ta.assigned_to = p_assigned_to.id
+          LEFT JOIN profiles p_assigned_by ON ta.assigned_by = p_assigned_by.id
+          WHERE ta.id IN (SELECT task_id FROM task_subtasks WHERE assigned_to = ?)
+            AND ta.assigned_by != ?
+            AND (ta.assigned_to IS NULL OR ta.assigned_to != ?)
         ) combined
         ORDER BY combined.task_datetime, combined.created_at DESC
       `
-      params = [userId, userId, userId, userId, userId]
+      params = [userId, userId, userId, userId, userId, userId, userId, userId]
     }
 
     const tasks = await query(sql, params)
