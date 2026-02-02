@@ -2488,7 +2488,7 @@ function TaskDialogContent({
             <div className="space-y-2 text-sm">
               {resolvedFileKeys.length > 0 ? (
                 resolvedFileKeys.map((resolved, index: number) => {
-                  const expiry = calculateFileExpiry(resolved.uploadedAt || task.created_at)
+                  const expiry = calculateFileExpiry(task.created_at)
                   return (
                     <div key={index} className="flex items-center gap-2">
                       <FileText className="h-4 w-4 shrink-0" />
@@ -2565,7 +2565,7 @@ function TaskDialogContent({
             <div className="space-y-2 text-sm">
               {commentResolvedFileKeys.length > 0 ? (
                 commentResolvedFileKeys.map((resolved, index: number) => {
-                  const expiry = calculateFileExpiry(resolved.uploadedAt || task.updated_at)
+                  const expiry = calculateFileExpiry(task.created_at)
                   return (
                     <div key={index} className="flex items-center gap-2">
                       <FileText className="h-4 w-4 shrink-0" />
