@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { ThemeProvider } from '@/components/theme-provider'
+import { ThemeToggle } from '@/components/theme-toggle'
 import './globals.css'
 
 const _geist = Geist({ subsets: ["latin"] });
@@ -29,6 +30,9 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className="font-sans antialiased">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+          <div className="fixed right-4 top-4 z-50">
+            <ThemeToggle />
+          </div>
           {children}
           <Analytics />
         </ThemeProvider>
