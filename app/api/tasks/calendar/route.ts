@@ -27,6 +27,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const year = searchParams.get("year")
     const month = searchParams.get("month") // 1-12
+    const assignedToMeOnly = searchParams.get("assignedToMeOnly") === "true"
 
     if (!year || !month) {
       return NextResponse.json({ error: "year and month are required" }, { status: 400 })
@@ -39,69 +40,165 @@ export async function GET(request: NextRequest) {
 
     // 모든 태스크 조회 (완료/미완료 모두)
     if (isStaff) {
-      // Staff용: 모든 태스크 조회
-      sql = `
-        SELECT * FROM (
-          SELECT
-            ta.id,
-            ta.title,
-            ta.status,
-            ta.priority,
-            ta.assigned_by,
-            ta.assigned_to,
-            ta.content,
-            ta.file_keys,
-            ta.due_date,
-            ta.created_at,
-            ta.updated_at,
-            ta.completed_at,
-            (${TASK_DATETIME_SQL('ta')}) as task_datetime,
-            CASE WHEN ta.assigned_by = ? THEN 'assigned' WHEN ta.assigned_to = ? THEN 'received' ELSE 'received' END as task_type,
-            p_assigned_to.full_name as assigned_to_name,
-            p_assigned_to.email as assigned_to_email,
-            p_assigned_by.full_name as assigned_by_name,
-            p_assigned_by.email as assigned_by_email,
-            FALSE as is_subtask,
-            NULL as parent_task_id,
-            NULL as subtitle
-          FROM task_assignments ta
-          LEFT JOIN profiles p_assigned_to ON ta.assigned_to = p_assigned_to.id
-          LEFT JOIN profiles p_assigned_by ON ta.assigned_by = p_assigned_by.id
-          WHERE (ta.assigned_by = ? OR ta.assigned_to = ?)
-          
-          UNION ALL
-          
-          SELECT
-            ts.id,
-            CONCAT(ta.title, ' - ', ts.subtitle) as title,
-            ts.status,
-            ta.priority,
-            ta.assigned_by,
-            ts.assigned_to,
-            ts.content,
-            ts.file_keys,
-            ta.due_date,
-            ts.created_at,
-            ts.updated_at,
-            ts.completed_at,
-            (${SUBTASK_DATETIME_SQL('ts', 'ta')}) as task_datetime,
-            'received' as task_type,
-            p_assigned_to.full_name as assigned_to_name,
-            p_assigned_to.email as assigned_to_email,
-            p_assigned_by.full_name as assigned_by_name,
-            p_assigned_by.email as assigned_by_email,
-            TRUE as is_subtask,
-            ts.task_id as parent_task_id,
-            ts.subtitle
-          FROM task_subtasks ts
-          INNER JOIN task_assignments ta ON ts.task_id = ta.id
-          LEFT JOIN profiles p_assigned_to ON ts.assigned_to = p_assigned_to.id
-          LEFT JOIN profiles p_assigned_by ON ta.assigned_by = p_assigned_by.id
-          WHERE (ta.assigned_by = ? OR ts.assigned_to = ?)
-        ) combined
-        ORDER BY combined.task_datetime, combined.created_at DESC
-      `
-      params = [userId, userId, userId, userId, userId, userId]
+      if (assignedToMeOnly) {
+        // Staff + 내 업무만: 본인 관련 태스크만 (단일 할당 + 공동할당 서브태스크 담당 포함)
+        // 3번째 UNION: 서브태스크로만 할당된 메인 태스크(공동할당) — 본인이 서브태스크 담당이면 캘린더에 표시
+        sql = `
+          SELECT * FROM (
+            SELECT
+              ta.id,
+              ta.title,
+              ta.status,
+              ta.priority,
+              ta.assigned_by,
+              ta.assigned_to,
+              ta.content,
+              ta.file_keys,
+              ta.due_date,
+              ta.created_at,
+              ta.updated_at,
+              ta.completed_at,
+              (${TASK_DATETIME_SQL('ta')}) as task_datetime,
+              CASE WHEN ta.assigned_by = ? THEN 'assigned' WHEN ta.assigned_to = ? THEN 'received' ELSE 'received' END as task_type,
+              p_assigned_to.full_name as assigned_to_name,
+              p_assigned_to.email as assigned_to_email,
+              p_assigned_by.full_name as assigned_by_name,
+              p_assigned_by.email as assigned_by_email,
+              FALSE as is_subtask,
+              NULL as parent_task_id,
+              NULL as subtitle
+            FROM task_assignments ta
+            LEFT JOIN profiles p_assigned_to ON ta.assigned_to = p_assigned_to.id
+            LEFT JOIN profiles p_assigned_by ON ta.assigned_by = p_assigned_by.id
+            WHERE (ta.assigned_by = ? OR ta.assigned_to = ?)
+            
+            UNION ALL
+            
+            SELECT
+              ts.id,
+              CONCAT(ta.title, ' - ', ts.subtitle) as title,
+              ts.status,
+              ta.priority,
+              ta.assigned_by,
+              ts.assigned_to,
+              ts.content,
+              ts.file_keys,
+              ta.due_date,
+              ts.created_at,
+              ts.updated_at,
+              ts.completed_at,
+              (${SUBTASK_DATETIME_SQL('ts', 'ta')}) as task_datetime,
+              'received' as task_type,
+              p_assigned_to.full_name as assigned_to_name,
+              p_assigned_to.email as assigned_to_email,
+              p_assigned_by.full_name as assigned_by_name,
+              p_assigned_by.email as assigned_by_email,
+              TRUE as is_subtask,
+              ts.task_id as parent_task_id,
+              ts.subtitle
+            FROM task_subtasks ts
+            INNER JOIN task_assignments ta ON ts.task_id = ta.id
+            LEFT JOIN profiles p_assigned_to ON ts.assigned_to = p_assigned_to.id
+            LEFT JOIN profiles p_assigned_by ON ta.assigned_by = p_assigned_by.id
+            WHERE (ta.assigned_by = ? OR ts.assigned_to = ?)
+            
+            UNION ALL
+            
+            SELECT
+              ta.id,
+              ta.title,
+              ta.status,
+              ta.priority,
+              ta.assigned_by,
+              ta.assigned_to,
+              ta.content,
+              ta.file_keys,
+              ta.due_date,
+              ta.created_at,
+              ta.updated_at,
+              ta.completed_at,
+              (${TASK_DATETIME_SQL('ta')}) as task_datetime,
+              'received' as task_type,
+              p_assigned_to.full_name as assigned_to_name,
+              p_assigned_to.email as assigned_to_email,
+              p_assigned_by.full_name as assigned_by_name,
+              p_assigned_by.email as assigned_by_email,
+              FALSE as is_subtask,
+              NULL as parent_task_id,
+              NULL as subtitle
+            FROM task_assignments ta
+            LEFT JOIN profiles p_assigned_to ON ta.assigned_to = p_assigned_to.id
+            LEFT JOIN profiles p_assigned_by ON ta.assigned_by = p_assigned_by.id
+            WHERE ta.id IN (SELECT task_id FROM task_subtasks WHERE assigned_to = ?)
+              AND ta.assigned_by != ?
+              AND (ta.assigned_to IS NULL OR ta.assigned_to != ?)
+          ) combined
+          ORDER BY combined.task_datetime, combined.created_at DESC
+        `
+        params = [userId, userId, userId, userId, userId, userId, userId, userId, userId]
+      } else {
+        // Staff + 전체: 모든 태스크 조회 (내 업무만 보기 OFF)
+        sql = `
+          SELECT * FROM (
+            SELECT
+              ta.id,
+              ta.title,
+              ta.status,
+              ta.priority,
+              ta.assigned_by,
+              ta.assigned_to,
+              ta.content,
+              ta.file_keys,
+              ta.due_date,
+              ta.created_at,
+              ta.updated_at,
+              ta.completed_at,
+              (${TASK_DATETIME_SQL('ta')}) as task_datetime,
+              CASE WHEN ta.assigned_by = ? THEN 'assigned' WHEN ta.assigned_to = ? THEN 'received' ELSE 'received' END as task_type,
+              p_assigned_to.full_name as assigned_to_name,
+              p_assigned_to.email as assigned_to_email,
+              p_assigned_by.full_name as assigned_by_name,
+              p_assigned_by.email as assigned_by_email,
+              FALSE as is_subtask,
+              NULL as parent_task_id,
+              NULL as subtitle
+            FROM task_assignments ta
+            LEFT JOIN profiles p_assigned_to ON ta.assigned_to = p_assigned_to.id
+            LEFT JOIN profiles p_assigned_by ON ta.assigned_by = p_assigned_by.id
+            
+            UNION ALL
+            
+            SELECT
+              ts.id,
+              CONCAT(ta.title, ' - ', ts.subtitle) as title,
+              ts.status,
+              ta.priority,
+              ta.assigned_by,
+              ts.assigned_to,
+              ts.content,
+              ts.file_keys,
+              ta.due_date,
+              ts.created_at,
+              ts.updated_at,
+              ts.completed_at,
+              (${SUBTASK_DATETIME_SQL('ts', 'ta')}) as task_datetime,
+              CASE WHEN ta.assigned_by = ? THEN 'assigned' WHEN ts.assigned_to = ? THEN 'received' ELSE 'received' END as task_type,
+              p_assigned_to.full_name as assigned_to_name,
+              p_assigned_to.email as assigned_to_email,
+              p_assigned_by.full_name as assigned_by_name,
+              p_assigned_by.email as assigned_by_email,
+              TRUE as is_subtask,
+              ts.task_id as parent_task_id,
+              ts.subtitle
+            FROM task_subtasks ts
+            INNER JOIN task_assignments ta ON ts.task_id = ta.id
+            LEFT JOIN profiles p_assigned_to ON ts.assigned_to = p_assigned_to.id
+            LEFT JOIN profiles p_assigned_by ON ta.assigned_by = p_assigned_by.id
+          ) combined
+          ORDER BY combined.task_datetime, combined.created_at DESC
+        `
+        params = [userId, userId, userId, userId]
+      }
     } else {
       // Client용: 모든 태스크 조회 (단일 할당 + 다중 할당 서브태스크 담당 포함)
       // 3번째 UNION: 서브태스크로만 할당된 메인 태스크(다중 할당) — 메인 row에 본인이 없어도 서브태스크 담당이면 캘린더에 표시

@@ -10,6 +10,8 @@ import { CalendarAssignedToMeToggle } from "./calendar/CalendarAssignedToMeToggl
 import { TaskDialog } from "./task/TaskDialog"
 
 export function AdminCalendar() {
+  const [selectedTask, setSelectedTask] = useState<any>(null)
+  const [showOnlyAssignedToMe, setShowOnlyAssignedToMe] = useState(false)
   const {
     calendarDate,
     isLoading,
@@ -20,10 +22,7 @@ export function AdminCalendar() {
     calendarDays,
     loadCalendarData,
     getKoreanHoliday,
-  } = useCalendar()
-
-  const [selectedTask, setSelectedTask] = useState<any>(null)
-  const [showOnlyAssignedToMe, setShowOnlyAssignedToMe] = useState(false)
+  } = useCalendar({ assignedToMeOnly: showOnlyAssignedToMe })
 
   // 유틸리티 함수들
   const getDueRangeKey = useCallback((task: any) => {
@@ -156,8 +155,7 @@ export function AdminCalendar() {
                     holiday={holiday}
                   >
                     <div className="flex-1 flex flex-col items-center gap-1 overflow-y-auto">
-                      {!showOnlyAssignedToMe &&
-                        filterTasks(tasks.assigned, dayStr).map((task: any, taskIndex: number) => (
+                      {filterTasks(tasks.assigned, dayStr).map((task: any, taskIndex: number) => (
                           <CalendarTaskItem
                             key={`assigned-${task.id}-${taskIndex}`}
                             task={task}

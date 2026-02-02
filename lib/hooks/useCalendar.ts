@@ -6,7 +6,13 @@ export interface CalendarTasks {
   received: any[]
 }
 
-export function useCalendar() {
+export interface UseCalendarOptions {
+  /** staff 전용: true면 내 업무만, false/미설정이면 전체 태스크 */
+  assignedToMeOnly?: boolean
+}
+
+export function useCalendar(options: UseCalendarOptions = {}) {
+  const { assignedToMeOnly = false } = options
   const [calendarDate, setCalendarDate] = useState<Date>(new Date())
   const [calendarTasks, setCalendarTasks] = useState<Record<string, CalendarTasks>>({})
   const [holidays, setHolidays] = useState<Record<string, string>>({})
@@ -58,8 +64,10 @@ export function useCalendar() {
       const year = calendarDate.getFullYear()
       const month = calendarDate.getMonth() + 1
       
-      // Tasks 로드 - 모든 태스크 표시
-      const calendarRes = await fetch(`/api/tasks/calendar?year=${year}&month=${month}`, {
+      // Tasks 로드 (staff는 assignedToMeOnly에 따라 전체/내 업무만)
+      const qs = new URLSearchParams({ year: String(year), month: String(month) })
+      if (assignedToMeOnly) qs.set("assignedToMeOnly", "true")
+      const calendarRes = await fetch(`/api/tasks/calendar?${qs.toString()}`, {
         credentials: "include",
         cache: "no-store",
       })
@@ -97,7 +105,7 @@ export function useCalendar() {
     } finally {
       setIsLoading(false)
     }
-  }, [calendarDate])
+  }, [calendarDate, assignedToMeOnly])
 
   // 한국 공휴일 확인
   const getKoreanHoliday = useCallback((date: Date): string | null => {
