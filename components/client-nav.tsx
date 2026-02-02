@@ -5,6 +5,7 @@ import { FileText, Home, LogOut, FileSpreadsheet, Layers } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import type { AuthUser } from "@/lib/db/auth"
+import { ThemeToggle } from "@/components/theme-toggle"
 
 interface ClientNavProps {
   user: AuthUser
@@ -131,6 +132,7 @@ export function ClientNav({ user }: ClientNavProps) {
           </div>
         </div>
         <div className="flex items-center gap-4">
+          <ThemeToggle />
           <p className="text-sm font-medium whitespace-nowrap max-w-[200px] truncate">
             환영합니다 {user.full_name || "고객"}님
           </p>

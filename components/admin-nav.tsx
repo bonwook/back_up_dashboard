@@ -7,6 +7,7 @@ import { usePathname, useRouter } from "next/navigation"
 import Image from "next/image"
 import { useEffect, useState } from "react"
 import type { AuthUser } from "@/lib/db/auth"
+import { ThemeToggle } from "@/components/theme-toggle"
 
 interface AdminNavProps {
   user: AuthUser
@@ -170,6 +171,7 @@ export function AdminNav({ user }: AdminNavProps) {
           </div>
         </div>
         <div className="flex items-center gap-4">
+          <ThemeToggle />
           {userRole === "admin" && (
             <>
               <Button

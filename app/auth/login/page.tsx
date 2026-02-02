@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
+import { ThemeToggle } from "@/components/theme-toggle"
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
@@ -53,7 +54,10 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen w-full items-center justify-center p-6">
+    <div className="relative flex min-h-screen w-full items-center justify-center p-6">
+      <div className="absolute right-4 top-4">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-sm">
         <Card>
           <CardHeader className="text-center">
