@@ -1,6 +1,6 @@
 import React from "react"
 import { Button } from "@/components/ui/button"
-import { Loader2, CheckCircle2 } from "lucide-react"
+import { Loader2, CheckCircle2, FileText } from "lucide-react"
 import { format } from "date-fns"
 import { ko } from "date-fns/locale"
 import { getStatusBadge, getStatusBorderColor } from "@/lib/utils/taskStatusHelpers"
@@ -30,6 +30,8 @@ interface StaffSessionBlockProps {
   onComplete: (subtaskId: string) => void
   /** 요청자(assigned_by) 또는 admin만 true. 할당받은 staff는 작업끝내기 비활성화를 위해 false */
   canCompleteSubtask?: boolean
+  /** 실제 resolve된 담당자 첨부파일이 있을 때만 true (아이콘 표시용) */
+  hasAttachment?: boolean
 }
 
 /**
@@ -45,6 +47,7 @@ export function StaffSessionBlock({
   onSelect,
   onComplete,
   canCompleteSubtask = true,
+  hasAttachment = false,
 }: StaffSessionBlockProps) {
   const isCompleted = subtask.status === "completed"
   const isAwaitingCompletion = subtask.status === "awaiting_completion"
@@ -72,8 +75,11 @@ export function StaffSessionBlock({
     >
       <div className="space-y-1">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs font-medium truncate">
-            {subtask.assigned_to_name || subtask.assigned_to_email || "담당자 없음"}
+          <span className="text-xs font-medium truncate inline-flex items-center gap-1 min-w-0">
+            <span className="truncate">{subtask.assigned_to_name || subtask.assigned_to_email || "담당자 없음"}</span>
+            {hasAttachment && (
+              <FileText className="h-3 w-3 text-muted-foreground shrink-0" aria-label="첨부파일 있음" />
+            )}
           </span>
           {getStatusBadge(subtask.status)}
         </div>

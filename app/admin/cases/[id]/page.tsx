@@ -405,6 +405,13 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     }))
   }, [subtasks])
 
+  // 실제 resolve된 담당자 첨부파일이 있는 subtaskId 집합 (아이콘은 이 기준으로만 표시)
+  const subtaskIdsWithResolvedFiles = useMemo(() => {
+    const set = new Set<string>()
+    resolvedSubtaskFileKeys.forEach((f) => set.add(f.subtaskId))
+    return set
+  }, [resolvedSubtaskFileKeys])
+
   const applyDueDate = useCallback(async (next: Date | null): Promise<boolean> => {
     if (!taskId) return false
     try {
@@ -669,12 +676,16 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               </div>
               <div className="flex items-center gap-2 flex-1">
                 <span className="text-muted-foreground">담당자</span>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1.5 items-center">
                   {Array.from(new Set(subtasks.map(st => st.assigned_to))).map((userId, idx) => {
                     const subtask = subtasks.find(st => st.assigned_to === userId)
+                    const hasResolvedFile = subtasks.some(st => st.assigned_to === userId && subtaskIdsWithResolvedFiles.has(st.id))
                     return (
-                      <span key={userId || idx} className="text-xs font-medium">
+                      <span key={userId || idx} className="text-xs font-medium inline-flex items-center gap-1">
                         {subtask?.assigned_to_name || subtask?.assigned_to_email || "담당자"}
+                        {hasResolvedFile && (
+                          <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" aria-label="첨부파일 있음" />
+                        )}
                         {idx < Array.from(new Set(subtasks.map(st => st.assigned_to))).length - 1 && ", "}
                       </span>
                     )
@@ -930,6 +941,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                             onSelect={() => setSelectedSubtask(selectedSubtask?.id === subtask.id ? null : subtask)}
                             onComplete={completeSubtask}
                             canCompleteSubtask={canEditTask}
+                            hasAttachment={subtaskIdsWithResolvedFiles.has(subtask.id)}
                           />
                         ))}
                       </div>
