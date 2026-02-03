@@ -894,60 +894,74 @@ export default function AdminProgressPage() {
                         </div>
                       )}
                       
-                      {/* 요청자 첨부파일 표시 */}
-                      {workResolvedFileKeys.length > 0 && (
+                      {/* 요청자 첨부파일 표시 - 다운로드 기간은 요청일(작업 생성일) 기준 7일 */}
+                      {workResolvedFileKeys.length > 0 && (() => {
+                        const workTask = workTaskId ? tasks.find(t => t.id === workTaskId) : null
+                        const requestDate = workTask?.created_at ?? null
+                        const fileExpiry = calculateFileExpiry(requestDate)
+                        const isFileExpired = fileExpiry.isExpired
+                        return (
                         <div className="space-y-2">
                           <Label className="text-sm font-semibold">요청자 첨부파일</Label>
                           <div className="flex flex-wrap gap-2 p-2 border border-transparent rounded-md bg-transparent">
                             {workResolvedFileKeys.map((resolved, idx) => (
-                              <div key={`main-resolved-${idx}`} className="flex items-center gap-2 px-2 py-1 bg-transparent rounded border text-sm">
-                                <FileText className="h-4 w-4 text-muted-foreground" />
-                                <span 
-                                  className="max-w-[150px] truncate cursor-pointer hover:underline"
-                                  title={resolved.fileName}
-                                  onClick={async (e) => {
-                                    e.preventDefault()
-                                    
-                                    try {
-                                      const response = await fetch(`/api/storage/signed-url?path=${encodeURIComponent(resolved.s3Key)}&expiresIn=604800`, {
-                                        credentials: 'include',
-                                      })
-                                      if (!response.ok) {
-                                        const errorData = await response.json().catch(() => ({}))
-                                        const errorMessage = errorData.error || '다운로드 URL 생성 실패'
-                                        if (errorMessage.includes('존재하지 않') || errorMessage.includes('기간이 지났') || response.status === 404) {
-                                          throw new Error('파일이 존재하지 않거나 다운로드 기간이 지났습니다.')
+                              <div key={`main-resolved-${idx}`} className={`flex items-center gap-2 px-2 py-1 rounded border text-sm ${isFileExpired ? 'bg-red-50 border-red-300 dark:bg-red-950/20 dark:border-red-800' : 'bg-transparent'}`}>
+                                <FileText className={`h-4 w-4 ${isFileExpired ? 'text-red-500' : 'text-muted-foreground'}`} />
+                                <div className="flex flex-col gap-0.5">
+                                  <span 
+                                    className={`max-w-[150px] truncate ${isFileExpired ? 'cursor-not-allowed text-red-600 dark:text-red-400 line-through' : 'cursor-pointer hover:underline'}`}
+                                    title={resolved.fileName}
+                                    onClick={async (e) => {
+                                      e.preventDefault()
+                                      if (isFileExpired) {
+                                        alert('다운로드 기간이 지나 다운로드할 수 없습니다.')
+                                        return
+                                      }
+                                      try {
+                                        const response = await fetch(`/api/storage/signed-url?path=${encodeURIComponent(resolved.s3Key)}&expiresIn=604800`, {
+                                          credentials: 'include',
+                                        })
+                                        if (!response.ok) {
+                                          const errorData = await response.json().catch(() => ({}))
+                                          const errorMessage = errorData.error || '다운로드 URL 생성 실패'
+                                          if (errorMessage.includes('존재하지 않') || errorMessage.includes('기간이 지났') || response.status === 404) {
+                                            throw new Error('파일이 존재하지 않거나 다운로드 기간이 지났습니다.')
+                                          }
+                                          throw new Error(errorMessage)
                                         }
-                                        throw new Error(errorMessage)
+                                        const data = await response.json()
+                                        if (data.signedUrl) {
+                                          const a = document.createElement('a')
+                                          a.href = data.signedUrl
+                                          a.download = resolved.fileName
+                                          document.body.appendChild(a)
+                                          a.click()
+                                          document.body.removeChild(a)
+                                        } else {
+                                          throw new Error('서명된 URL을 받을 수 없습니다')
+                                        }
+                                      } catch (error: any) {
+                                        console.error('파일 다운로드 오류:', error)
+                                        toast({
+                                          title: '오류',
+                                          description: error.message || '파일 다운로드에 실패했습니다.',
+                                          variant: 'destructive',
+                                        })
                                       }
-                                      const data = await response.json()
-                                      if (data.signedUrl) {
-                                        const a = document.createElement('a')
-                                        a.href = data.signedUrl
-                                        a.download = resolved.fileName
-                                        document.body.appendChild(a)
-                                        a.click()
-                                        document.body.removeChild(a)
-                                      } else {
-                                        throw new Error('서명된 URL을 받을 수 없습니다')
-                                      }
-                                    } catch (error: any) {
-                                      console.error('파일 다운로드 오류:', error)
-                                      toast({
-                                        title: '오류',
-                                        description: error.message || '파일 다운로드에 실패했습니다.',
-                                        variant: 'destructive',
-                                      })
-                                    }
-                                  }}
-                                >
-                                  {resolved.fileName}
-                                </span>
+                                    }}
+                                  >
+                                    {resolved.fileName}
+                                  </span>
+                                  <span className={`text-xs ${isFileExpired ? 'text-red-600 dark:text-red-400 font-medium' : 'text-muted-foreground'}`}>
+                                    ({fileExpiry.expiryText})
+                                  </span>
+                                </div>
                               </div>
                             ))}
                           </div>
                         </div>
-                      )}
+                        );
+                      })()}
                     </div>
                     
                     {/* 내용 에디터 (아래로 이동) */}
@@ -1281,30 +1295,23 @@ export default function AdminProgressPage() {
                       <div className="flex flex-wrap gap-2 p-2 border border-transparent rounded-md bg-transparent mb-2">
                         {/* 기존 저장된 첨부파일 (workCommentResolvedFileKeys) - 전체 표시 */}
                         {workCommentResolvedFileKeys.map((resolved, idx) => {
-                          // 업로드 날짜 + 7일 계산
-                          const uploadedAt = resolved.uploadedAt ? new Date(resolved.uploadedAt) : null
-                          const expiryDate = uploadedAt ? new Date(uploadedAt.getTime() + 7 * 24 * 60 * 60 * 1000) : null
-                          const isExpired = expiryDate ? new Date() > expiryDate : false
-                          const expiryDateStr = expiryDate ? expiryDate.toLocaleDateString('ko-KR', { 
-                            year: 'numeric',
-                            month: '2-digit',
-                            day: '2-digit',
-                            timeZone: 'Asia/Seoul'
-                          }) : null
+                          const fileExpiry = calculateFileExpiry(resolved.uploadedAt ?? null)
+                          const isExpired = fileExpiry.isExpired
+                          const expiryDateStr = !isExpired ? formatDateShort(fileExpiry.expiresAt) : null
                           
                           return (
                           <div key={`comment-resolved-${idx}`} className={`flex items-center gap-2 px-2 py-1 rounded border text-sm ${isExpired ? 'bg-red-50 border-red-300 dark:bg-red-950/20 dark:border-red-800' : 'bg-transparent'}`}>
                             <FileText className={`h-4 w-4 ${isExpired ? 'text-red-500' : 'text-muted-foreground'}`} />
                             <div className="flex flex-col gap-0.5">
                               <span 
-                                className={`max-w-[150px] truncate ${isExpired ? 'cursor-not-allowed text-red-600 dark:text-red-400' : 'cursor-pointer hover:underline'}`}
+                                className={`max-w-[150px] truncate ${isExpired ? 'cursor-not-allowed text-red-600 dark:text-red-400 line-through' : 'cursor-pointer hover:underline'}`}
                                 title={`${resolved.fileName}${expiryDateStr ? ` ~ ${expiryDateStr}` : ''}`}
                                 onClick={async (e) => {
                                   e.preventDefault()
                                   
                                   // 7일이 지났으면 다운로드 불가
                                   if (isExpired) {
-                                    alert(`다운로드 기간 만료\n\n이 파일의 다운로드 기간(${expiryDateStr})이 지나 다운로드할 수 없습니다.`)
+                                    alert(`다운로드 기간 만료\n\n이 파일의 다운로드 기간이 지나 다운로드할 수 없습니다.`)
                                     return
                                   }
                                   
@@ -1344,7 +1351,7 @@ export default function AdminProgressPage() {
                               >
                                 {resolved.fileName}
                               </span>
-                              {expiryDateStr && (
+                              {(expiryDateStr || isExpired) && (
                                 <span className={`text-xs ${isExpired ? 'text-red-600 dark:text-red-400 font-medium' : 'text-muted-foreground'}`}>
                                   {isExpired ? '기간 만료' : `~ ${expiryDateStr}`}
                                 </span>
@@ -1457,60 +1464,74 @@ export default function AdminProgressPage() {
                         </div>
                       )}
                       
-                      {/* 요청자 첨부파일 표시 */}
-                      {workResolvedFileKeys.length > 0 && (
+                      {/* 요청자 첨부파일 표시 - 다운로드 기간은 요청일(작업 생성일) 기준 7일 */}
+                      {workResolvedFileKeys.length > 0 && (() => {
+                        const workTask = workTaskId ? tasks.find(t => t.id === workTaskId) : null
+                        const requestDate = workTask?.created_at ?? null
+                        const fileExpiry = calculateFileExpiry(requestDate)
+                        const isFileExpired = fileExpiry.isExpired
+                        return (
                         <div className="space-y-2 mt-2">
                           <Label className="text-sm font-semibold">요청자 첨부파일</Label>
                           <div className="flex flex-wrap gap-2 p-2 border border-transparent rounded-md bg-transparent">
                             {workResolvedFileKeys.map((resolved, idx) => (
-                              <div key={`multi-resolved-${idx}`} className="flex items-center gap-2 px-2 py-1 bg-transparent rounded border text-sm">
-                                <FileText className="h-4 w-4 text-muted-foreground" />
-                                <span 
-                                  className="max-w-[150px] truncate cursor-pointer hover:underline"
-                                  title={resolved.fileName}
-                                  onClick={async (e) => {
-                                    e.preventDefault()
-                                    
-                                    try {
-                                      const response = await fetch(`/api/storage/signed-url?path=${encodeURIComponent(resolved.s3Key)}&expiresIn=604800`, {
-                                        credentials: 'include',
-                                      })
-                                      if (!response.ok) {
-                                        const errorData = await response.json().catch(() => ({}))
-                                        const errorMessage = errorData.error || '다운로드 URL 생성 실패'
-                                        if (errorMessage.includes('존재하지 않') || errorMessage.includes('기간이 지났') || response.status === 404) {
-                                          throw new Error('파일이 존재하지 않거나 다운로드 기간이 지났습니다.')
+                              <div key={`multi-resolved-${idx}`} className={`flex items-center gap-2 px-2 py-1 rounded border text-sm ${isFileExpired ? 'bg-red-50 border-red-300 dark:bg-red-950/20 dark:border-red-800' : 'bg-transparent'}`}>
+                                <FileText className={`h-4 w-4 ${isFileExpired ? 'text-red-500' : 'text-muted-foreground'}`} />
+                                <div className="flex flex-col gap-0.5">
+                                  <span 
+                                    className={`max-w-[150px] truncate ${isFileExpired ? 'cursor-not-allowed text-red-600 dark:text-red-400 line-through' : 'cursor-pointer hover:underline'}`}
+                                    title={resolved.fileName}
+                                    onClick={async (e) => {
+                                      e.preventDefault()
+                                      if (isFileExpired) {
+                                        alert('다운로드 기간이 지나 다운로드할 수 없습니다.')
+                                        return
+                                      }
+                                      try {
+                                        const response = await fetch(`/api/storage/signed-url?path=${encodeURIComponent(resolved.s3Key)}&expiresIn=604800`, {
+                                          credentials: 'include',
+                                        })
+                                        if (!response.ok) {
+                                          const errorData = await response.json().catch(() => ({}))
+                                          const errorMessage = errorData.error || '다운로드 URL 생성 실패'
+                                          if (errorMessage.includes('존재하지 않') || errorMessage.includes('기간이 지났') || response.status === 404) {
+                                            throw new Error('파일이 존재하지 않거나 다운로드 기간이 지났습니다.')
+                                          }
+                                          throw new Error(errorMessage)
                                         }
-                                        throw new Error(errorMessage)
+                                        const data = await response.json()
+                                        if (data.signedUrl) {
+                                          const a = document.createElement('a')
+                                          a.href = data.signedUrl
+                                          a.download = resolved.fileName
+                                          document.body.appendChild(a)
+                                          a.click()
+                                          document.body.removeChild(a)
+                                        } else {
+                                          throw new Error('서명된 URL을 받을 수 없습니다')
+                                        }
+                                      } catch (error: any) {
+                                        console.error('파일 다운로드 오류:', error)
+                                        toast({
+                                          title: '오류',
+                                          description: error.message || '파일 다운로드에 실패했습니다.',
+                                          variant: 'destructive',
+                                        })
                                       }
-                                      const data = await response.json()
-                                      if (data.signedUrl) {
-                                        const a = document.createElement('a')
-                                        a.href = data.signedUrl
-                                        a.download = resolved.fileName
-                                        document.body.appendChild(a)
-                                        a.click()
-                                        document.body.removeChild(a)
-                                      } else {
-                                        throw new Error('서명된 URL을 받을 수 없습니다')
-                                      }
-                                    } catch (error: any) {
-                                      console.error('파일 다운로드 오류:', error)
-                                      toast({
-                                        title: '오류',
-                                        description: error.message || '파일 다운로드에 실패했습니다.',
-                                        variant: 'destructive',
-                                      })
-                                    }
-                                  }}
-                                >
-                                  {resolved.fileName}
-                                </span>
+                                    }}
+                                  >
+                                    {resolved.fileName}
+                                  </span>
+                                  <span className={`text-xs ${isFileExpired ? 'text-red-600 dark:text-red-400 font-medium' : 'text-muted-foreground'}`}>
+                                    ({fileExpiry.expiryText})
+                                  </span>
+                                </div>
                               </div>
                             ))}
                           </div>
                         </div>
-                      )}
+                        );
+                      })()}
                     </div>
                     
                     {/* 내용 에디터 (아래로 이동) */}
@@ -1844,30 +1865,23 @@ export default function AdminProgressPage() {
                       <div className="flex flex-wrap gap-2 p-2 border border-transparent rounded-md bg-transparent mb-2">
                         {/* 기존 저장된 첨부파일 (workCommentResolvedFileKeys) - 전체 표시 */}
                         {workCommentResolvedFileKeys.map((resolved, idx) => {
-                          // 업로드 날짜 + 7일 계산
-                          const uploadedAt = resolved.uploadedAt ? new Date(resolved.uploadedAt) : null
-                          const expiryDate = uploadedAt ? new Date(uploadedAt.getTime() + 7 * 24 * 60 * 60 * 1000) : null
-                          const isExpired = expiryDate ? new Date() > expiryDate : false
-                          const expiryDateStr = expiryDate ? expiryDate.toLocaleDateString('ko-KR', { 
-                            year: 'numeric',
-                            month: '2-digit',
-                            day: '2-digit',
-                            timeZone: 'Asia/Seoul'
-                          }) : null
+                          const fileExpiry = calculateFileExpiry(resolved.uploadedAt ?? null)
+                          const isExpired = fileExpiry.isExpired
+                          const expiryDateStr = !isExpired ? formatDateShort(fileExpiry.expiresAt) : null
                           
                           return (
                           <div key={`comment-resolved-${idx}`} className={`flex items-center gap-2 px-2 py-1 rounded border text-sm ${isExpired ? 'bg-red-50 border-red-300 dark:bg-red-950/20 dark:border-red-800' : 'bg-transparent'}`}>
                             <FileText className={`h-4 w-4 ${isExpired ? 'text-red-500' : 'text-muted-foreground'}`} />
                             <div className="flex flex-col gap-0.5">
                               <span 
-                                className={`max-w-[150px] truncate ${isExpired ? 'cursor-not-allowed text-red-600 dark:text-red-400' : 'cursor-pointer hover:underline'}`}
+                                className={`max-w-[150px] truncate ${isExpired ? 'cursor-not-allowed text-red-600 dark:text-red-400 line-through' : 'cursor-pointer hover:underline'}`}
                                 title={`${resolved.fileName}${expiryDateStr ? ` ~ ${expiryDateStr}` : ''}`}
                                 onClick={async (e) => {
                                   e.preventDefault()
                                   
                                   // 7일이 지났으면 다운로드 불가
                                   if (isExpired) {
-                                    alert(`다운로드 기간 만료\n\n이 파일의 다운로드 기간(${expiryDateStr})이 지나 다운로드할 수 없습니다.`)
+                                    alert(`다운로드 기간 만료\n\n이 파일의 다운로드 기간이 지나 다운로드할 수 없습니다.`)
                                     return
                                   }
                                   
@@ -1907,7 +1921,7 @@ export default function AdminProgressPage() {
                               >
                                 {resolved.fileName}
                               </span>
-                              {expiryDateStr && (
+                              {(expiryDateStr || isExpired) && (
                                 <span className={`text-xs ${isExpired ? 'text-red-600 dark:text-red-400 font-medium' : 'text-muted-foreground'}`}>
                                   {isExpired ? '기간 만료' : `~ ${expiryDateStr}`}
                                 </span>

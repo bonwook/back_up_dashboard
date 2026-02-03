@@ -1,8 +1,10 @@
-import { differenceInDays, addDays, format } from "date-fns"
+import { addDays, format, startOfDay, endOfDay, differenceInCalendarDays } from "date-fns"
 import { ko } from "date-fns/locale"
 
 /**
  * 업로드 날짜로부터 7일 후의 만료일을 계산하고 남은 일수를 반환
+ * - 업로드일·만료일은 '날짜' 기준(자정~자정)으로 계산하여 타임존/시간에 따른 오표기 방지
+ * - uploadedAt이 없으면 만료로 간주
  */
 export function calculateFileExpiry(uploadedAt: Date | string | null | undefined): {
   expiresAt: Date
@@ -10,11 +12,21 @@ export function calculateFileExpiry(uploadedAt: Date | string | null | undefined
   isExpired: boolean
   expiryText: string
 } {
-  const uploaded = uploadedAt ? new Date(uploadedAt) : new Date()
-  const expiresAt = addDays(uploaded, 7)
+  if (uploadedAt == null || uploadedAt === "") {
+    return {
+      expiresAt: new Date(0),
+      daysRemaining: -1,
+      isExpired: true,
+      expiryText: "만료됨",
+    }
+  }
+
+  const uploaded = new Date(uploadedAt)
+  const uploadDay = startOfDay(uploaded)
+  const expiryEndOfDay = endOfDay(addDays(uploadDay, 7))
   const now = new Date()
-  const daysRemaining = differenceInDays(expiresAt, now)
-  const isExpired = daysRemaining < 0
+  const daysRemaining = differenceInCalendarDays(expiryEndOfDay, now)
+  const isExpired = now > expiryEndOfDay
 
   let expiryText = ""
   if (isExpired) {
@@ -28,8 +40,8 @@ export function calculateFileExpiry(uploadedAt: Date | string | null | undefined
   }
 
   return {
-    expiresAt,
-    daysRemaining,
+    expiresAt: expiryEndOfDay,
+    daysRemaining: isExpired ? -1 : daysRemaining,
     isExpired,
     expiryText,
   }

@@ -526,21 +526,22 @@ export function TaskDetailDialog({
               <div className="space-y-2 text-sm">
                 {resolvedFileKeys.length > 0 ? (
                   resolvedFileKeys.map((resolved, index) => {
-                    const expiry = calculateFileExpiry(
-                      resolved.uploadedAt || task.created_at
-                    )
+                    // 요청자 첨부는 '요청한 날짜(작업 생성일)' 기준 7일
+                    const expiry = calculateFileExpiry(task.created_at)
                     return (
                       <div key={index} className="flex items-center gap-2">
-                        <FileText className="h-4 w-4 shrink-0" />
+                        <FileText className={`h-4 w-4 shrink-0 ${expiry.isExpired ? "text-muted-foreground/60" : ""}`} />
                         <button
                           type="button"
-                          className="text-blue-600 hover:text-blue-800 underline text-left cursor-pointer"
-                          onClick={() =>
+                          className={`text-left max-w-[200px] truncate ${expiry.isExpired ? "cursor-not-allowed text-muted-foreground line-through" : "text-blue-600 hover:text-blue-800 underline cursor-pointer"}`}
+                          onClick={() => {
+                            if (expiry.isExpired) return
                             handleDownloadWithProgress(
                               resolved.s3Key,
                               resolved.fileName
                             )
-                          }
+                          }}
+                          disabled={expiry.isExpired}
                         >
                           {resolved.fileName}
                         </button>
@@ -578,31 +579,31 @@ export function TaskDetailDialog({
                     </div>
                   ) : (
                     assigneeFileKeys.map((resolved, index) => {
-                      const expiry = calculateFileExpiry(
-                        resolved.uploadedAt || task.updated_at
-                      )
+                      const expiry = calculateFileExpiry(resolved.uploadedAt ?? null)
                       return (
                         <div
                           key={index}
                           role="button"
-                          tabIndex={0}
-                          className="flex items-center gap-2 cursor-pointer"
-                          onClick={() =>
+                          tabIndex={expiry.isExpired ? -1 : 0}
+                          className={`flex items-center gap-2 ${expiry.isExpired ? "cursor-not-allowed" : "cursor-pointer"}`}
+                          onClick={() => {
+                            if (expiry.isExpired) return
                             handleDownloadWithProgress(
                               resolved.s3Key,
                               resolved.fileName
                             )
-                          }
-                          onKeyDown={(e) =>
-                            e.key === "Enter" &&
-                            handleDownloadWithProgress(
-                              resolved.s3Key,
-                              resolved.fileName
-                            )
-                          }
+                          }}
+                          onKeyDown={(e) => {
+                            if (expiry.isExpired) return
+                            if (e.key === "Enter")
+                              handleDownloadWithProgress(
+                                resolved.s3Key,
+                                resolved.fileName
+                              )
+                          }}
                         >
-                          <FileText className="h-4 w-4 shrink-0" />
-                          <span className="max-w-[200px] truncate text-blue-600 hover:text-blue-800 underline">
+                          <FileText className={`h-4 w-4 shrink-0 ${expiry.isExpired ? "text-muted-foreground/60" : ""}`} />
+                          <span className={`max-w-[200px] truncate ${expiry.isExpired ? "text-muted-foreground line-through" : "text-blue-600 hover:text-blue-800 underline"}`}>
                             {resolved.fileName}
                           </span>
                           <span
