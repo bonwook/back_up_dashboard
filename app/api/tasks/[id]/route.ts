@@ -309,18 +309,14 @@ export async function PATCH(
     const userRole = userRoleRes && userRoleRes.length > 0 ? userRoleRes[0].role : null
     const isAdminOrStaff = userRole === "admin" || userRole === "staff"
 
-    // due_date는 요청자(assigned_by) 또는 admin만 수정 가능. 할당받은 staff(assigned_to)는 마감일 수정 불가
+    // due_date는 admin/staff는 모든 업무 수정 가능, 그 외는 요청자·담당자만 수정 가능
     if (due_date !== undefined) {
       if (!isAdminOrStaff) {
-        return NextResponse.json({ error: "마감일은 staff만 수정할 수 있습니다" }, { status: 403 })
-      }
-      const isAssigner = decoded.id === task.assigned_by
-      const isAdmin = userRole === "admin"
-      if (!isAssigner && !isAdmin) {
-        return NextResponse.json(
-          { error: "마감일은 업무를 준 사람(요청자) 또는 관리자만 수정할 수 있습니다" },
-          { status: 403 }
-        )
+        const isAssigner = decoded.id === task.assigned_by
+        const isAssignee = decoded.id === task.assigned_to
+        if (!isAssigner && !isAssignee) {
+          return NextResponse.json({ error: "마감일은 이 업무의 요청자·담당자 또는 관리자만 수정할 수 있습니다" }, { status: 403 })
+        }
       }
     }
 

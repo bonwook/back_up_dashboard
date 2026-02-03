@@ -73,7 +73,15 @@ export default function AdminProgressPage() {
   
   // 작업공간 탭 모드 (개별/공동)
   const [contentMode, setContentMode] = useState<'main' | 'add'>('add')
-  
+  // 작업공간 마감일 수정 팝오버 (undefined=서버 값 그대로, null=해제 선택, Date=선택한 날짜)
+  const [workDueDatePopoverOpen, setWorkDueDatePopoverOpen] = useState(false)
+  const [workDueDatePickerValue, setWorkDueDatePickerValue] = useState<Date | null | undefined>(undefined)
+
+  // 작업 변경 시 마감일 선택 초기화
+  useEffect(() => {
+    setWorkDueDatePickerValue(undefined)
+  }, [workTaskId])
+
   // contentEditable 초기값 설정
   useEffect(() => {
     const editor = document.getElementById('work-content')
@@ -106,6 +114,7 @@ export default function AdminProgressPage() {
   const clearWorkArea = useCallback((taskId?: string) => {
     // 작업공간 상태 초기화
     setWorkTaskId(null)
+    setWorkDueDatePopoverOpen(false)
     setIsWorkAreaReadOnly(false)
     setWorkForm({ title: "", content: "", priority: "medium" })
     setWorkAttachedFiles([])
@@ -681,12 +690,9 @@ export default function AdminProgressPage() {
                   </div>
                   <div></div>
                 </div>
-                <div className="grid grid-cols-2 gap-4 min-w-0 max-w-full">
-                  <div className="space-y-2 min-w-0 max-w-full">
-                    <div className="flex items-center gap-4">
-                      <Label htmlFor="work-priority" className="text-sm leading-none font-medium">중요도</Label>
-                    </div>
-                    <div className="flex items-end gap-2">
+                <div className="flex flex-wrap items-end gap-4 min-w-0 max-w-full">
+                  <div className="flex flex-col gap-1 min-w-0">
+                    <Label htmlFor="work-priority" className="text-sm leading-none font-medium shrink-0">중요도</Label>
                     <Select
                       value={workForm.priority}
                       onValueChange={(value) => setWorkForm({ ...workForm, priority: value })}
@@ -694,7 +700,7 @@ export default function AdminProgressPage() {
                     >
                       <SelectTrigger 
                         id="work-priority" 
-                        className={`h-auto py-2 ${isWorkAreaReadOnly || !workTaskId ? 'cursor-default' : 'cursor-pointer'}`}
+                        className={`h-9 w-full min-w-[100px] ${isWorkAreaReadOnly || !workTaskId ? 'cursor-default' : 'cursor-pointer'}`}
                         style={isWorkAreaReadOnly || !workTaskId ? { cursor: 'default' } : undefined}
                       >
                         {workForm.priority === "low" && (
@@ -728,25 +734,59 @@ export default function AdminProgressPage() {
                         </SelectItem>
                       </SelectContent>
                     </Select>
-                    {(() => {
-                      const currentTask = workTaskId ? tasks.find(t => t.id === workTaskId) : null
-                      if (!currentTask || !currentTask.due_date) return null
+                  </div>
+                  {workTaskId && (() => {
+                      const currentTask = tasks.find(t => t.id === workTaskId)
+                      if (!currentTask) return null
+                      // 서브태스크는 마감일이 부모(task_assignments)에만 있으므로 부모 ID로 PATCH 및 표시
+                      const dueDatePatchId = currentTask.is_subtask && currentTask.task_id ? currentTask.task_id : workTaskId
+                      const taskToUpdate = tasks.find(t => t.id === dueDatePatchId)
+                      const canEditDueDate = taskToUpdate?.status !== "completed"
+                      const serverDueDate = taskToUpdate?.due_date ? new Date(taskToUpdate.due_date) : null
+                      // 아이콘/달력에 표시할 날짜: 달력에서 선택한 값이 있으면 그대로, 없으면 서버 값
+                      const displayDueDate = workDueDatePickerValue !== undefined ? workDueDatePickerValue : serverDueDate
+                      const selectedInCalendar = workDueDatePickerValue !== undefined ? workDueDatePickerValue : serverDueDate
                       return (
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-center h-auto py-1">
-                            <span className="px-2 py-1 rounded text-sm font-medium">{"~" + new Date(currentTask.due_date).toLocaleDateString('ko-KR', { 
-                              year: 'numeric',
-                              month: '2-digit',
-                              day: '2-digit',
-                              timeZone: 'Asia/Seoul'
-                            })}</span>
-                          </div>
+                        <div className="flex flex-col items-center gap-1">
+                          <Label className="text-sm leading-none font-medium shrink-0">마감일</Label>
+                          <Popover open={workDueDatePopoverOpen} onOpenChange={setWorkDueDatePopoverOpen}>
+                            <PopoverTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size={displayDueDate ? "sm" : "icon"}
+                                className={displayDueDate ? "h-9 px-2 shrink-0 gap-1.5" : "h-9 w-9 shrink-0"}
+                                disabled={!canEditDueDate}
+                                title={!canEditDueDate ? "완료된 작업은 마감일을 변경할 수 없습니다" : displayDueDate ? `마감일: ${format(displayDueDate, "yyyy.MM.dd", { locale: ko })} (한 번 클릭 선택, 같은 날 다시 클릭 해제)` : "마감일 선택"}
+                              >
+                                <CalendarIcon className="h-4 w-4 shrink-0" />
+                                {displayDueDate && (
+                                  <span className="text-xs font-medium tabular-nums">
+                                    {format(displayDueDate, "M/d", { locale: ko })}
+                                  </span>
+                                )}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0" align="start">
+                              <Calendar
+                                mode="single"
+                                selected={selectedInCalendar ?? undefined}
+                                onSelect={(date) => {
+                                  if (!canEditDueDate) return
+                                  const currentSelected = workDueDatePickerValue !== undefined ? workDueDatePickerValue : serverDueDate
+                                  const isSameDay =
+                                    currentSelected &&
+                                    date &&
+                                    format(currentSelected, "yyyy-MM-dd") === format(date, "yyyy-MM-dd")
+                                  setWorkDueDatePickerValue(isSameDay ? null : (date ?? null))
+                                }}
+                                locale={ko}
+                              />
+                            </PopoverContent>
+                          </Popover>
                         </div>
                       )
                     })()}
-                  </div>
-                  </div>
-                  <div></div>
                 </div>
                 {/* 개별/공동 탭으로 변경 */}
                 <div className="space-y-2 min-w-0 max-w-full">
@@ -2004,12 +2044,37 @@ export default function AdminProgressPage() {
                           credentials: 'include',
                           body: JSON.stringify(updateBody),
                         })
-                        
+
                         if (!updateResponse.ok) {
                           const errorData = await updateResponse.json().catch(() => ({}))
                           throw new Error(errorData.error || 'Task 업데이트 실패')
                         }
-                        
+
+                        // 마감일 변경이 있으면 해당 업무(또는 부모)에 PATCH
+                        if (workDueDatePickerValue !== undefined) {
+                          const currentTask = tasks.find((t) => t.id === workTaskId)
+                          const dueDatePatchId = currentTask?.is_subtask && currentTask?.task_id
+                            ? currentTask.task_id
+                            : workTaskId
+                          const dueDateValue =
+                            workDueDatePickerValue === null
+                              ? null
+                              : format(workDueDatePickerValue, 'yyyy-MM-dd')
+                          const dueDateRes = await fetch(`/api/tasks/${dueDatePatchId}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify({ due_date: dueDateValue }),
+                          })
+                          if (!dueDateRes.ok) {
+                            const errBody = await dueDateRes.json().catch(() => ({}))
+                            throw new Error(
+                              typeof errBody?.error === 'string' ? errBody.error : '마감일 업데이트 실패'
+                            )
+                          }
+                          setWorkDueDatePickerValue(undefined)
+                        }
+
                         // 임시저장 데이터 삭제
                         localStorage.removeItem(`work-comment-temp-${workTaskId}`)
                         
@@ -2106,7 +2171,7 @@ export default function AdminProgressPage() {
         setFinalizedTaskIds={setFinalizedTaskIds}
         userRole={userRole ?? user?.role}
         showDeleteTaskButton={true}
-        showDueDateEditor={true}
+        showDueDateEditor={false}
         onEditTask={async (task) => {
           let mainTaskContent = task.content || ""
           let mainTaskFileKeys: string[] = task.file_keys || []
