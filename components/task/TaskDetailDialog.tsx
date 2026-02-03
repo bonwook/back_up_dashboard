@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import {
   AlertDialog,
@@ -481,106 +482,117 @@ export function TaskDetailDialog({
             </div>
           )}
 
-          <div>
-            <p className="text-muted-foreground mb-2">요청자 내용</p>
+          {/* 요청자 내용 - progress 작업공간 본문과 동일 스타일 */}
+          <div className="space-y-2">
+            <Label className="text-sm font-semibold">요청자 내용</Label>
             {task.content ? (
               <div
-                className="text-sm bg-muted/50 p-3 rounded-md border border-border/50 wrap-break-word word-break break-all overflow-x-auto prose prose-sm max-w-none task-detail-prose"
-                dangerouslySetInnerHTML={{ __html: sanitizeHtml(task.content) }}
+                className="text-sm border rounded-md overflow-hidden bg-muted/30 wrap-break-word word-break break-all overflow-x-auto prose prose-sm max-w-none task-detail-prose"
                 style={{
+                  minHeight: "120px",
                   maxHeight: "400px",
                   overflowY: "auto",
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
                 }}
-              />
+              >
+                <div
+                  className="p-3"
+                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(task.content) }}
+                />
+              </div>
             ) : (
-              <div className="text-sm bg-muted/30 p-3 rounded-md border border-border/50 text-center text-muted-foreground min-h-[80px] flex items-center justify-center">
+              <div className="border rounded-md bg-muted/30 p-4 text-center text-muted-foreground min-h-[80px] flex items-center justify-center">
                 내용이 없습니다
               </div>
             )}
             {task.content && proseTableStyles}
           </div>
 
-          <div>
-            <p className="text-muted-foreground mb-2">담당자 내용</p>
+          {/* 담당자 내용 - progress 작업공간 내용과 동일 스타일 */}
+          <div className="space-y-2">
+            <Label className="text-sm font-semibold">담당자 내용</Label>
             {comment ? (
               <div
-                className="text-sm bg-muted/50 p-3 rounded-md border border-border/50 wrap-break-word word-break break-all overflow-x-auto prose prose-sm max-w-none task-detail-prose"
-                dangerouslySetInnerHTML={{ __html: sanitizeHtml(comment) }}
+                className="text-sm border rounded-md overflow-hidden bg-muted/30 wrap-break-word word-break break-all overflow-x-auto prose prose-sm max-w-none task-detail-prose"
                 style={{
+                  minHeight: "120px",
                   maxHeight: "400px",
                   overflowY: "auto",
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
                 }}
-              />
+              >
+                <div
+                  className="p-3"
+                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(comment) }}
+                />
+              </div>
             ) : (
-              <div className="text-sm bg-muted/30 p-3 rounded-md border border-border/50 text-center text-muted-foreground min-h-[80px] flex items-center justify-center">
+              <div className="border rounded-md bg-muted/30 p-4 text-center text-muted-foreground min-h-[80px] flex items-center justify-center">
                 내용이 없습니다
               </div>
             )}
             {comment && proseTableStyles}
           </div>
 
-          {task.file_keys && task.file_keys.length > 0 && (
-            <div>
-              <p className="text-muted-foreground mb-2">요청자 첨부파일</p>
-              <div className="space-y-2 text-sm">
-                {resolvedFileKeys.length > 0 ? (
-                  resolvedFileKeys.map((resolved, index) => {
-                    // 요청자 첨부는 '요청한 날짜(작업 생성일)' 기준 7일
-                    const expiry = calculateFileExpiry(task.created_at)
-                    return (
-                      <div key={index} className="flex items-center gap-2">
-                        <FileText className={`h-4 w-4 shrink-0 ${expiry.isExpired ? "text-muted-foreground/60" : ""}`} />
-                        <button
-                          type="button"
-                          className={`text-left max-w-[200px] truncate ${expiry.isExpired ? "cursor-not-allowed text-muted-foreground line-through" : "text-blue-600 hover:text-blue-800 underline cursor-pointer"}`}
-                          onClick={() => {
-                            if (expiry.isExpired) return
-                            handleDownloadWithProgress(
-                              resolved.s3Key,
-                              resolved.fileName
-                            )
-                          }}
-                          disabled={expiry.isExpired}
-                        >
-                          {resolved.fileName}
-                        </button>
-                        <span
-                          className={`text-xs shrink-0 ${expiry.isExpired ? "text-red-500" : expiry.daysRemaining <= 2 ? "text-orange-500" : "text-muted-foreground"}`}
-                        >
-                          ({expiry.expiryText})
-                        </span>
-                      </div>
-                    )
-                  })
-                ) : (
-                  <div className="text-muted-foreground">
-                    파일 정보를 불러오는 중...
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {task.comment_file_keys && task.comment_file_keys.length > 0 && (() => {
-            const assigneeFileKeys = commentResolvedFileKeys.filter(
-              (r) => r.userId === task.assigned_to
-            )
-            const showSection =
-              commentResolvedFileKeys.length === 0 || assigneeFileKeys.length > 0
-            if (!showSection) return null
-            return (
-              <div>
-                <p className="text-muted-foreground mb-2">담당자 첨부파일</p>
-                <div className="space-y-2 text-sm">
-                  {commentResolvedFileKeys.length === 0 ? (
-                    <div className="text-muted-foreground">
-                      파일 정보를 불러오는 중...
+          {/* 요청자 첨부파일 - progress와 동일 레이아웃/스타일 */}
+          <div className="space-y-2">
+            <Label className="text-sm font-semibold">요청자 첨부파일</Label>
+            <div className="flex flex-wrap gap-2 p-2 border border-transparent rounded-md bg-transparent min-h-[52px]">
+              {resolvedFileKeys.length > 0 ? (
+                resolvedFileKeys.map((resolved, index) => {
+                  const expiry = calculateFileExpiry(task.created_at)
+                  return (
+                    <div
+                      key={index}
+                      className={`flex items-center gap-2 px-2 py-1 rounded border text-sm ${expiry.isExpired ? "bg-red-50 border-red-300 dark:bg-red-950/20 dark:border-red-800" : "bg-transparent"}`}
+                    >
+                      <FileText className={`h-4 w-4 shrink-0 ${expiry.isExpired ? "text-red-500" : "text-muted-foreground"}`} />
+                      <button
+                        type="button"
+                        className={`text-left max-w-[200px] truncate ${expiry.isExpired ? "cursor-not-allowed text-red-600 dark:text-red-400 line-through" : "cursor-pointer hover:underline"}`}
+                        onClick={() => {
+                          if (expiry.isExpired) return
+                          handleDownloadWithProgress(
+                            resolved.s3Key,
+                            resolved.fileName
+                          )
+                        }}
+                        disabled={expiry.isExpired}
+                      >
+                        {resolved.fileName}
+                      </button>
+                      <span
+                        className={`text-xs shrink-0 ${expiry.isExpired ? "text-red-600 dark:text-red-400 font-medium" : "text-muted-foreground"}`}
+                      >
+                        ({expiry.expiryText})
+                      </span>
                     </div>
-                  ) : (
+                  )
+                })
+              ) : !task.file_keys?.length ? (
+                <div className="w-full border rounded-md bg-muted/30 p-4 text-center text-muted-foreground min-h-[52px] flex items-center justify-center text-sm">
+                  첨부파일이 없습니다
+                </div>
+              ) : (
+                <div className="w-full text-muted-foreground text-sm">
+                  파일 정보를 불러오는 중...
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 담당자 첨부파일 - progress와 동일 레이아웃/스타일 */}
+          <div className="space-y-2">
+            <Label className="text-sm font-semibold">담당자 첨부파일</Label>
+            <div className="flex flex-wrap gap-2 p-2 border border-transparent rounded-md bg-transparent min-h-[52px]">
+              {commentResolvedFileKeys.length > 0 ? (
+                (() => {
+                  const assigneeFileKeys = commentResolvedFileKeys.filter(
+                    (r) => r.userId === task.assigned_to
+                  )
+                  return assigneeFileKeys.length > 0 ? (
                     assigneeFileKeys.map((resolved, index) => {
                       const expiry = calculateFileExpiry(resolved.uploadedAt ?? null)
                       return (
@@ -588,7 +600,7 @@ export function TaskDetailDialog({
                           key={index}
                           role="button"
                           tabIndex={expiry.isExpired ? -1 : 0}
-                          className={`flex items-center gap-2 ${expiry.isExpired ? "cursor-not-allowed" : "cursor-pointer"}`}
+                          className={`flex items-center gap-2 px-2 py-1 rounded border text-sm ${expiry.isExpired ? "bg-red-50 border-red-300 dark:bg-red-950/20 dark:border-red-800 cursor-not-allowed" : "bg-transparent cursor-pointer"}`}
                           onClick={() => {
                             if (expiry.isExpired) return
                             handleDownloadWithProgress(
@@ -605,23 +617,35 @@ export function TaskDetailDialog({
                               )
                           }}
                         >
-                          <FileText className={`h-4 w-4 shrink-0 ${expiry.isExpired ? "text-muted-foreground/60" : ""}`} />
-                          <span className={`max-w-[200px] truncate ${expiry.isExpired ? "text-muted-foreground line-through" : "text-blue-600 hover:text-blue-800 underline"}`}>
+                          <FileText className={`h-4 w-4 shrink-0 ${expiry.isExpired ? "text-red-500" : "text-muted-foreground"}`} />
+                          <span className={`max-w-[200px] truncate ${expiry.isExpired ? "text-red-600 dark:text-red-400 line-through" : "hover:underline"}`}>
                             {resolved.fileName}
                           </span>
                           <span
-                            className={`text-xs shrink-0 ${expiry.isExpired ? "text-red-500" : expiry.daysRemaining <= 2 ? "text-orange-500" : "text-muted-foreground"}`}
+                            className={`text-xs shrink-0 ${expiry.isExpired ? "text-red-600 dark:text-red-400 font-medium" : "text-muted-foreground"}`}
                           >
                             ({expiry.expiryText})
                           </span>
                         </div>
                       )
                     })
-                  )}
+                  ) : (
+                    <div className="w-full border rounded-md bg-muted/30 p-4 text-center text-muted-foreground min-h-[52px] flex items-center justify-center text-sm">
+                      첨부파일이 없습니다
+                    </div>
+                  )
+                })()
+              ) : !task.comment_file_keys?.length ? (
+                <div className="w-full border rounded-md bg-muted/30 p-4 text-center text-muted-foreground min-h-[52px] flex items-center justify-center text-sm">
+                  첨부파일이 없습니다
                 </div>
-              </div>
-            )
-          })()}
+              ) : (
+                <div className="w-full text-muted-foreground text-sm">
+                  파일 정보를 불러오는 중...
+                </div>
+              )}
+            </div>
+          </div>
 
           <div className="pt-4 border-t">
             <TaskCommentSection

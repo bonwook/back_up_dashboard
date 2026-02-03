@@ -7,7 +7,7 @@ import { CalendarHeader } from "./calendar/CalendarHeader"
 import { CalendarDay } from "./calendar/CalendarDay"
 import { CalendarTaskItem } from "./calendar/CalendarTaskItem"
 import { CalendarAssignedToMeToggle } from "./calendar/CalendarAssignedToMeToggle"
-import { TaskDialog } from "./task/TaskDialog"
+import { TaskDetailDialog } from "./task/TaskDetailDialog"
 
 export function AdminCalendar() {
   const [selectedTask, setSelectedTask] = useState<any>(null)
@@ -199,10 +199,11 @@ export function AdminCalendar() {
         </CardContent>
       </Card>
 
-      <TaskDialog
+      <TaskDetailDialog
         task={selectedTask}
         open={!!selectedTask}
         onOpenChange={(open) => !open && setSelectedTask(null)}
+        onTaskUpdate={loadCalendarData}
       />
     </>
   )
