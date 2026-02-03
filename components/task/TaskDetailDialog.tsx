@@ -297,6 +297,17 @@ export function TaskDetailDialog({
     [subtasks]
   )
 
+  /** 공동 업무: 같은 부제(subtitle)를 가진 서브태스크끼리 그룹화 */
+  const subtasksBySubtitle = useMemo(() => {
+    const map = new Map<string, any[]>()
+    subtasks.forEach((st: any) => {
+      const key = st.subtitle != null && String(st.subtitle).trim() !== "" ? String(st.subtitle).trim() : "\u200b"
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(st)
+    })
+    return Array.from(map.entries())
+  }, [subtasks])
+
   const commentTaskIds = useMemo(
     () => (displayTask ? [displayTask.id, ...subtasks.map((s: any) => s.id)] : []),
     [displayTask?.id, subtasks]
@@ -712,41 +723,50 @@ export function TaskDetailDialog({
             </>
           )}
 
-          {/* 공동 업무 전용: 서브태스크별 요청자·담당자 내용 + 첨부파일 */}
+          {/* 공동 업무 전용: 같은 부제별로 한 블록 — 요청자 내용 + 담당자별 내용 */}
           {isJointTask && (
             <div className="space-y-4 pt-4 border-t">
-              {subtasks.map((st: any) => {
-                const stContent = st.content ?? ""
-                const stComment = st.comment
-                  ? st.comment.startsWith("\n")
-                    ? st.comment.substring(1)
-                    : st.comment
-                  : ""
+              {subtasksBySubtitle.map(([subtitleKey, group]) => {
+                const blockTitle = subtitleKey === "\u200b" ? "부제 없음" : subtitleKey
+                const firstContent = group[0]?.content ?? ""
                 return (
-                  <div key={st.id} className="rounded-lg border bg-muted/20 p-3 space-y-3">
+                  <div key={subtitleKey} className="rounded-lg border bg-muted/20 p-3 space-y-3">
                     <p className="text-xs font-medium text-muted-foreground">
-                      {st.title || st.subtitle || "서브태스크"}
+                      {blockTitle}
                     </p>
                     <div className="grid gap-2 sm:grid-cols-2">
                       <div>
                         <p className="text-[11px] font-medium text-muted-foreground mb-1">요청자 내용</p>
                         <div className="text-sm border rounded-md bg-muted/30 p-2 min-h-[60px] overflow-y-auto max-h-[200px]">
-                          {stContent ? (
-                            <div className="p-2 prose prose-sm max-w-none task-detail-prose" dangerouslySetInnerHTML={{ __html: sanitizeHtml(stContent) }} />
+                          {firstContent ? (
+                            <div className="p-2 prose prose-sm max-w-none task-detail-prose" dangerouslySetInnerHTML={{ __html: sanitizeHtml(firstContent) }} />
                           ) : (
                             <span className="text-muted-foreground">내용이 없습니다</span>
                           )}
                         </div>
                       </div>
-                      <div>
+                      <div className="space-y-2">
                         <p className="text-[11px] font-medium text-muted-foreground mb-1">담당자 내용</p>
-                        <div className="text-sm border rounded-md bg-muted/30 p-2 min-h-[60px] overflow-y-auto max-h-[200px]">
-                          {stComment ? (
-                            <div className="p-2 prose prose-sm max-w-none task-detail-prose" dangerouslySetInnerHTML={{ __html: sanitizeHtml(stComment) }} />
-                          ) : (
-                            <span className="text-muted-foreground">내용이 없습니다</span>
-                          )}
-                        </div>
+                        {group.map((st: any) => {
+                          const stComment = st.comment
+                            ? st.comment.startsWith("\n")
+                              ? st.comment.substring(1)
+                              : st.comment
+                            : ""
+                          const assigneeLabel = st.assigned_to_name || st.assigned_to_email || "담당자"
+                          return (
+                            <div key={st.id} className="border rounded-md bg-muted/30 p-2">
+                              <p className="text-[10px] font-medium text-muted-foreground mb-1">{assigneeLabel}</p>
+                              <div className="text-sm min-h-[40px] overflow-y-auto max-h-[160px]">
+                                {stComment ? (
+                                  <div className="p-1.5 prose prose-sm max-w-none task-detail-prose" dangerouslySetInnerHTML={{ __html: sanitizeHtml(stComment) }} />
+                                ) : (
+                                  <span className="text-muted-foreground">내용이 없습니다</span>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
                       </div>
                     </div>
                   </div>
