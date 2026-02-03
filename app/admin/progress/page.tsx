@@ -504,7 +504,7 @@ export default function AdminProgressPage() {
           <h1 className="text-3xl font-bold">Progress</h1>
           <Badge variant="secondary" className="text-sm font-medium">관리자</Badge>
         </div>
-        <p className="text-muted-foreground mt-2">업무를 드래그하여 상태를 변경할 수 있습니다</p>
+        <p className="text-muted-foreground mt-2">공동업무 및 담당한 업무를 드래그하여 상태를 변경할 수 있습니다</p>
       </div>
 
       {isLoading ? (

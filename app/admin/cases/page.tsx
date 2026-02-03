@@ -32,6 +32,8 @@ interface Task {
   created_at: string
   updated_at: string
   completed_at: string | null
+  is_multi_assign?: boolean
+  has_any_attachment?: boolean
 }
 
 export default function WorklistPage() {
@@ -41,6 +43,7 @@ export default function WorklistPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [priorityFilter, setPriorityFilter] = useState<string>("all")
+  const [onlyMyRequests, setOnlyMyRequests] = useState(false)
   const [activeTab, setActiveTab] = useState<"worklist" | "completed">("worklist")
   const [completedReports, setCompletedReports] = useState<any[]>([])
   const [isLoadingCompleted, setIsLoadingCompleted] = useState(false)
@@ -128,8 +131,13 @@ export default function WorklistPage() {
       filtered = filtered.filter((task) => task.priority === priorityFilter)
     }
 
+    // 요청자가 본인인 업무만
+    if (onlyMyRequests && me?.id) {
+      filtered = filtered.filter((task) => task.assigned_by === me.id)
+    }
+
     setFilteredTasks(filtered)
-  }, [tasks, searchQuery, statusFilter, priorityFilter, activeTab])
+  }, [tasks, searchQuery, statusFilter, priorityFilter, activeTab, onlyMyRequests, me?.id])
 
   useEffect(() => {
     loadTasks()
@@ -286,7 +294,17 @@ export default function WorklistPage() {
         <TabsContent value="worklist">
           <Card className="mb-6">
             <CardHeader>
-              <CardTitle>필터 및 검색</CardTitle>
+              <div className="flex items-center gap-2">
+                <CardTitle>필터 및 검색</CardTitle>
+                <Button
+                  type="button"
+                  variant={onlyMyRequests ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setOnlyMyRequests((prev) => !prev)}
+                >
+                  내 요청
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="grid gap-4 md:grid-cols-3">
@@ -365,6 +383,7 @@ export default function WorklistPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>제목</TableHead>
+                        <TableHead>단일/다중</TableHead>
                         <TableHead>요청자</TableHead>
                         <TableHead>담당자</TableHead>
                         <TableHead>첨부</TableHead>
@@ -385,14 +404,19 @@ export default function WorklistPage() {
                             onClick={() => router.push(`/admin/cases/${task.id}`)}
                           >
                             <TableCell className="font-medium">{task.title}</TableCell>
+                            <TableCell>
+                              <Badge variant={task.is_multi_assign ? "secondary" : "outline"} className="font-normal">
+                                {task.is_multi_assign ? "다중" : "단일"}
+                              </Badge>
+                            </TableCell>
                             <TableCell>{task.assigned_by_name || task.assigned_by_email || "Unknown"}</TableCell>
                             <TableCell>{task.assigned_to_name || task.assigned_to_email || "Unknown"}</TableCell>
                             <TableCell>
-                              {(task.file_keys && task.file_keys.length > 0) || (task.comment_file_keys && task.comment_file_keys.length > 0) ? (
+                              {task.has_any_attachment ?? ((task.file_keys?.length ?? 0) + (task.comment_file_keys?.length ?? 0) > 0) ? (
                                 <div
                                   className="inline-flex items-center px-2 text-muted-foreground"
-                                  aria-label={`첨부파일 ${(task.file_keys?.length || 0) + (task.comment_file_keys?.length || 0)}개`}
-                                  title={`첨부파일 ${(task.file_keys?.length || 0) + (task.comment_file_keys?.length || 0)}개`}
+                                  aria-label="첨부파일 있음"
+                                  title="첨부파일 있음"
                                 >
                                   <Paperclip className="h-4 w-4" />
                                 </div>

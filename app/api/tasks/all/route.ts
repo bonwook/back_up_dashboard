@@ -56,11 +56,11 @@ export async function GET(request: NextRequest) {
 
     const tasks = await query(sql, params)
 
-    // Parse JSON file_keys and comment_file_keys
+    // Parse JSON file_keys and comment_file_keys, normalize is_multi_assign
     const tasksWithParsedKeys = tasks.map((task: Record<string, unknown>) => {
       try {
-        const fileKeys = typeof task.file_keys === 'string' 
-          ? JSON.parse(task.file_keys) 
+        const fileKeys = typeof task.file_keys === 'string'
+          ? JSON.parse(task.file_keys)
           : task.file_keys || []
         const commentFileKeys = typeof task.comment_file_keys === 'string'
           ? JSON.parse(task.comment_file_keys)
@@ -69,17 +69,54 @@ export async function GET(request: NextRequest) {
           ...task,
           file_keys: fileKeys,
           comment_file_keys: commentFileKeys,
+          is_multi_assign: Boolean(task.is_multi_assign),
         }
       } catch {
         return {
           ...task,
           file_keys: [],
           comment_file_keys: [],
+          is_multi_assign: Boolean(task.is_multi_assign),
         }
       }
     })
 
-    return NextResponse.json({ tasks: tasksWithParsedKeys })
+    // 서브태스크 중 첨부가 하나라도 있는지 조회 (담당자 중 한 명이라도 올렸으면 표시)
+    const taskIds = tasksWithParsedKeys.map((t: Record<string, unknown>) => t.id).filter(Boolean)
+    let subtaskFiles: { task_id: string; file_keys: unknown; comment_file_keys: unknown }[] = []
+    if (taskIds.length > 0) {
+      const placeholders = taskIds.map(() => "?").join(",")
+      subtaskFiles = await query(
+        `SELECT task_id, file_keys, comment_file_keys FROM task_subtasks WHERE task_id IN (${placeholders})`,
+        taskIds
+      )
+    }
+
+    const hasAttachmentFromSubtask = (taskId: string) => {
+      return subtaskFiles.some((st: Record<string, unknown>) => {
+        if (st.task_id !== taskId) return false
+        try {
+          const fk = typeof st.file_keys === "string" ? JSON.parse(st.file_keys) : st.file_keys || []
+          const cfk = typeof st.comment_file_keys === "string" ? JSON.parse(st.comment_file_keys) : st.comment_file_keys || []
+          return (Array.isArray(fk) && fk.length > 0) || (Array.isArray(cfk) && cfk.length > 0)
+        } catch {
+          return false
+        }
+      })
+    }
+
+    const tasksWithAttachment = tasksWithParsedKeys.map((task: Record<string, unknown>) => {
+      const fileKeys = (task.file_keys as string[]) || []
+      const commentFileKeys = (task.comment_file_keys as string[]) || []
+      const taskHasFiles = fileKeys.length > 0 || commentFileKeys.length > 0
+      const anySubtaskHasFiles = hasAttachmentFromSubtask(task.id as string)
+      return {
+        ...task,
+        has_any_attachment: taskHasFiles || anySubtaskHasFiles,
+      }
+    })
+
+    return NextResponse.json({ tasks: tasksWithAttachment })
   } catch (error: unknown) {
     console.error("[Tasks All API] Error fetching tasks:", error)
     const errorMessage = error instanceof Error ? error.message : "Internal server error"
