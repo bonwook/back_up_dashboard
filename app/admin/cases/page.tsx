@@ -383,7 +383,7 @@ export default function WorklistPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>제목</TableHead>
-                        <TableHead>단일/다중</TableHead>
+                        <TableHead>개별/공동</TableHead>
                         <TableHead>요청자</TableHead>
                         <TableHead>담당자</TableHead>
                         <TableHead>첨부</TableHead>
@@ -406,7 +406,7 @@ export default function WorklistPage() {
                             <TableCell className="font-medium">{task.title}</TableCell>
                             <TableCell>
                               <Badge variant={task.is_multi_assign ? "secondary" : "outline"} className="font-normal">
-                                {task.is_multi_assign ? "다중" : "단일"}
+                                {task.is_multi_assign ? "공동" : "개별"}
                               </Badge>
                             </TableCell>
                             <TableCell>{task.assigned_by_name || task.assigned_by_email || "Unknown"}</TableCell>

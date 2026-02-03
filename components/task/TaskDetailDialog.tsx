@@ -48,8 +48,8 @@ export interface TaskDetailTask {
   comment?: string | null
   priority: "low" | "medium" | "high" | "urgent"
   status: string
-  file_keys?: string[]
-  comment_file_keys?: string[]
+  file_keys?: string[] | { key: string; uploaded_at?: string | null }[]
+  comment_file_keys?: string[] | { key: string; uploaded_at?: string | null }[]
   created_at: string
   updated_at: string
   completed_at: string | null
@@ -59,6 +59,8 @@ export interface TaskDetailTask {
   assigned_by_name?: string
   assigned_by_email?: string
   is_subtask?: boolean
+  parent_task_id?: string
+  task_id?: string
 }
 
 interface ResolvedFileKey {
@@ -135,6 +137,14 @@ function getStatusLabel(status: string) {
   }
 }
 
+/** API 응답의 file_keys/comment_file_keys를 string[]로 통일 */
+function normalizeFileKeys(
+  keys: string[] | { key: string; uploaded_at?: string | null }[] | undefined
+): string[] {
+  if (!keys?.length) return []
+  return keys.map((k) => (typeof k === "string" ? k : (k as { key?: string })?.key ?? "")).filter(Boolean)
+}
+
 export function TaskDetailDialog({
   task,
   open,
@@ -163,10 +173,40 @@ export function TaskDetailDialog({
   const [isDownloading, setIsDownloading] = useState(false)
   const [downloadProgress, setDownloadProgress] = useState(0)
   const [downloadingFileName, setDownloadingFileName] = useState("")
+  /** 캘린더 등에서 열 때 상세(comment, comment_file_keys 등) 로드용 */
+  const [fullTask, setFullTask] = useState<TaskDetailTask | null>(null)
+
+  const mainTaskId = task ? (task.parent_task_id ?? task.task_id ?? task.id) : null
+  const displayTask: TaskDetailTask | null = task
+    ? (fullTask ?? { ...task, file_keys: normalizeFileKeys(task.file_keys), comment_file_keys: normalizeFileKeys(task.comment_file_keys) })
+    : null
 
   useEffect(() => {
     if (propUserRole !== undefined) setUserRole(propUserRole)
   }, [propUserRole])
+
+  useEffect(() => {
+    if (!open || !mainTaskId) {
+      setFullTask(null)
+      return
+    }
+    let cancelled = false
+    fetch(`/api/tasks/${mainTaskId}`, { credentials: "include" })
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (cancelled || !data?.task) return
+        const t = data.task
+        setFullTask({
+          ...t,
+          file_keys: normalizeFileKeys(t.file_keys),
+          comment_file_keys: normalizeFileKeys(t.comment_file_keys),
+        })
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [open, mainTaskId])
 
   useEffect(() => {
     const loadUser = async () => {
@@ -184,10 +224,10 @@ export function TaskDetailDialog({
   }, [propUserRole])
 
   useEffect(() => {
-    if (!task?.id) return
+    if (!mainTaskId) return
     const load = async () => {
       try {
-        const res = await fetch(`/api/tasks/${task.id}/subtasks`, {
+        const res = await fetch(`/api/tasks/${mainTaskId}/subtasks`, {
           credentials: "include",
         })
         if (!res.ok) return
@@ -198,10 +238,13 @@ export function TaskDetailDialog({
       }
     }
     load()
-  }, [task?.id])
+  }, [mainTaskId])
+
+  const displayFileKeys = displayTask ? normalizeFileKeys(displayTask.file_keys) : []
+  const displayCommentFileKeys = displayTask ? normalizeFileKeys(displayTask.comment_file_keys) : []
 
   useEffect(() => {
-    if (!task?.file_keys?.length) {
+    if (!displayTask?.id || !displayFileKeys.length) {
       setResolvedFileKeys([])
       return
     }
@@ -210,7 +253,7 @@ export function TaskDetailDialog({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({ fileKeys: task.file_keys }),
+      body: JSON.stringify({ fileKeys: displayFileKeys }),
     })
       .then((r) => r.json())
       .then((data) => {
@@ -222,10 +265,10 @@ export function TaskDetailDialog({
     return () => {
       cancelled = true
     }
-  }, [task?.id, task?.file_keys?.length])
+  }, [displayTask?.id, fullTask?.id, displayFileKeys.length])
 
   useEffect(() => {
-    if (!task?.comment_file_keys?.length) {
+    if (!displayTask?.id || !displayCommentFileKeys.length) {
       setCommentResolvedFileKeys([])
       return
     }
@@ -234,7 +277,7 @@ export function TaskDetailDialog({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({ fileKeys: task.comment_file_keys }),
+      body: JSON.stringify({ fileKeys: displayCommentFileKeys }),
     })
       .then((r) => r.json())
       .then((data) => {
@@ -246,13 +289,28 @@ export function TaskDetailDialog({
     return () => {
       cancelled = true
     }
-  }, [task?.id, task?.comment_file_keys?.length])
+  }, [displayTask?.id, fullTask?.id, displayCommentFileKeys.length])
 
   const allSubtasksCompleted = useMemo(
     () =>
       subtasks.length > 0 && subtasks.every((st: any) => st.status === "completed"),
     [subtasks]
   )
+
+  const commentTaskIds = useMemo(
+    () => (displayTask ? [displayTask.id, ...subtasks.map((s: any) => s.id)] : []),
+    [displayTask?.id, subtasks]
+  )
+  const taskIdToRole = useMemo(() => {
+    if (!displayTask) return {}
+    const map: Record<string, { assigned_by?: string | null; assigned_to?: string | null }> = {
+      [displayTask.id]: { assigned_by: displayTask.assigned_by, assigned_to: displayTask.assigned_to },
+    }
+    subtasks.forEach((s: any) => {
+      map[s.id] = { assigned_by: displayTask.assigned_by, assigned_to: s.assigned_to }
+    })
+    return map
+  }, [displayTask?.id, displayTask?.assigned_by, displayTask?.assigned_to, subtasks])
 
   const handleDownloadWithProgress = async (s3Key: string, name?: string) => {
     const fileName = name ?? s3Key.split("/").pop() ?? "download"
@@ -281,10 +339,10 @@ export function TaskDetailDialog({
   }
 
   const handleCompleteTask = async () => {
-    if (!task || !onTaskUpdate) return
+    if (!displayTask || !onTaskUpdate) return
     setIsDeleting(true)
     try {
-      const updateRes = await fetch(`/api/tasks/${task.id}`, {
+      const updateRes = await fetch(`/api/tasks/${displayTask.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -294,7 +352,7 @@ export function TaskDetailDialog({
         const err = await updateRes.json().catch(() => ({}))
         throw new Error(err.error || "작업 완료 처리 실패")
       }
-      const reportRes = await fetch(`/api/tasks/${task.id}/create-report`, {
+      const reportRes = await fetch(`/api/tasks/${displayTask.id}/create-report`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -309,7 +367,7 @@ export function TaskDetailDialog({
       })
       setShowCompleteDialog(false)
       onTaskUpdate()
-      if (setFinalizedTaskIds) setFinalizedTaskIds((prev) => new Set(prev).add(task.id))
+      if (setFinalizedTaskIds) setFinalizedTaskIds((prev) => new Set(prev).add(displayTask.id))
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "작업 완료 처리에 실패했습니다."
       toast({ title: "완료 처리 실패", description: message, variant: "destructive" })
@@ -319,10 +377,10 @@ export function TaskDetailDialog({
   }
 
   const handleDeleteTaskFromDB = async () => {
-    if (!task || !onTaskUpdate) return
+    if (!displayTask || !onTaskUpdate) return
     setIsDeletingTask(true)
     try {
-      const res = await fetch(`/api/tasks/${task.id}`, {
+      const res = await fetch(`/api/tasks/${displayTask.id}`, {
         method: "DELETE",
         credentials: "include",
       })
@@ -342,12 +400,13 @@ export function TaskDetailDialog({
     }
   }
 
-  if (!task) return null
+  if (!task || !displayTask) return null
 
-  const comment = task.comment
-    ? task.comment.startsWith("\n")
-      ? task.comment.substring(1)
-      : task.comment
+  const isJointTask = subtasks.length > 0
+  const comment = displayTask.comment
+    ? displayTask.comment.startsWith("\n")
+      ? displayTask.comment.substring(1)
+      : displayTask.comment
     : ""
 
   const proseTableStyles = (
@@ -383,9 +442,9 @@ export function TaskDetailDialog({
   )
 
   const canComplete =
-    (task.status === "awaiting_completion" ||
+    (displayTask.status === "awaiting_completion" ||
       (subtasks.length > 0 && allSubtasksCompleted)) &&
-    (user?.id === task.assigned_by ||
+    (user?.id === displayTask.assigned_by ||
       userRole === "admin" ||
       userRole === "staff")
 
@@ -400,12 +459,12 @@ export function TaskDetailDialog({
       >
         <DialogHeader className="pr-8 pb-3">
           <div className="flex items-center gap-2 wrap-break-word word-break break-all">
-            {getStatusIcon(task.status)}
+            {getStatusIcon(displayTask.status)}
             <DialogTitle className="min-w-0">
-              {task.title}
-              {task.subtitle && task.is_subtask && (
+              {displayTask.title}
+              {displayTask.subtitle && displayTask.is_subtask && (
                 <span className="text-muted-foreground text-sm ml-2">
-                  ({task.subtitle})
+                  ({displayTask.subtitle})
                 </span>
               )}
             </DialogTitle>
@@ -423,28 +482,28 @@ export function TaskDetailDialog({
           </div>
         </DialogHeader>
 
-        <div className="flex items-center justify-between gap-4 pb-4 border-b">
+        <div className="flex items-center justify-between gap-4 pb-4">
           <div className="flex items-center gap-2 flex-wrap">
-            <Badge className={getPriorityColor(task.priority)}>
-              {task.priority === "urgent"
+            <Badge className={getPriorityColor(displayTask.priority)}>
+              {displayTask.priority === "urgent"
                 ? "긴급"
-                : task.priority === "high"
+                : displayTask.priority === "high"
                   ? "높음"
-                  : task.priority === "medium"
+                  : displayTask.priority === "medium"
                     ? "보통"
                     : "낮음"}
             </Badge>
-            <Badge variant="outline">{getStatusLabel(task.status)}</Badge>
+            <Badge variant="outline">{getStatusLabel(displayTask.status)}</Badge>
             <span className="text-xs text-muted-foreground">
               작업 요청자:{" "}
               <span className="font-medium text-foreground">
-                {task.assigned_by_name || task.assigned_by_email}
+                {displayTask.assigned_by_name || displayTask.assigned_by_email}
               </span>
             </span>
             <span className="text-xs text-muted-foreground">
-              {task.due_date
-                ? `시작일 ${formatDateShort(task.created_at)} ~ 마감일 ${formatDateShort(task.due_date)}`
-                : `시작일 ${formatDateShort(task.created_at)}`}
+              {displayTask.due_date
+                ? `시작일 ${formatDateShort(displayTask.created_at)} ~ 마감일 ${formatDateShort(displayTask.due_date)}`
+                : `시작일 ${formatDateShort(displayTask.created_at)}`}
             </span>
           </div>
         </div>
@@ -460,167 +519,114 @@ export function TaskDetailDialog({
             </div>
           )}
 
-          {showDueDateEditor && (userRole !== "client" || task.completed_at) && (
+          {showDueDateEditor && (userRole !== "client" || displayTask.completed_at) && (
             <div className="grid grid-cols-2 gap-4">
               {userRole !== "client" && (
                 <div>
                   <p className="text-muted-foreground mb-1">마감일</p>
                   <DueDateEditor
-                    taskId={task.id}
-                    dueDate={task.due_date}
+                    taskId={displayTask.id}
+                    dueDate={displayTask.due_date}
                     onUpdate={onTaskUpdate ?? (() => {})}
                     userRole={userRole}
                   />
                 </div>
               )}
-              {task.completed_at && (
+              {displayTask.completed_at && (
                 <div>
                   <p className="text-muted-foreground">종료일</p>
-                  <p className="font-medium">{formatDateShort(task.completed_at)}</p>
+                  <p className="font-medium">{formatDateShort(displayTask.completed_at)}</p>
                 </div>
               )}
             </div>
           )}
 
-          {/* 요청자 내용 - progress 작업공간 본문과 동일 스타일 */}
-          <div className="space-y-2">
-            <Label className="text-sm font-semibold">요청자 내용</Label>
-            {task.content ? (
-              <div
-                className="text-sm border rounded-md overflow-hidden bg-muted/30 wrap-break-word word-break break-all overflow-x-auto prose prose-sm max-w-none task-detail-prose"
-                style={{
-                  minHeight: "120px",
-                  maxHeight: "400px",
-                  overflowY: "auto",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                }}
-              >
-                <div
-                  className="p-3"
-                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(task.content) }}
-                />
-              </div>
-            ) : (
-              <div className="border rounded-md bg-muted/30 p-4 text-center text-muted-foreground min-h-[80px] flex items-center justify-center">
-                내용이 없습니다
-              </div>
-            )}
-            {task.content && proseTableStyles}
-          </div>
-
-          {/* 담당자 내용 - progress 작업공간 내용과 동일 스타일 */}
-          <div className="space-y-2">
-            <Label className="text-sm font-semibold">담당자 내용</Label>
-            {comment ? (
-              <div
-                className="text-sm border rounded-md overflow-hidden bg-muted/30 wrap-break-word word-break break-all overflow-x-auto prose prose-sm max-w-none task-detail-prose"
-                style={{
-                  minHeight: "120px",
-                  maxHeight: "400px",
-                  overflowY: "auto",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                }}
-              >
-                <div
-                  className="p-3"
-                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(comment) }}
-                />
-              </div>
-            ) : (
-              <div className="border rounded-md bg-muted/30 p-4 text-center text-muted-foreground min-h-[80px] flex items-center justify-center">
-                내용이 없습니다
-              </div>
-            )}
-            {comment && proseTableStyles}
-          </div>
-
-          {/* 요청자 첨부파일 - progress와 동일 레이아웃/스타일 */}
-          <div className="space-y-2">
-            <Label className="text-sm font-semibold">요청자 첨부파일</Label>
-            <div className="flex flex-wrap gap-2 p-2 border border-transparent rounded-md bg-transparent min-h-[52px]">
-              {resolvedFileKeys.length > 0 ? (
-                resolvedFileKeys.map((resolved, index) => {
-                  const expiry = calculateFileExpiry(task.created_at)
-                  return (
+          {/* 개별 업무: 요청자/담당자 내용 한 세트 */}
+          {!isJointTask && (
+            <>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">요청자 내용</Label>
+                {displayTask.content ? (
+                  <div
+                    className="text-sm border rounded-md overflow-hidden bg-muted/30 wrap-break-word word-break break-all overflow-x-auto prose prose-sm max-w-none task-detail-prose"
+                    style={{
+                      minHeight: "120px",
+                      maxHeight: "400px",
+                      overflowY: "auto",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                    }}
+                  >
                     <div
-                      key={index}
-                      className={`flex items-center gap-2 px-2 py-1 rounded border text-sm ${expiry.isExpired ? "bg-red-50 border-red-300 dark:bg-red-950/20 dark:border-red-800" : "bg-transparent"}`}
-                    >
-                      <FileText className={`h-4 w-4 shrink-0 ${expiry.isExpired ? "text-red-500" : "text-muted-foreground"}`} />
-                      <button
-                        type="button"
-                        className={`text-left max-w-[200px] truncate ${expiry.isExpired ? "cursor-not-allowed text-red-600 dark:text-red-400 line-through" : "cursor-pointer hover:underline"}`}
-                        onClick={() => {
-                          if (expiry.isExpired) return
-                          handleDownloadWithProgress(
-                            resolved.s3Key,
-                            resolved.fileName
-                          )
-                        }}
-                        disabled={expiry.isExpired}
-                      >
-                        {resolved.fileName}
-                      </button>
-                      <span
-                        className={`text-xs shrink-0 ${expiry.isExpired ? "text-red-600 dark:text-red-400 font-medium" : "text-muted-foreground"}`}
-                      >
-                        ({expiry.expiryText})
-                      </span>
-                    </div>
-                  )
-                })
-              ) : !task.file_keys?.length ? (
-                <div className="w-full border rounded-md bg-muted/30 p-4 text-center text-muted-foreground min-h-[52px] flex items-center justify-center text-sm">
-                  첨부파일이 없습니다
-                </div>
-              ) : (
-                <div className="w-full text-muted-foreground text-sm">
-                  파일 정보를 불러오는 중...
-                </div>
-              )}
-            </div>
-          </div>
+                      className="p-3"
+                      dangerouslySetInnerHTML={{ __html: sanitizeHtml(displayTask.content) }}
+                    />
+                  </div>
+                ) : (
+                  <div className="border rounded-md bg-muted/30 p-4 text-center text-muted-foreground min-h-[80px] flex items-center justify-center">
+                    내용이 없습니다
+                  </div>
+                )}
+                {displayTask.content && proseTableStyles}
+              </div>
 
-          {/* 담당자 첨부파일 - progress와 동일 레이아웃/스타일 */}
-          <div className="space-y-2">
-            <Label className="text-sm font-semibold">담당자 첨부파일</Label>
-            <div className="flex flex-wrap gap-2 p-2 border border-transparent rounded-md bg-transparent min-h-[52px]">
-              {commentResolvedFileKeys.length > 0 ? (
-                (() => {
-                  const assigneeFileKeys = commentResolvedFileKeys.filter(
-                    (r) => r.userId === task.assigned_to
-                  )
-                  return assigneeFileKeys.length > 0 ? (
-                    assigneeFileKeys.map((resolved, index) => {
-                      const expiry = calculateFileExpiry(resolved.uploadedAt ?? null)
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">담당자 내용</Label>
+                {comment ? (
+                  <div
+                    className="text-sm border rounded-md overflow-hidden bg-muted/30 wrap-break-word word-break break-all overflow-x-auto prose prose-sm max-w-none task-detail-prose"
+                    style={{
+                      minHeight: "120px",
+                      maxHeight: "400px",
+                      overflowY: "auto",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    <div
+                      className="p-3"
+                      dangerouslySetInnerHTML={{ __html: sanitizeHtml(comment) }}
+                    />
+                  </div>
+                ) : (
+                  <div className="border rounded-md bg-muted/30 p-4 text-center text-muted-foreground min-h-[80px] flex items-center justify-center">
+                    내용이 없습니다
+                  </div>
+                )}
+                {comment && proseTableStyles}
+              </div>
+            </>
+          )}
+
+          {/* 개별 업무 전용: 요청자/담당자 첨부파일 */}
+          {!isJointTask && (
+            <>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">요청자 첨부파일</Label>
+                <div className="flex flex-wrap gap-2 p-2 border border-transparent rounded-md bg-transparent min-h-[52px]">
+                  {resolvedFileKeys.length > 0 ? (
+                    resolvedFileKeys.map((resolved, index) => {
+                      const expiry = calculateFileExpiry(displayTask.created_at)
                       return (
                         <div
                           key={index}
-                          role="button"
-                          tabIndex={expiry.isExpired ? -1 : 0}
-                          className={`flex items-center gap-2 px-2 py-1 rounded border text-sm ${expiry.isExpired ? "bg-red-50 border-red-300 dark:bg-red-950/20 dark:border-red-800 cursor-not-allowed" : "bg-transparent cursor-pointer"}`}
-                          onClick={() => {
-                            if (expiry.isExpired) return
-                            handleDownloadWithProgress(
-                              resolved.s3Key,
-                              resolved.fileName
-                            )
-                          }}
-                          onKeyDown={(e) => {
-                            if (expiry.isExpired) return
-                            if (e.key === "Enter")
+                          className={`flex items-center gap-2 px-2 py-1 rounded border text-sm ${expiry.isExpired ? "bg-red-50 border-red-300 dark:bg-red-950/20 dark:border-red-800" : "bg-transparent"}`}
+                        >
+                          <FileText className={`h-4 w-4 shrink-0 ${expiry.isExpired ? "text-red-500" : "text-muted-foreground"}`} />
+                          <button
+                            type="button"
+                            className={`text-left max-w-[200px] truncate ${expiry.isExpired ? "cursor-not-allowed text-red-600 dark:text-red-400 line-through" : "cursor-pointer hover:underline"}`}
+                            onClick={() => {
+                              if (expiry.isExpired) return
                               handleDownloadWithProgress(
                                 resolved.s3Key,
                                 resolved.fileName
                               )
-                          }}
-                        >
-                          <FileText className={`h-4 w-4 shrink-0 ${expiry.isExpired ? "text-red-500" : "text-muted-foreground"}`} />
-                          <span className={`max-w-[200px] truncate ${expiry.isExpired ? "text-red-600 dark:text-red-400 line-through" : "hover:underline"}`}>
+                            }}
+                            disabled={expiry.isExpired}
+                          >
                             {resolved.fileName}
-                          </span>
+                          </button>
                           <span
                             className={`text-xs shrink-0 ${expiry.isExpired ? "text-red-600 dark:text-red-400 font-medium" : "text-muted-foreground"}`}
                           >
@@ -629,27 +635,202 @@ export function TaskDetailDialog({
                         </div>
                       )
                     })
-                  ) : (
+                  ) : !displayFileKeys.length ? (
                     <div className="w-full border rounded-md bg-muted/30 p-4 text-center text-muted-foreground min-h-[52px] flex items-center justify-center text-sm">
                       첨부파일이 없습니다
                     </div>
-                  )
-                })()
-              ) : !task.comment_file_keys?.length ? (
-                <div className="w-full border rounded-md bg-muted/30 p-4 text-center text-muted-foreground min-h-[52px] flex items-center justify-center text-sm">
-                  첨부파일이 없습니다
+                  ) : (
+                    <div className="w-full text-muted-foreground text-sm">
+                      파일 정보를 불러오는 중...
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="w-full text-muted-foreground text-sm">
-                  파일 정보를 불러오는 중...
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">담당자 첨부파일</Label>
+                <div className="flex flex-wrap gap-2 p-2 border border-transparent rounded-md bg-transparent min-h-[52px]">
+                  {commentResolvedFileKeys.length > 0 ? (
+                    (() => {
+                      const assigneeFileKeys = commentResolvedFileKeys.filter(
+                        (r) => r.userId === displayTask.assigned_to
+                      )
+                      return assigneeFileKeys.length > 0 ? (
+                        assigneeFileKeys.map((resolved, index) => {
+                          const expiry = calculateFileExpiry(resolved.uploadedAt ?? null)
+                          return (
+                            <div
+                              key={index}
+                              role="button"
+                              tabIndex={expiry.isExpired ? -1 : 0}
+                              className={`flex items-center gap-2 px-2 py-1 rounded border text-sm ${expiry.isExpired ? "bg-red-50 border-red-300 dark:bg-red-950/20 dark:border-red-800 cursor-not-allowed" : "bg-transparent cursor-pointer"}`}
+                              onClick={() => {
+                                if (expiry.isExpired) return
+                                handleDownloadWithProgress(
+                                  resolved.s3Key,
+                                  resolved.fileName
+                                )
+                              }}
+                              onKeyDown={(e) => {
+                                if (expiry.isExpired) return
+                                if (e.key === "Enter")
+                                  handleDownloadWithProgress(
+                                    resolved.s3Key,
+                                    resolved.fileName
+                                  )
+                              }}
+                            >
+                              <FileText className={`h-4 w-4 shrink-0 ${expiry.isExpired ? "text-red-500" : "text-muted-foreground"}`} />
+                              <span className={`max-w-[200px] truncate ${expiry.isExpired ? "text-red-600 dark:text-red-400 line-through" : "hover:underline"}`}>
+                                {resolved.fileName}
+                              </span>
+                              <span
+                                className={`text-xs shrink-0 ${expiry.isExpired ? "text-red-600 dark:text-red-400 font-medium" : "text-muted-foreground"}`}
+                              >
+                                ({expiry.expiryText})
+                              </span>
+                            </div>
+                          )
+                        })
+                      ) : (
+                        <div className="w-full border rounded-md bg-muted/30 p-4 text-center text-muted-foreground min-h-[52px] flex items-center justify-center text-sm">
+                          첨부파일이 없습니다
+                        </div>
+                      )
+                    })()
+                  ) : !displayCommentFileKeys.length ? (
+                    <div className="w-full border rounded-md bg-muted/30 p-4 text-center text-muted-foreground min-h-[52px] flex items-center justify-center text-sm">
+                      첨부파일이 없습니다
+                    </div>
+                  ) : (
+                    <div className="w-full text-muted-foreground text-sm">
+                      파일 정보를 불러오는 중...
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
+            </>
+          )}
+
+          {/* 공동 업무 전용: 서브태스크별 요청자·담당자 내용 + 첨부파일 */}
+          {isJointTask && (
+            <div className="space-y-4 pt-4 border-t">
+              {subtasks.map((st: any) => {
+                const stContent = st.content ?? ""
+                const stComment = st.comment
+                  ? st.comment.startsWith("\n")
+                    ? st.comment.substring(1)
+                    : st.comment
+                  : ""
+                return (
+                  <div key={st.id} className="rounded-lg border bg-muted/20 p-3 space-y-3">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      {st.title || st.subtitle || "서브태스크"}
+                    </p>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div>
+                        <p className="text-[11px] font-medium text-muted-foreground mb-1">요청자 내용</p>
+                        <div className="text-sm border rounded-md bg-muted/30 p-2 min-h-[60px] overflow-y-auto max-h-[200px]">
+                          {stContent ? (
+                            <div className="p-2 prose prose-sm max-w-none task-detail-prose" dangerouslySetInnerHTML={{ __html: sanitizeHtml(stContent) }} />
+                          ) : (
+                            <span className="text-muted-foreground">내용이 없습니다</span>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-medium text-muted-foreground mb-1">담당자 내용</p>
+                        <div className="text-sm border rounded-md bg-muted/30 p-2 min-h-[60px] overflow-y-auto max-h-[200px]">
+                          {stComment ? (
+                            <div className="p-2 prose prose-sm max-w-none task-detail-prose" dangerouslySetInnerHTML={{ __html: sanitizeHtml(stComment) }} />
+                          ) : (
+                            <span className="text-muted-foreground">내용이 없습니다</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+
+              <div className="space-y-2 pt-2">
+                <Label className="text-sm font-semibold">첨부파일</Label>
+                <div className="flex flex-wrap gap-2 p-2 border border-transparent rounded-md bg-transparent min-h-[52px]">
+                  {resolvedFileKeys.length > 0 || commentResolvedFileKeys.length > 0 ? (
+                    <>
+                      {resolvedFileKeys.map((resolved, index) => {
+                        const expiry = calculateFileExpiry(displayTask.created_at)
+                        return (
+                          <div
+                            key={`req-${index}`}
+                            className={`flex items-center gap-2 px-2 py-1 rounded border text-sm ${expiry.isExpired ? "bg-red-50 border-red-300 dark:bg-red-950/20 dark:border-red-800" : "bg-transparent"}`}
+                          >
+                            <FileText className={`h-4 w-4 shrink-0 ${expiry.isExpired ? "text-red-500" : "text-muted-foreground"}`} />
+                            <button
+                              type="button"
+                              className={`text-left max-w-[200px] truncate ${expiry.isExpired ? "cursor-not-allowed text-red-600 dark:text-red-400 line-through" : "cursor-pointer hover:underline"}`}
+                              onClick={() => {
+                                if (expiry.isExpired) return
+                                handleDownloadWithProgress(resolved.s3Key, resolved.fileName)
+                              }}
+                              disabled={expiry.isExpired}
+                            >
+                              {resolved.fileName}
+                            </button>
+                            <span className={`text-xs shrink-0 ${expiry.isExpired ? "text-red-600 dark:text-red-400 font-medium" : "text-muted-foreground"}`}>
+                              ({expiry.expiryText})
+                            </span>
+                          </div>
+                        )
+                      })}
+                      {commentResolvedFileKeys.map((resolved, index) => {
+                        const expiry = calculateFileExpiry(resolved.uploadedAt ?? null)
+                        return (
+                          <div
+                            key={`cmt-${index}`}
+                            role="button"
+                            tabIndex={expiry.isExpired ? -1 : 0}
+                            className={`flex items-center gap-2 px-2 py-1 rounded border text-sm ${expiry.isExpired ? "bg-red-50 border-red-300 dark:bg-red-950/20 dark:border-red-800 cursor-not-allowed" : "bg-transparent cursor-pointer"}`}
+                            onClick={() => {
+                              if (expiry.isExpired) return
+                              handleDownloadWithProgress(resolved.s3Key, resolved.fileName)
+                            }}
+                            onKeyDown={(e) => {
+                              if (expiry.isExpired) return
+                              if (e.key === "Enter") handleDownloadWithProgress(resolved.s3Key, resolved.fileName)
+                            }}
+                          >
+                            <FileText className={`h-4 w-4 shrink-0 ${expiry.isExpired ? "text-red-500" : "text-muted-foreground"}`} />
+                            <span className={`max-w-[200px] truncate ${expiry.isExpired ? "text-red-600 dark:text-red-400 line-through" : "hover:underline"}`}>
+                              {resolved.fileName}
+                            </span>
+                            <span className={`text-xs shrink-0 ${expiry.isExpired ? "text-red-600 dark:text-red-400 font-medium" : "text-muted-foreground"}`}>
+                              ({expiry.expiryText})
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </>
+                  ) : !displayFileKeys.length && !displayCommentFileKeys.length ? (
+                    <div className="w-full border rounded-md bg-muted/30 p-4 text-center text-muted-foreground min-h-[52px] flex items-center justify-center text-sm">
+                      첨부파일이 없습니다
+                    </div>
+                  ) : (
+                    <div className="w-full text-muted-foreground text-sm">
+                      파일 정보를 불러오는 중...
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="pt-4 border-t">
             <TaskCommentSection
-              taskId={task.id}
+              taskId={displayTask.id}
+              taskIds={commentTaskIds}
+              taskIdToRole={taskIdToRole}
+              pollInterval={15000}
               me={user}
               allowWrite={false}
               allowDelete={false}
@@ -658,10 +839,10 @@ export function TaskDetailDialog({
         </div>
 
         <div className="flex justify-end mt-4 pt-4 border-t gap-2">
-          {onEditTask && task.status !== "awaiting_completion" && (
+          {onEditTask && displayTask.status !== "awaiting_completion" && (
             <Button
               type="button"
-              onClick={() => onEditTask(task)}
+              onClick={() => onEditTask(displayTask)}
               variant="outline"
               className="gap-2 cursor-pointer"
             >

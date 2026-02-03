@@ -126,7 +126,7 @@
 
 2. **`app/api/storage/upload/route.ts`**
    - MIME 타입 검증 추가
-   - 폴더 업로드 및 단일 파일 업로드 모두 적용
+   - 폴더 업로드 및 개별 파일 업로드 모두 적용
 
 #### 보안 효과
 - ✅ 확장자 조작 공격 방어 (예: `malware.exe` → `malware.jpg`)

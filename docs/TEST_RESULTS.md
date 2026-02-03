@@ -101,7 +101,7 @@
 ### 3.2 데이터베이스 모듈 (lib/database)
 **테스트 항목**:
 - ✅ `query()` - MySQL 쿼리 실행
-- ✅ `queryOne()` - 단일 결과 조회
+- ✅ `queryOne()` - 개별 결과 조회
 - ✅ `getPool()` - 연결 풀 관리
 - ✅ `createClient()` (server) - 서버 사이드 클라이언트
 - ✅ `createClient()` (client) - 클라이언트 사이드 클라이언트

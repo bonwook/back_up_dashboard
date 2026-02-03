@@ -268,7 +268,7 @@ export default function ClientUploadPage() {
         })
       }
     } else {
-      // 단일 파일 업로드 처리
+      // 개별 파일 업로드 처리
       const file = files[0]
       
       // 기타 타입 선택 시 기존 확장자 파일인지 확인
@@ -495,7 +495,7 @@ export default function ClientUploadPage() {
       }
     }
     
-    // 단일 파일 업로드 시 크기 제한 재확인
+    // 개별 파일 업로드 시 크기 제한 재확인
     if (!isFolderUpload && uploadedFile) {
       const MAX_FILE_SIZES: Record<string, number> = {
         excel: 50 * 1024 * 1024, // 50MB
@@ -550,7 +550,7 @@ export default function ClientUploadPage() {
         const folderNameToSend = folderName.trim() || (folderPath ? folderPath.split(/[/\\]/).pop() || folderPath : "")
         formData.append("folderName", folderNameToSend)
       } else if (uploadedFile) {
-        // 단일 파일 업로드
+        // 개별 파일 업로드
         formData.append("file", uploadedFile)
         // 7z나 zip 파일은 자동으로 zip 타입으로 처리
         const fileExtension = uploadedFile.name.split('.').pop()?.toLowerCase()

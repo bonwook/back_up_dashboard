@@ -146,7 +146,7 @@ export default function AdminFileUploadPage() {
         description: `${fileArray.length}개의 파일이 업로드됩니다`,
       })
     } else {
-      // 단일 파일 업로드 처리
+      // 개별 파일 업로드 처리
       const file = files[0]
       
       // 파일 크기 제한 검증 (모든 파일 타입에 대해 1GB 제한)
@@ -232,7 +232,7 @@ export default function AdminFileUploadPage() {
       }
     }
     
-    // 단일 파일 업로드 시 크기 제한 재확인
+    // 개별 파일 업로드 시 크기 제한 재확인
     if (!isFolderUpload && uploadedFile) {
       const MAX_FILE_SIZE = 1 * 1024 * 1024 * 1024 // 1GB
       
@@ -308,7 +308,7 @@ export default function AdminFileUploadPage() {
         const folderNameToSend = folderName.trim() || (folderPath ? folderPath.split(/[/\\]/).pop() || folderPath : "")
         formData.append("folderName", folderNameToSend)
       } else if (uploadedFile) {
-        // 단일 파일 업로드
+        // 개별 파일 업로드
         formData.append("file", uploadedFile)
         // 파일 확장자로 자동 감지
         const detectedType = detectFileType(uploadedFile.name)

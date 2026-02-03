@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url)
-    const statusParam = searchParams.get("status") // 배열 형태 또는 단일 값
+    const statusParam = searchParams.get("status") // 배열 형태 또는 개별 값
     const orderBy = searchParams.get("orderBy") || "created_at"
     const orderDir = searchParams.get("orderDir")?.toUpperCase() || "DESC"
 

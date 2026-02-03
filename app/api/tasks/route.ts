@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server"
 import { verifyToken } from "@/lib/auth"
 import { query } from "@/lib/db/mysql"
 
-// GET /api/tasks - 현재 사용자에게 지정된 task 목록 조회 (단일 할당 및 다중 할당 모두 지원)
+// GET /api/tasks - 현재 사용자에게 지정된 task 목록 조회 (개별 할당 및 다중 할당 모두 지원)
 export async function GET(request: NextRequest) {
   try {
     const token = request.cookies.get("auth-token")?.value
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const status = searchParams.get("status") // optional filter
 
-    // 메인 task 가져오기 (단일 할당 및 다중 할당의 메인 task 모두 포함)
+    // 메인 task 가져오기 (개별 할당 및 다중 할당의 메인 task 모두 포함)
     let sql = `
       SELECT 
         ta.*,

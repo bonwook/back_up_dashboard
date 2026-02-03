@@ -296,7 +296,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ files: uploadedFiles, count: uploadedFiles.length })
     }
 
-    // 단일 파일 업로드 처리
+    // 개별 파일 업로드 처리
     if (!file) {
       console.error("[API Upload] No file provided")
       return NextResponse.json({ error: "No file provided" }, { status: 400 })

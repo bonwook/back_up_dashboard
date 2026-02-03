@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
     // 모든 태스크 조회 (완료/미완료 모두)
     if (isStaff) {
       if (assignedToMeOnly) {
-        // Staff + 내 업무만: 본인 관련 태스크만 (단일 할당 + 공동할당 서브태스크 담당 포함)
+        // Staff + 내 업무만: 본인 관련 태스크만 (개별 할당 + 공동할당 서브태스크 담당 포함)
         // 3번째 UNION: 서브태스크로만 할당된 메인 태스크(공동할당) — 본인이 서브태스크 담당이면 캘린더에 표시
         sql = `
           SELECT * FROM (
@@ -200,7 +200,7 @@ export async function GET(request: NextRequest) {
         params = [userId, userId, userId, userId]
       }
     } else {
-      // Client용: 모든 태스크 조회 (단일 할당 + 다중 할당 서브태스크 담당 포함)
+      // Client용: 모든 태스크 조회 (개별 할당 + 다중 할당 서브태스크 담당 포함)
       // 3번째 UNION: 서브태스크로만 할당된 메인 태스크(다중 할당) — 메인 row에 본인이 없어도 서브태스크 담당이면 캘린더에 표시
       sql = `
         SELECT * FROM (

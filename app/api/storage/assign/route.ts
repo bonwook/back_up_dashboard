@@ -15,7 +15,7 @@ interface SubtaskBlock {
   fileKeys: string[]
 }
 
-// POST /api/storage/assign - 파일 업무 등록 (단일 또는 다중 할당 지원)
+// POST /api/storage/assign - 파일 업무 등록 (개별 또는 다중 할당 지원)
 export async function POST(request: NextRequest) {
   try {
     const token = request.cookies.get("auth-token")?.value
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
       // 다중 할당 모드
       return await handleMultiAssignment(decoded.id, title, priority, due_date, assignments)
     } else {
-      // 기존 단일 할당 모드 (하위 호환성 유지)
+      // 기존 개별 할당 모드 (하위 호환성 유지)
       if (fileKeys !== undefined && !Array.isArray(fileKeys)) {
         return NextResponse.json({ error: "파일 키 목록이 올바른 형식이 아닙니다" }, { status: 400 })
       }
@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// 단일 할당 처리 (기존 로직)
+// 개별 할당 처리 (기존 로직)
 async function handleSingleAssignment(
   assignedById: string,
   assignedTo: string,

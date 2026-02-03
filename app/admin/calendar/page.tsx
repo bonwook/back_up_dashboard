@@ -182,6 +182,7 @@ export default function AdminCalendarPage() {
           open={!!selectedTask}
           onOpenChange={(open) => !open && setSelectedTask(null)}
           onTaskUpdate={loadCalendarData}
+          showCompleteButton={false}
         />
       </Suspense>
     </div>

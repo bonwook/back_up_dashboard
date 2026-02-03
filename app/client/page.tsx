@@ -152,7 +152,7 @@ export default function ClientDashboardPage() {
                         )
                       })}
                     
-                    {/* 지정받은 업무 (received) - 단일/다중 할당 모두 포함 */}
+                    {/* 지정받은 업무 (received) - 개별/다중 할당 모두 포함 */}
                     {filterTasks(tasks.received, dayStr).map((task: any, taskIndex: number) => {
                       const overdue = isTaskOverdue(task)
                       const statusColor = getTaskStatusColor(task.status, overdue)

@@ -12,7 +12,7 @@ interface CalendarAssignedToMeToggleProps {
 
 /**
  * 캘린더에서 "내게 부여된 업무만 보기" 토글.
- * 단일 할당(assigned_to) 및 다중 할당(subtask assignees) 모두 포함된 received 목록만 표시할 때 사용.
+ * 개별 할당(assigned_to) 및 다중 할당(subtask assignees) 모두 포함된 received 목록만 표시할 때 사용.
  */
 export function CalendarAssignedToMeToggle({
   checked,

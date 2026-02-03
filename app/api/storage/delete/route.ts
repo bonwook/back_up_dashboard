@@ -167,7 +167,7 @@ export async function DELETE(request: NextRequest) {
         },
       })
     } else {
-      // 단일 파일 삭제
+      // 개별 파일 삭제
       // DB에서 파일 정보 조회
       const [fileRecord] = await query(
         "SELECT id, s3_key FROM user_files WHERE s3_key = ? AND user_id = ?",
