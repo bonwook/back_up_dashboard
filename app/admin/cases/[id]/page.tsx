@@ -1,11 +1,11 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Loader2, Calendar as CalendarIcon, FileText, X, Send } from "lucide-react"
+import { ArrowLeft, Loader2, Calendar as CalendarIcon, FileText, X, Send, Bold, Italic, Underline, Minus, Grid3x3 as TableIcon } from "lucide-react"
 import Link from "next/link"
 import { SafeHtml } from "@/components/safe-html"
 import { sanitizeHtml } from "@/lib/utils/sanitize"
@@ -34,6 +34,7 @@ import { getStatusBadge, getStatusColor, getStatusBorderColor, getPriorityBadge 
 import { FileListItem } from "./components/FileListItem"
 import { StaffSessionBlock } from "./components/StaffSessionBlock"
 import { useSubtaskCompletion } from "@/lib/hooks/useSubtaskCompletion"
+import { useContentEditor } from "@/lib/hooks/useContentEditor"
 
 interface Task {
   id: string
@@ -100,7 +101,10 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [subtasks, setSubtasks] = useState<Subtask[]>([])
   const [selectedSubtask, setSelectedSubtask] = useState<Subtask | null>(null)
   const [isLoadingSubtasks, setIsLoadingSubtasks] = useState(false)
-  
+  const [isEditingRequesterContent, setIsEditingRequesterContent] = useState(false)
+  const [isSavingRequesterContent, setIsSavingRequesterContent] = useState(false)
+  const didSetInitialRequesterContent = useRef(false)
+
   // 서브태스크 완료 처리 hook
   const { completeSubtask, isCompleting: isCompletingSubtask } = useSubtaskCompletion({
     onSuccess: () => {
@@ -108,6 +112,16 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       reloadTask()
     }
   })
+
+  // 요청자 내용 편집용 서식 툴바 (굵게/기울임/밑줄/테이블/구분선)
+  const {
+    editorState: requesterEditorState,
+    updateEditorState: updateRequesterEditorState,
+    tableGridHover: requesterTableGridHover,
+    setTableGridHover: setRequesterTableGridHover,
+    createTable: createRequesterTable,
+    addResizeHandlersToTable: addResizeHandlersToRequesterTable,
+  } = useContentEditor({ editorId: "requester-content-editor", onContentChange: () => {} })
 
   useEffect(() => {
     params.then((p) => {
@@ -263,6 +277,62 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       setTask(data.task)
     }
   }, [taskId])
+
+  // 수정 모드 종료 시 초기화 플래그 리셋 (의존성 배열 길이 고정을 위해 별도 effect)
+  useEffect(() => {
+    if (!isEditingRequesterContent) {
+      didSetInitialRequesterContent.current = false
+    }
+  }, [isEditingRequesterContent])
+
+  // 요청자 내용 편집 시 에디터에 초기값 설정 + 기존 테이블 리사이즈 핸들 부착 (의존성 배열 길이 4개 고정)
+  useEffect(() => {
+    if (!isEditingRequesterContent || !task) return
+    const t = setTimeout(() => {
+      const el = document.getElementById("requester-content-editor") as HTMLElement | null
+      if (!el) return
+      if (!didSetInitialRequesterContent.current) {
+        el.innerHTML = task.content || ""
+        didSetInitialRequesterContent.current = true
+      }
+      el.querySelectorAll("table").forEach((table) => {
+        addResizeHandlersToRequesterTable(table as HTMLTableElement)
+      })
+    }, 0)
+    return () => clearTimeout(t)
+  }, [isEditingRequesterContent, task?.id, task?.content, addResizeHandlersToRequesterTable])
+
+  const handleSaveRequesterContent = useCallback(async () => {
+    if (!taskId || !task) return
+    const el = document.getElementById("requester-content-editor") as HTMLElement | null
+    if (!el) return
+    const raw = el.innerHTML || ""
+    const content = sanitizeHtml(raw.trim() ? raw : "")
+    setIsSavingRequesterContent(true)
+    try {
+      const res = await fetch(`/api/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ content }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error || "요청자 내용 저장 실패")
+      }
+      toast({ title: "저장됨", description: "요청자 내용이 저장되었습니다." })
+      await reloadTask()
+      setIsEditingRequesterContent(false)
+    } catch (e: any) {
+      toast({
+        title: "저장 실패",
+        description: e?.message || "요청자 내용을 저장하는 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSavingRequesterContent(false)
+    }
+  }, [taskId, task, reloadTask, toast])
 
   const loadComments = useCallback(async () => {
     if (!taskId) return
@@ -738,13 +808,206 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       {/* 개별 할당: subtasks가 없을 때 */}
       {subtasks.length === 0 && (
         <div className="space-y-6 mb-6">
-          {/* 요청자 내용 - 항상 표시 */}
+          {/* 요청자 내용 - 항상 표시 (요청자/admin일 때 수정 가능) */}
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-lg">{task.assigned_by_name || task.assigned_by_email} 내용</CardTitle>
+              {canEditTask && !isEditingRequesterContent && (
+                <Button variant="outline" size="sm" onClick={() => setIsEditingRequesterContent(true)}>
+                  수정
+                </Button>
+              )}
             </CardHeader>
             <CardContent>
-              {task.content ? (
+              {canEditTask && isEditingRequesterContent ? (
+                <>
+                  <div
+                    className="border rounded-md overflow-hidden bg-background flex flex-col"
+                    style={{
+                      height: "350px",
+                      minHeight: "350px",
+                      maxHeight: "350px",
+                    }}
+                  >
+                    <div className="flex items-center gap-1 p-2 flex-wrap shrink-0 border-b">
+                      <Button
+                        type="button"
+                        variant={requesterEditorState.bold ? "secondary" : "ghost"}
+                        size="sm"
+                        className={`h-8 w-8 p-0 ${requesterEditorState.bold ? "bg-primary/10" : ""}`}
+                        onClick={(e) => {
+                          e.preventDefault()
+                          const editor = document.getElementById("requester-content-editor")
+                          if (editor) {
+                            editor.focus()
+                            document.execCommand("bold", false)
+                            updateRequesterEditorState()
+                          }
+                        }}
+                        title="굵게 (Ctrl+B)"
+                      >
+                        <Bold className={`h-4 w-4 ${requesterEditorState.bold ? "text-primary" : ""}`} />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={requesterEditorState.italic ? "secondary" : "ghost"}
+                        size="sm"
+                        className={`h-8 w-8 p-0 ${requesterEditorState.italic ? "bg-primary/10" : ""}`}
+                        onClick={(e) => {
+                          e.preventDefault()
+                          const editor = document.getElementById("requester-content-editor")
+                          if (editor) {
+                            editor.focus()
+                            document.execCommand("italic", false)
+                            updateRequesterEditorState()
+                          }
+                        }}
+                        title="기울임 (Ctrl+I)"
+                      >
+                        <Italic className={`h-4 w-4 ${requesterEditorState.italic ? "text-primary" : ""}`} />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={requesterEditorState.underline ? "secondary" : "ghost"}
+                        size="sm"
+                        className={`h-8 w-8 p-0 ${requesterEditorState.underline ? "bg-primary/10" : ""}`}
+                        onClick={(e) => {
+                          e.preventDefault()
+                          const editor = document.getElementById("requester-content-editor")
+                          if (editor) {
+                            editor.focus()
+                            document.execCommand("underline", false)
+                            updateRequesterEditorState()
+                          }
+                        }}
+                        title="밑줄"
+                      >
+                        <Underline className={`h-4 w-4 ${requesterEditorState.underline ? "text-primary" : ""}`} />
+                      </Button>
+                      <div className="w-px h-6 bg-border mx-1" />
+                      <div className="relative">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            setRequesterTableGridHover(
+                              requesterTableGridHover.show
+                                ? { row: 0, col: 0, show: false }
+                                : { row: 0, col: 0, show: true }
+                            )
+                          }}
+                          title="테이블"
+                        >
+                          <TableIcon className="h-4 w-4" />
+                        </Button>
+                        {requesterTableGridHover.show && (
+                          <div
+                            className="absolute top-full left-0 mt-2 bg-background border rounded-lg shadow-xl p-4 z-50 min-w-[280px]"
+                            onMouseLeave={() => setRequesterTableGridHover({ row: 0, col: 0, show: false })}
+                          >
+                            <div className="grid grid-cols-10 gap-1 mb-3">
+                              {Array.from({ length: 100 }).map((_, idx) => {
+                                const row = Math.floor(idx / 10) + 1
+                                const col = (idx % 10) + 1
+                                const isSelected =
+                                  row <= requesterTableGridHover.row && col <= requesterTableGridHover.col
+                                return (
+                                  <div
+                                    key={idx}
+                                    className={`w-5 h-5 border border-border rounded-sm transition-colors ${
+                                      isSelected ? "bg-primary border-primary" : "bg-muted hover:bg-muted/80"
+                                    }`}
+                                    onMouseEnter={() => setRequesterTableGridHover({ row, col, show: true })}
+                                    onClick={() => {
+                                      createRequesterTable(row, col)
+                                      setRequesterTableGridHover({ row: 0, col: 0, show: false })
+                                    }}
+                                  />
+                                )
+                              })}
+                            </div>
+                            <div className="text-sm text-center font-medium text-foreground border-t pt-2">
+                              {requesterTableGridHover.row > 0 && requesterTableGridHover.col > 0
+                                ? `${requesterTableGridHover.row} x ${requesterTableGridHover.col} 테이블`
+                                : "테이블 크기 선택"}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="w-px h-6 bg-border mx-1" />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          const editor = document.getElementById("requester-content-editor") as HTMLElement
+                          if (editor) {
+                            editor.focus()
+                            const hr = document.createElement("hr")
+                            hr.style.border = "none"
+                            hr.style.borderTop = "2px solid #6b7280"
+                            hr.style.margin = "10px 0"
+                            const selection = window.getSelection()
+                            if (selection && selection.rangeCount > 0) {
+                              const range = selection.getRangeAt(0)
+                              range.deleteContents()
+                              range.insertNode(hr)
+                              range.setStartAfter(hr)
+                              range.collapse(true)
+                              selection.removeAllRanges()
+                              selection.addRange(range)
+                            }
+                          }
+                        }}
+                        title="구분선"
+                      >
+                        <Minus className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div
+                      id="requester-content-editor"
+                      contentEditable
+                      suppressContentEditableWarning
+                      data-placeholder="내용을 입력하세요."
+                      onInput={() => {
+                        updateRequesterEditorState()
+                        const editor = document.getElementById("requester-content-editor")
+                        if (editor) {
+                          editor.querySelectorAll("table[data-resizable='true']").forEach((table) => {
+                            addResizeHandlersToRequesterTable(table as HTMLTableElement)
+                          })
+                        }
+                      }}
+                      onBlur={updateRequesterEditorState}
+                      onMouseUp={updateRequesterEditorState}
+                      onKeyUp={updateRequesterEditorState}
+                      className="text-sm p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 custom-scrollbar focus:outline-none focus:ring-0 resize-none w-full min-w-0"
+                      style={{
+                        minHeight: "280px",
+                        whiteSpace: "pre-wrap",
+                      }}
+                    />
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <Button size="sm" onClick={handleSaveRequesterContent} disabled={isSavingRequesterContent}>
+                      {isSavingRequesterContent ? <Loader2 className="h-4 w-4 animate-spin" /> : "저장"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setIsEditingRequesterContent(false)}
+                      disabled={isSavingRequesterContent}
+                    >
+                      취소
+                    </Button>
+                  </div>
+                </>
+              ) : task.content ? (
                 <div
                   className="border rounded-md overflow-hidden bg-background"
                   style={{
@@ -834,13 +1097,206 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       {/* 공동 할당: subtasks가 있을 때 */}
       {subtasks.length > 0 && (
         <div className="space-y-6 mb-6">
-          {/* 요청자 내용 - 항상 표시 */}
+          {/* 요청자 내용 - 항상 표시 (요청자/admin일 때 수정 가능) */}
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-lg">요청자 내용</CardTitle>
+              {canEditTask && !isEditingRequesterContent && (
+                <Button variant="outline" size="sm" onClick={() => setIsEditingRequesterContent(true)}>
+                  수정
+                </Button>
+              )}
             </CardHeader>
             <CardContent>
-              {task.content ? (
+              {canEditTask && isEditingRequesterContent ? (
+                <>
+                  <div
+                    className="border rounded-md overflow-hidden bg-background flex flex-col"
+                    style={{
+                      height: "350px",
+                      minHeight: "350px",
+                      maxHeight: "350px",
+                    }}
+                  >
+                    <div className="flex items-center gap-1 p-2 flex-wrap shrink-0 border-b">
+                      <Button
+                        type="button"
+                        variant={requesterEditorState.bold ? "secondary" : "ghost"}
+                        size="sm"
+                        className={`h-8 w-8 p-0 ${requesterEditorState.bold ? "bg-primary/10" : ""}`}
+                        onClick={(e) => {
+                          e.preventDefault()
+                          const editor = document.getElementById("requester-content-editor")
+                          if (editor) {
+                            editor.focus()
+                            document.execCommand("bold", false)
+                            updateRequesterEditorState()
+                          }
+                        }}
+                        title="굵게 (Ctrl+B)"
+                      >
+                        <Bold className={`h-4 w-4 ${requesterEditorState.bold ? "text-primary" : ""}`} />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={requesterEditorState.italic ? "secondary" : "ghost"}
+                        size="sm"
+                        className={`h-8 w-8 p-0 ${requesterEditorState.italic ? "bg-primary/10" : ""}`}
+                        onClick={(e) => {
+                          e.preventDefault()
+                          const editor = document.getElementById("requester-content-editor")
+                          if (editor) {
+                            editor.focus()
+                            document.execCommand("italic", false)
+                            updateRequesterEditorState()
+                          }
+                        }}
+                        title="기울임 (Ctrl+I)"
+                      >
+                        <Italic className={`h-4 w-4 ${requesterEditorState.italic ? "text-primary" : ""}`} />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={requesterEditorState.underline ? "secondary" : "ghost"}
+                        size="sm"
+                        className={`h-8 w-8 p-0 ${requesterEditorState.underline ? "bg-primary/10" : ""}`}
+                        onClick={(e) => {
+                          e.preventDefault()
+                          const editor = document.getElementById("requester-content-editor")
+                          if (editor) {
+                            editor.focus()
+                            document.execCommand("underline", false)
+                            updateRequesterEditorState()
+                          }
+                        }}
+                        title="밑줄"
+                      >
+                        <Underline className={`h-4 w-4 ${requesterEditorState.underline ? "text-primary" : ""}`} />
+                      </Button>
+                      <div className="w-px h-6 bg-border mx-1" />
+                      <div className="relative">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            setRequesterTableGridHover(
+                              requesterTableGridHover.show
+                                ? { row: 0, col: 0, show: false }
+                                : { row: 0, col: 0, show: true }
+                            )
+                          }}
+                          title="테이블"
+                        >
+                          <TableIcon className="h-4 w-4" />
+                        </Button>
+                        {requesterTableGridHover.show && (
+                          <div
+                            className="absolute top-full left-0 mt-2 bg-background border rounded-lg shadow-xl p-4 z-50 min-w-[280px]"
+                            onMouseLeave={() => setRequesterTableGridHover({ row: 0, col: 0, show: false })}
+                          >
+                            <div className="grid grid-cols-10 gap-1 mb-3">
+                              {Array.from({ length: 100 }).map((_, idx) => {
+                                const row = Math.floor(idx / 10) + 1
+                                const col = (idx % 10) + 1
+                                const isSelected =
+                                  row <= requesterTableGridHover.row && col <= requesterTableGridHover.col
+                                return (
+                                  <div
+                                    key={idx}
+                                    className={`w-5 h-5 border border-border rounded-sm transition-colors ${
+                                      isSelected ? "bg-primary border-primary" : "bg-muted hover:bg-muted/80"
+                                    }`}
+                                    onMouseEnter={() => setRequesterTableGridHover({ row, col, show: true })}
+                                    onClick={() => {
+                                      createRequesterTable(row, col)
+                                      setRequesterTableGridHover({ row: 0, col: 0, show: false })
+                                    }}
+                                  />
+                                )
+                              })}
+                            </div>
+                            <div className="text-sm text-center font-medium text-foreground border-t pt-2">
+                              {requesterTableGridHover.row > 0 && requesterTableGridHover.col > 0
+                                ? `${requesterTableGridHover.row} x ${requesterTableGridHover.col} 테이블`
+                                : "테이블 크기 선택"}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="w-px h-6 bg-border mx-1" />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          const editor = document.getElementById("requester-content-editor") as HTMLElement
+                          if (editor) {
+                            editor.focus()
+                            const hr = document.createElement("hr")
+                            hr.style.border = "none"
+                            hr.style.borderTop = "2px solid #6b7280"
+                            hr.style.margin = "10px 0"
+                            const selection = window.getSelection()
+                            if (selection && selection.rangeCount > 0) {
+                              const range = selection.getRangeAt(0)
+                              range.deleteContents()
+                              range.insertNode(hr)
+                              range.setStartAfter(hr)
+                              range.collapse(true)
+                              selection.removeAllRanges()
+                              selection.addRange(range)
+                            }
+                          }
+                        }}
+                        title="구분선"
+                      >
+                        <Minus className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div
+                      id="requester-content-editor"
+                      contentEditable
+                      suppressContentEditableWarning
+                      data-placeholder="내용을 입력하세요."
+                      onInput={() => {
+                        updateRequesterEditorState()
+                        const editor = document.getElementById("requester-content-editor")
+                        if (editor) {
+                          editor.querySelectorAll("table[data-resizable='true']").forEach((table) => {
+                            addResizeHandlersToRequesterTable(table as HTMLTableElement)
+                          })
+                        }
+                      }}
+                      onBlur={updateRequesterEditorState}
+                      onMouseUp={updateRequesterEditorState}
+                      onKeyUp={updateRequesterEditorState}
+                      className="text-sm p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 custom-scrollbar focus:outline-none focus:ring-0 resize-none w-full min-w-0"
+                      style={{
+                        minHeight: "280px",
+                        whiteSpace: "pre-wrap",
+                      }}
+                    />
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <Button size="sm" onClick={handleSaveRequesterContent} disabled={isSavingRequesterContent}>
+                      {isSavingRequesterContent ? <Loader2 className="h-4 w-4 animate-spin" /> : "저장"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setIsEditingRequesterContent(false)}
+                      disabled={isSavingRequesterContent}
+                    >
+                      취소
+                    </Button>
+                  </div>
+                </>
+              ) : task.content ? (
                 <div
                   className="border rounded-md overflow-hidden bg-background"
                   style={{
@@ -982,6 +1438,41 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           border: none;
           border-top: 2px solid #9ca3af;
           margin: 10px 0;
+        }
+        /* 요청자 내용 편집 에디터 */
+        #requester-content-editor:empty:before {
+          content: attr(data-placeholder);
+          color: #9ca3af;
+          pointer-events: none;
+        }
+        #requester-content-editor table {
+          border-collapse: collapse;
+          width: 100%;
+          margin: 10px 0;
+          border: 2px solid #6b7280;
+        }
+        #requester-content-editor table td,
+        #requester-content-editor table th {
+          border: 2px solid #6b7280;
+          padding: 8px;
+          position: relative;
+        }
+        #requester-content-editor table td u,
+        #requester-content-editor table th u,
+        #requester-content-editor table td[style*="underline"],
+        #requester-content-editor table th[style*="underline"] {
+          text-decoration: none !important;
+        }
+        #requester-content-editor hr {
+          border: none;
+          border-top: 2px solid #9ca3af;
+          margin: 10px 0;
+        }
+        table[data-resizable="true"] td[contenteditable="true"] u,
+        table[data-resizable="true"] th[contenteditable="true"] u,
+        table[data-resizable="true"] td[contenteditable="true"][style*="underline"],
+        table[data-resizable="true"] th[contenteditable="true"][style*="underline"] {
+          text-decoration: none !important;
         }
         
         /* 스크롤바 스타일 */

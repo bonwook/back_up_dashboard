@@ -320,8 +320,20 @@ export async function PATCH(
       }
     }
 
-    if (task.assigned_to !== decoded.id && !isAdminOrStaff) {
+    const isAssignee = task.assigned_to === decoded.id
+    const isRequester = task.assigned_by === decoded.id
+    if (!isAssignee && !isRequester && !isAdminOrStaff) {
       return NextResponse.json({ error: "권한이 없습니다" }, { status: 403 })
+    }
+
+    // 요청자(assigned_by)는 요청자 내용·첨부·마감일·작업완료만 수정 가능
+    if (isRequester && !isAdminOrStaff) {
+      if (comment !== undefined || comment_file_keys !== undefined) {
+        return NextResponse.json({ error: "요청자는 담당자 내용·첨부파일을 수정할 수 없습니다" }, { status: 403 })
+      }
+      if (status !== undefined && !(status === "completed" && task.current_status === "awaiting_completion")) {
+        return NextResponse.json({ error: "요청자는 작업완료 처리만 상태 변경할 수 있습니다" }, { status: 403 })
+      }
     }
 
     // 상태 업데이트 또는 description 업데이트
