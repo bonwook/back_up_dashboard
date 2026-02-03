@@ -79,6 +79,8 @@ export interface TaskDetailDialogProps {
   userRole?: string | null
   /** client progress에서만 태스크 제거 버튼 표시 */
   showDeleteTaskButton?: boolean
+  /** 작업 끝내기 버튼 표시 (admin progress에서 담당자 본인일 때 false 전달) */
+  showCompleteButton?: boolean
   /** progress 페이지에서 마감일 편집 표시 */
   showDueDateEditor?: boolean
 }
@@ -142,6 +144,7 @@ export function TaskDetailDialog({
   setFinalizedTaskIds,
   userRole: propUserRole,
   showDeleteTaskButton = false,
+  showCompleteButton = true,
   showDueDateEditor = false,
 }: TaskDetailDialogProps) {
   const { toast } = useToast()
@@ -642,7 +645,7 @@ export function TaskDetailDialog({
               작성
             </Button>
           )}
-          {canComplete && (
+          {canComplete && showCompleteButton && (
               <Button
                 type="button"
                 onClick={() => setShowCompleteDialog(true)}

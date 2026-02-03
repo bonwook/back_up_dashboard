@@ -2184,7 +2184,8 @@ export default function AdminProgressPage() {
         finalizedTaskIds={finalizedTaskIds}
         setFinalizedTaskIds={setFinalizedTaskIds}
         userRole={userRole ?? user?.role}
-        showDeleteTaskButton={true}
+        showDeleteTaskButton={!selectedTask || user?.id !== selectedTask.assigned_to}
+        showCompleteButton={!selectedTask || user?.id !== selectedTask.assigned_to}
         showDueDateEditor={false}
         onEditTask={async (task) => {
           let mainTaskContent = task.content || ""
