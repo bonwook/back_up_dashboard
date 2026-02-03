@@ -734,10 +734,10 @@ export function TaskDetailDialog({
                     <p className="text-xs font-medium text-muted-foreground">
                       {blockTitle}
                     </p>
-                    <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="space-y-3">
                       <div>
                         <p className="text-[11px] font-medium text-muted-foreground mb-1">요청자 내용</p>
-                        <div className="text-sm border rounded-md bg-muted/30 p-2 min-h-[60px] overflow-y-auto max-h-[200px]">
+                        <div className="text-sm border rounded-md bg-muted/30 p-2 min-h-[140px] overflow-y-auto max-h-[400px]">
                           {firstContent ? (
                             <div className="p-2 prose prose-sm max-w-none task-detail-prose" dangerouslySetInnerHTML={{ __html: sanitizeHtml(firstContent) }} />
                           ) : (
@@ -745,29 +745,26 @@ export function TaskDetailDialog({
                           )}
                         </div>
                       </div>
-                      <div className="space-y-2">
-                        <p className="text-[11px] font-medium text-muted-foreground mb-1">담당자 내용</p>
-                        {group.map((st: any) => {
-                          const stComment = st.comment
-                            ? st.comment.startsWith("\n")
-                              ? st.comment.substring(1)
-                              : st.comment
-                            : ""
-                          const assigneeLabel = st.assigned_to_name || st.assigned_to_email || "담당자"
-                          return (
-                            <div key={st.id} className="border rounded-md bg-muted/30 p-2">
-                              <p className="text-[10px] font-medium text-muted-foreground mb-1">{assigneeLabel}</p>
-                              <div className="text-sm min-h-[40px] overflow-y-auto max-h-[160px]">
-                                {stComment ? (
-                                  <div className="p-1.5 prose prose-sm max-w-none task-detail-prose" dangerouslySetInnerHTML={{ __html: sanitizeHtml(stComment) }} />
-                                ) : (
-                                  <span className="text-muted-foreground">내용이 없습니다</span>
-                                )}
-                              </div>
+                      {group.map((st: any) => {
+                        const stComment = st.comment
+                          ? st.comment.startsWith("\n")
+                            ? st.comment.substring(1)
+                            : st.comment
+                          : ""
+                        const assigneeLabel = st.assigned_to_name || st.assigned_to_email || "담당자"
+                        return (
+                          <div key={st.id}>
+                            <p className="text-[11px] font-medium text-muted-foreground mb-1">담당자: {assigneeLabel}</p>
+                            <div className="text-sm border rounded-md bg-muted/30 p-2 min-h-[120px] overflow-y-auto max-h-[360px]">
+                              {stComment ? (
+                                <div className="p-2 prose prose-sm max-w-none task-detail-prose" dangerouslySetInnerHTML={{ __html: sanitizeHtml(stComment) }} />
+                              ) : (
+                                <span className="text-muted-foreground">내용이 없습니다</span>
+                              )}
                             </div>
-                          )
-                        })}
-                      </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )
@@ -858,7 +855,7 @@ export function TaskDetailDialog({
           </div>
         </div>
 
-        <div className="flex justify-end mt-4 pt-4 border-t gap-2">
+        <div className="flex justify-end mt-4 pt-4 gap-2">
           {onEditTask && displayTask.status !== "awaiting_completion" && (
             <Button
               type="button"
