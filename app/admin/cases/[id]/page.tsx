@@ -323,6 +323,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       toast({ title: "저장됨", description: "요청자 내용이 저장되었습니다." })
       await reloadTask()
       setIsEditingRequesterContent(false)
+      window.dispatchEvent(new CustomEvent("task-content-updated", { detail: { taskId } }))
+      router.refresh()
     } catch (e: any) {
       toast({
         title: "저장 실패",

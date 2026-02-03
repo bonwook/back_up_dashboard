@@ -169,6 +169,34 @@ export default function ClientProgressPage() {
     loadTasks()
   }, [loadTasks])
 
+  // 케이스 상세에서 요청자 내용 수정 시 해당 task 카드 반영
+  useEffect(() => {
+    const handler = async (e: Event) => {
+      const { taskId } = (e as CustomEvent<{ taskId: string }>).detail
+      try {
+        const res = await fetch(`/api/tasks/${taskId}`, { credentials: "include" })
+        if (!res.ok) return
+        const data = await res.json()
+        const updated = data.task
+        if (!updated) return
+        setTasks((prev) =>
+          prev.map((t) => (t.id === taskId ? { ...t, ...updated } : t))
+        )
+      } catch {
+        // 무시
+      }
+    }
+    window.addEventListener("task-content-updated", handler)
+    return () => window.removeEventListener("task-content-updated", handler)
+  }, [])
+
+  // 다른 탭에서 수정 후 이 탭으로 돌아오면 목록 새로고침
+  useEffect(() => {
+    const onFocus = () => loadTasks()
+    window.addEventListener("focus", onFocus)
+    return () => window.removeEventListener("focus", onFocus)
+  }, [loadTasks])
+
   const handleStatusChange = useCallback(async (taskId: string, newStatus: TaskStatus) => {
     setUpdatingTaskId(taskId)
     try {
