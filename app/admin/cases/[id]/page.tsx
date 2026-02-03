@@ -1032,7 +1032,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   className={`flex ${isMe ? "justify-end" : "justify-start"}`}
                 >
                   <div className={`flex flex-col max-w-[85%] sm:max-w-[75%] ${isMe ? "items-end" : "items-start"}`}>
-                    <div className={`flex items-center gap-2 px-2 mb-1 ${isMe ? "flex-row-reverse" : ""}`}>
+                    <div className="flex items-center gap-2 px-2 mb-1">
                       <span className="text-[11px] font-medium text-foreground/90">
                         {c.full_name || "사용자"}
                       </span>
@@ -1045,31 +1045,27 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                           minute: "2-digit",
                         })}
                       </span>
+                      {canDelete && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="ml-auto h-6 w-6 shrink-0 text-red-500 hover:text-red-600 hover:bg-red-500/10"
+                          onClick={() => handleDeleteComment(c.id)}
+                          title="댓글 삭제"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                     </div>
                     <div
                       className={`rounded-2xl px-4 py-3 shadow-md ${bubbleClass}`}
                     >
-                      <div className="flex items-end gap-2">
-                        <div className="text-sm wrap-break-word word-break break-all text-inherit [&_p]:my-0 [&_pre]:whitespace-pre-wrap [&_a]:underline">
-                          <SafeHtml
-                            html={c.content || ""}
-                            className="prose prose-sm max-w-none prose-p:my-0 [&_table]:w-max [&_pre]:whitespace-pre-wrap [&_code]:break-all prose-inherit"
-                          />
-                        </div>
-                        {canDelete && (
-                          <div className="shrink-0 self-end">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 text-current opacity-80 hover:opacity-100 hover:bg-black/10"
-                              onClick={() => handleDeleteComment(c.id)}
-                              title="댓글 삭제"
-                            >
-                              <X className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        )}
+                      <div className="text-sm wrap-break-word word-break break-all text-inherit [&_p]:my-0 [&_pre]:whitespace-pre-wrap [&_a]:underline">
+                        <SafeHtml
+                          html={c.content || ""}
+                          className="prose prose-sm max-w-none prose-p:my-0 [&_table]:w-max [&_pre]:whitespace-pre-wrap [&_code]:break-all prose-inherit"
+                        />
                       </div>
                     </div>
                   </div>

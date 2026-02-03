@@ -650,13 +650,13 @@ export default function ClientProgressPage() {
                   </div>
                 ) : (
                   <>
-                  {/* 단일/공동 업무 표시 */}
+                  {/* 단일/공동 업무 표시 - 스타일만 공동 업무 스타일로 통일 */}
                   {(() => {
                     const currentTask = tasks.find(t => t.id === workTaskId)
                     const isMulti = currentTask?.is_multi_assign === true
                     return (
                       <div className="flex items-center gap-2 pb-2 border-b">
-                        <Badge variant={isMulti ? "secondary" : "outline"} className="text-sm shrink-0">
+                        <Badge variant="secondary" className="text-sm shrink-0">
                           {isMulti ? "공동 업무" : "단일 업무"}
                         </Badge>
                       </div>
