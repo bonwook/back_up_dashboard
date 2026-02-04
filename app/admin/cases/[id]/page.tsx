@@ -101,10 +101,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [isPostingComment, setIsPostingComment] = useState(false)
   const [subtasks, setSubtasks] = useState<Subtask[]>([])
   const [selectedSubtask, setSelectedSubtask] = useState<Subtask | null>(null)
+  /** 공동 업무에서 부제 태그 클릭 시 선택된 부제 (해당 부제의 요청자 내용 + 분담 블록만 표시) */
+  const [selectedSubtitle, setSelectedSubtitle] = useState<string | null>(null)
   const [isLoadingSubtasks, setIsLoadingSubtasks] = useState(false)
   const [isEditingRequesterContent, setIsEditingRequesterContent] = useState(false)
   const [isSavingRequesterContent, setIsSavingRequesterContent] = useState(false)
   const didSetInitialRequesterContent = useRef(false)
+  /** 공동 수정 시 에디터에 마지막으로 로드한 소스(부제) 추적 — 부제 전환 시 에디터 내용 갱신용 */
+  const lastRequesterContentSourceRef = useRef<{ taskId: string; subtitle: string | null } | null>(null)
 
   // 서브태스크 완료 처리 hook
   const { completeSubtask, isCompleting: isCompletingSubtask } = useSubtaskCompletion({
@@ -283,59 +287,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   useEffect(() => {
     if (!isEditingRequesterContent) {
       didSetInitialRequesterContent.current = false
+      lastRequesterContentSourceRef.current = null
     }
   }, [isEditingRequesterContent])
-
-  // 요청자 내용 편집 시 에디터에 초기값 설정 + 기존 테이블 리사이즈 핸들 부착 (의존성 배열 길이 4개 고정)
-  useEffect(() => {
-    if (!isEditingRequesterContent || !task) return
-    const t = setTimeout(() => {
-      const el = document.getElementById("requester-content-editor") as HTMLElement | null
-      if (!el) return
-      if (!didSetInitialRequesterContent.current) {
-        el.innerHTML = task.content || ""
-        didSetInitialRequesterContent.current = true
-      }
-      el.querySelectorAll("table").forEach((table) => {
-        addResizeHandlersToRequesterTable(table as HTMLTableElement)
-      })
-    }, 0)
-    return () => clearTimeout(t)
-  }, [isEditingRequesterContent, task?.id, task?.content, addResizeHandlersToRequesterTable])
-
-  const handleSaveRequesterContent = useCallback(async () => {
-    if (!taskId || !task) return
-    const el = document.getElementById("requester-content-editor") as HTMLElement | null
-    if (!el) return
-    const raw = el.innerHTML || ""
-    const content = sanitizeHtml(raw.trim() ? raw : "")
-    setIsSavingRequesterContent(true)
-    try {
-      const res = await fetch(`/api/tasks/${taskId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ content }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.error || "요청자 내용 저장 실패")
-      }
-      toast({ title: "저장됨", description: "요청자 내용이 저장되었습니다." })
-      await reloadTask()
-      setIsEditingRequesterContent(false)
-      window.dispatchEvent(new CustomEvent("task-content-updated", { detail: { taskId } }))
-      router.refresh()
-    } catch (e: any) {
-      toast({
-        title: "저장 실패",
-        description: e?.message || "요청자 내용을 저장하는 중 오류가 발생했습니다.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsSavingRequesterContent(false)
-    }
-  }, [taskId, task, reloadTask, toast])
 
   const loadComments = useCallback(async () => {
     if (!taskId) return
@@ -477,6 +431,87 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       tasks,
     }))
   }, [subtasks])
+
+  // 요청자 내용 편집 시 에디터에 초기값 설정 (개별: task.content, 공동: 선택/기본 부제의 첫 서브태스크 content) + 테이블 리사이즈
+  useEffect(() => {
+    if (!isEditingRequesterContent || !task) return
+    const t = setTimeout(() => {
+      const el = document.getElementById("requester-content-editor") as HTMLElement | null
+      if (!el) return
+      const isJoint = subtasks.length > 0
+      const effectiveSubtitle = isJoint ? (selectedSubtitle ?? groupedSubtasks[0]?.subtitle ?? null) : null
+      const contentToLoad = effectiveSubtitle
+        ? (groupedSubtasks.find((g) => g.subtitle === effectiveSubtitle)?.tasks[0]?.content ?? "")
+        : (task.content ?? "")
+      const sourceKey = { taskId: task.id, subtitle: effectiveSubtitle }
+      const prev = lastRequesterContentSourceRef.current
+      if (prev?.taskId !== sourceKey.taskId || prev?.subtitle !== sourceKey.subtitle) {
+        lastRequesterContentSourceRef.current = sourceKey
+        el.innerHTML = contentToLoad
+        didSetInitialRequesterContent.current = true
+      }
+      el.querySelectorAll("table").forEach((table) => {
+        addResizeHandlersToRequesterTable(table as HTMLTableElement)
+      })
+    }, 0)
+    return () => clearTimeout(t)
+  }, [isEditingRequesterContent, task?.id, task?.content, subtasks.length, selectedSubtitle, groupedSubtasks, addResizeHandlersToRequesterTable])
+
+  const handleSaveRequesterContent = useCallback(async () => {
+    if (!taskId || !task) return
+    const el = document.getElementById("requester-content-editor") as HTMLElement | null
+    if (!el) return
+    const raw = el.innerHTML || ""
+    const content = sanitizeHtml(raw.trim() ? raw : "")
+    setIsSavingRequesterContent(true)
+    try {
+      if (subtasks.length > 0) {
+        const effectiveSubtitle = selectedSubtitle ?? groupedSubtasks[0]?.subtitle ?? null
+        const group = effectiveSubtitle ? groupedSubtasks.find((g) => g.subtitle === effectiveSubtitle) : groupedSubtasks[0]
+        if (!group) {
+          toast({ title: "저장 실패", description: "선택된 부제를 찾을 수 없습니다.", variant: "destructive" })
+          return
+        }
+        for (const st of group.tasks) {
+          const res = await fetch(`/api/tasks/${st.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ content, is_subtask: true }),
+          })
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}))
+            throw new Error(err.error || "요청자 내용 저장 실패")
+          }
+        }
+      } else {
+        const res = await fetch(`/api/tasks/${taskId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ content }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.error || "요청자 내용 저장 실패")
+        }
+      }
+      toast({ title: "저장됨", description: "요청자 내용이 저장되었습니다." })
+      await reloadTask()
+      await loadSubtasks()
+      setIsEditingRequesterContent(false)
+      window.dispatchEvent(new CustomEvent("task-content-updated", { detail: { taskId } }))
+      router.refresh()
+    } catch (e: any) {
+      toast({
+        title: "저장 실패",
+        description: e?.message || "요청자 내용을 저장하는 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSavingRequesterContent(false)
+    }
+  }, [taskId, task, subtasks.length, selectedSubtitle, groupedSubtasks, reloadTask, loadSubtasks, toast])
 
   // 실제 resolve된 담당자 첨부파일이 있는 subtaskId 집합 (아이콘은 이 기준으로만 표시)
   const subtaskIdsWithResolvedFiles = useMemo(() => {
@@ -1107,7 +1142,25 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           {/* 요청자 내용 - 항상 표시 (요청자/admin일 때 수정 가능) */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-lg">요청자 내용</CardTitle>
+              <div className="flex items-center gap-2 flex-wrap">
+                <CardTitle className="text-lg">요청자 내용</CardTitle>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {groupedSubtasks.map((group) => (
+                    <Badge
+                      key={group.subtitle}
+                      variant={selectedSubtitle === group.subtitle ? "default" : "outline"}
+                      className="text-[11px] font-normal cursor-pointer shrink-0"
+                      onClick={() => {
+                        const next = selectedSubtitle === group.subtitle ? null : group.subtitle
+                        setSelectedSubtitle(next)
+                        setSelectedSubtask(next ? group.tasks[0] ?? null : selectedSubtask)
+                      }}
+                    >
+                      {group.subtitle}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
               {canEditTask && !isEditingRequesterContent && (
                 <Button variant="outline" size="sm" onClick={() => setIsEditingRequesterContent(true)}>
                   수정
@@ -1303,43 +1356,48 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                     </Button>
                   </div>
                 </>
-              ) : task.content ? (
-                <div
-                  className="border rounded-md overflow-hidden bg-background"
-                  style={{
-                    height: "300px",
-                    minHeight: "300px",
-                    maxHeight: "300px",
-                    display: "flex",
-                    flexDirection: "column",
-                  }}
-                >
-                  <div
-                    id="worklist-content-display-joint"
-                    className="text-sm bg-muted/50 p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 dark:prose-invert custom-scrollbar"
-                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(task.content) }}
-                    style={{
-                      userSelect: "none",
-                      cursor: "default",
-                      whiteSpace: "pre-wrap",
-                    }}
-                  />
-                </div>
-              ) : (
-                <div
-                  className="border rounded-md bg-muted/30 p-4 text-center text-muted-foreground"
-                  style={{
-                    height: "300px",
-                    minHeight: "300px",
-                    maxHeight: "300px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  내용이 없습니다
-                </div>
-              )}
+              ) : (() => {
+                  const displayContent = selectedSubtitle
+                    ? (groupedSubtasks.find((g) => g.subtitle === selectedSubtitle)?.tasks[0]?.content ?? null)
+                    : task.content
+                  return displayContent ? (
+                    <div
+                      className="border rounded-md overflow-hidden bg-background"
+                      style={{
+                        height: "300px",
+                        minHeight: "300px",
+                        maxHeight: "300px",
+                        display: "flex",
+                        flexDirection: "column",
+                      }}
+                    >
+                      <div
+                        id="worklist-content-display-joint"
+                        className="text-sm bg-muted/50 p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 dark:prose-invert custom-scrollbar"
+                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(displayContent) }}
+                        style={{
+                          userSelect: "none",
+                          cursor: "default",
+                          whiteSpace: "pre-wrap",
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div
+                      className="border rounded-md bg-muted/30 p-4 text-center text-muted-foreground"
+                      style={{
+                        height: "300px",
+                        minHeight: "300px",
+                        maxHeight: "300px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      {selectedSubtitle ? "해당 부제의 요청자 내용이 없습니다" : "내용이 없습니다"}
+                    </div>
+                  )
+                })()}
             </CardContent>
           </Card>
 
@@ -1383,14 +1441,17 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   )}
                 </div>
 
-                {/* 서브태스크 목록 스택 */}
+                {/* 서브태스크 목록 스택 (부제 태그 선택 시 해당 부제 블록만 표시) */}
                 <div className="w-[240px] bg-muted/30 overflow-y-auto custom-scrollbar p-2 space-y-3">
                   {isLoadingSubtasks ? (
                     <div className="flex items-center justify-center h-full">
                       <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                     </div>
                   ) : (
-                    groupedSubtasks.map((group) => (
+                    (selectedSubtitle
+                      ? groupedSubtasks.filter((g) => g.subtitle === selectedSubtitle)
+                      : groupedSubtasks
+                    ).map((group) => (
                       <div key={group.subtitle} className="border-2 border-muted rounded-lg p-2 bg-background/50 space-y-1.5">
                         <div className="text-[11px] font-semibold text-foreground/80 mb-1 px-1">
                           {group.subtitle}

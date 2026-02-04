@@ -548,7 +548,17 @@ async function handleSubtaskUpdate(
   const userRole = userRoleRes && userRoleRes.length > 0 ? userRoleRes[0].role : null
   const isAdminOrStaff = userRole === "admin" || userRole === "staff"
 
-  if (subtask.assigned_to !== userId && !isAdminOrStaff) {
+  // 메인 task 요청자(assigned_by) 확인 - 요청자는 서브태스크 요청자 내용(content) 수정 가능
+  const parentTaskRes = await query(
+    "SELECT assigned_by FROM task_assignments WHERE id = ?",
+    [subtask.task_id]
+  )
+  const parentAssignedBy = parentTaskRes && parentTaskRes.length > 0 ? (parentTaskRes[0] as { assigned_by: string }).assigned_by : null
+
+  const canEditAsAssignee = subtask.assigned_to === userId
+  const canEditAsRequester = parentAssignedBy === userId
+
+  if (!canEditAsAssignee && !canEditAsRequester && !isAdminOrStaff) {
     return NextResponse.json({ error: "권한이 없습니다" }, { status: 403 })
   }
 
