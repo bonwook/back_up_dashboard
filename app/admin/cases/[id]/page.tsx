@@ -112,6 +112,11 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const didSetInitialRequesterContent = useRef(false)
   /** 공동 수정 시 에디터에 마지막으로 로드한 소스(부제) 추적 — 부제 전환 시 에디터 내용 갱신용 */
   const lastRequesterContentSourceRef = useRef<{ taskId: string; subtitle: string | null } | null>(null)
+  /** 공동: 요청자 내용 카드에서 "담당업무 표시" 선택 시 true → 내가 작성한 분담내용 표시 */
+  const [showMyAssignment, setShowMyAssignment] = useState(false)
+  const [isEditingMyComment, setIsEditingMyComment] = useState(false)
+  const [isSavingMyComment, setIsSavingMyComment] = useState(false)
+  const didSetMyCommentEditorRef = useRef(false)
 
   // 서브태스크 완료 처리 hook
   const { completeSubtask, isCompleting: isCompletingSubtask } = useSubtaskCompletion({
@@ -469,6 +474,77 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       tasks,
     }))
   }, [subtasks])
+
+  /** 공동: 현재 로그인 사용자에게 할당된 subtask 목록 (담당업무 표시용) */
+  const mySubtasks = useMemo(
+    () => (me?.id ? subtasks.filter((st) => st.assigned_to === me.id) : []),
+    [subtasks, me?.id]
+  )
+  const mySubtaskForComment = mySubtasks[0] ?? null
+
+  // 담당업무 표시 시 분담내용에서 본인(me.id) subtask 블록 자동 선택
+  useEffect(() => {
+    if (!showMyAssignment || !me?.id || subtasks.length === 0) return
+    const mySt = subtasks.find((st) => st.assigned_to === me.id)
+    if (mySt) {
+      setSelectedSubtask(mySt)
+      setSelectedSubtitle(mySt.subtitle)
+    }
+  }, [showMyAssignment, me?.id, subtasks])
+
+  // 내 담당업무 편집 시 에디터에 초기값 한 번만 설정
+  useEffect(() => {
+    if (!isEditingMyComment || !mySubtaskForComment) {
+      didSetMyCommentEditorRef.current = false
+      return
+    }
+    const t = setTimeout(() => {
+      const el = document.getElementById("my-comment-editor") as HTMLElement | null
+      if (!el || didSetMyCommentEditorRef.current) return
+      const raw = mySubtaskForComment.comment ?? ""
+      const commentDisplay = raw.startsWith("\n") ? raw.substring(1) : raw
+      el.innerHTML = sanitizeHtml(commentDisplay)
+      didSetMyCommentEditorRef.current = true
+    }, 0)
+    return () => clearTimeout(t)
+  }, [isEditingMyComment, mySubtaskForComment?.id])
+
+  /** 공동: 내 담당업무(분담내용) 저장 — subtask comment PATCH */
+  const handleSaveMyComment = useCallback(async () => {
+    if (!mySubtaskForComment) return
+    const el = document.getElementById("my-comment-editor") as HTMLElement | null
+    if (!el) return
+    const raw = el.innerHTML || ""
+    const comment = sanitizeHtml(raw.trim() ? raw : "")
+    setIsSavingMyComment(true)
+    try {
+      const res = await fetch(`/api/tasks/${mySubtaskForComment.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ comment, is_subtask: true }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error || "분담내용 저장 실패")
+      }
+      toast({ title: "저장됨", description: "내 담당업무 내용이 저장되었습니다." })
+      await loadSubtasks()
+      setIsEditingMyComment(false)
+      if (taskId) {
+        window.dispatchEvent(new CustomEvent("task-content-updated", { detail: { taskId } }))
+      }
+      router.refresh()
+    } catch (e: any) {
+      toast({
+        title: "저장 실패",
+        description: e?.message || "분담내용을 저장하는 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSavingMyComment(false)
+    }
+  }, [mySubtaskForComment, taskId, loadSubtasks, toast, router])
 
   // 요청자 내용 편집 시 에디터에 초기값 설정 (개별: task.content, 공동: 선택/기본 부제의 첫 서브태스크 content) + 테이블 리사이즈
   useEffect(() => {
@@ -1221,13 +1297,40 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       {/* 공동 할당: subtasks가 있을 때 */}
       {subtasks.length > 0 && (
         <div className="space-y-6 mb-6">
-          {/* 요청자 내용 - 항상 표시 (요청자/admin일 때 수정 가능) */}
+          {/* 요청자 내용 / 내 담당업무 - 토글로 전환 */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <div className="flex items-center gap-2 flex-wrap">
-                <CardTitle className="text-lg">요청자 내용</CardTitle>
+                <CardTitle className="text-lg">
+                  {showMyAssignment ? "내 담당업무" : "요청자 내용"}
+                </CardTitle>
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  {groupedSubtasks.map((group) => (
+                  {mySubtasks.length > 0 &&
+                    (showMyAssignment ? (
+                      <Badge
+                        variant="outline"
+                        className="text-[11px] font-normal cursor-pointer shrink-0"
+                        onClick={() => setShowMyAssignment(false)}
+                      >
+                        요청자 내용
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="text-[11px] font-normal cursor-pointer shrink-0"
+                        onClick={() => {
+                          setShowMyAssignment(true)
+                          const mySub = mySubtasks[0]
+                          if (mySub) {
+                            setSelectedSubtask(mySub)
+                            setSelectedSubtitle(mySub.subtitle)
+                          }
+                        }}
+                      >
+                        담당업무 표시
+                      </Badge>
+                    ))}
+                  {!showMyAssignment && groupedSubtasks.map((group) => (
                     <Badge
                       key={group.subtitle}
                       variant={selectedSubtitle === group.subtitle ? "default" : "outline"}
@@ -1243,14 +1346,93 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   ))}
                 </div>
               </div>
-              {canEditTask && !isEditingRequesterContent && (
+              {!showMyAssignment && canEditTask && !isEditingRequesterContent && (
                 <Button variant="outline" size="sm" onClick={() => setIsEditingRequesterContent(true)}>
+                  수정
+                </Button>
+              )}
+              {showMyAssignment && mySubtaskForComment && !isEditingMyComment && (
+                <Button variant="outline" size="sm" onClick={() => setIsEditingMyComment(true)}>
                   수정
                 </Button>
               )}
             </CardHeader>
             <CardContent>
-              {canEditTask && isEditingRequesterContent ? (
+              {showMyAssignment ? (
+                /* 내 담당업무(분담내용) 표시 및 수정 */
+                (() => {
+                  const commentRaw = mySubtaskForComment?.comment ?? ""
+                  const commentDisplay = commentRaw.startsWith("\n") ? commentRaw.substring(1) : commentRaw
+                  if (isEditingMyComment && mySubtaskForComment) {
+                    return (
+                      <>
+                        <div
+                          className="border rounded-md overflow-hidden bg-background flex flex-col"
+                          style={{
+                            height: "300px",
+                            minHeight: "300px",
+                            maxHeight: "300px",
+                          }}
+                        >
+                          <div
+                            id="my-comment-editor"
+                            contentEditable
+                            suppressContentEditableWarning
+                            data-placeholder="내가 작성한 분담내용을 입력하세요."
+                            className="text-sm p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 custom-scrollbar focus:outline-none focus:ring-0 resize-none w-full min-w-0"
+                            style={{ minHeight: "280px", whiteSpace: "pre-wrap" }}
+                          />
+                        </div>
+                        <div className="flex gap-2 mt-3">
+                          <Button size="sm" onClick={handleSaveMyComment} disabled={isSavingMyComment}>
+                            {isSavingMyComment ? <Loader2 className="h-4 w-4 animate-spin" /> : "저장"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setIsEditingMyComment(false)}
+                            disabled={isSavingMyComment}
+                          >
+                            취소
+                          </Button>
+                        </div>
+                      </>
+                    )
+                  }
+                  return commentDisplay ? (
+                    <div
+                      className="border rounded-md overflow-hidden bg-background"
+                      style={{
+                        height: "300px",
+                        minHeight: "300px",
+                        maxHeight: "300px",
+                        display: "flex",
+                        flexDirection: "column",
+                      }}
+                    >
+                      <div
+                        className="text-sm bg-muted/50 p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 dark:prose-invert custom-scrollbar"
+                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(commentDisplay) }}
+                        style={{ userSelect: "none", cursor: "default", whiteSpace: "pre-wrap" }}
+                      />
+                    </div>
+                  ) : (
+                    <div
+                      className="border rounded-md bg-muted/30 p-4 text-center text-muted-foreground"
+                      style={{
+                        height: "300px",
+                        minHeight: "300px",
+                        maxHeight: "300px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      내가 작성한 분담내용이 없습니다. 수정 버튼으로 작성해 보세요.
+                    </div>
+                  )
+                })()
+              ) : canEditTask && isEditingRequesterContent ? (
                 <>
                   <div
                     className="border rounded-md overflow-hidden bg-background flex flex-col"
@@ -1591,7 +1773,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           margin: 10px 0;
         }
         /* 요청자 내용 편집 에디터 */
-        #requester-content-editor:empty:before {
+        #requester-content-editor:empty:before,
+        #my-comment-editor:empty:before {
           content: attr(data-placeholder);
           color: #9ca3af;
           pointer-events: none;

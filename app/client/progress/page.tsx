@@ -2136,7 +2136,7 @@ export default function ClientProgressPage() {
         showDueDateEditor={true}
         onEditTask={async (task) => {
           let mainTaskContent = task.content || ""
-          let mainTaskFileKeys: string[] = normalizeFileKeys(task.file_keys) ?? []
+          let mainTaskFileKeys: string[] = (normalizeFileKeys(task.file_keys) ?? []) as string[]
 
           if (task.is_subtask && (task as Task).task_id) {
             try {
@@ -2144,7 +2144,7 @@ export default function ClientProgressPage() {
               if (mainTaskRes.ok) {
                 const mainTaskData = await mainTaskRes.json()
                 mainTaskContent = mainTaskData.task?.content || ""
-                mainTaskFileKeys = normalizeFileKeys(mainTaskData.task?.file_keys) ?? []
+                mainTaskFileKeys = (normalizeFileKeys(mainTaskData.task?.file_keys) ?? []) as string[]
               }
             } catch (error) {
               console.error("main task 로드 오류:", error)
