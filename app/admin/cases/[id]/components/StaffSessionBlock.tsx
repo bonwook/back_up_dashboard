@@ -32,6 +32,8 @@ interface StaffSessionBlockProps {
   canCompleteSubtask?: boolean
   /** 실제 resolve된 담당자 첨부파일이 있을 때만 true (아이콘 표시용) */
   hasAttachment?: boolean
+  /** 현재 로그인 사용자 본인 담당 블록이면 true — 분담내용에서 내 블록 강조 */
+  isMyBlock?: boolean
 }
 
 /**
@@ -48,6 +50,7 @@ export function StaffSessionBlock({
   onComplete,
   canCompleteSubtask = true,
   hasAttachment = false,
+  isMyBlock = false,
 }: StaffSessionBlockProps) {
   const isCompleted = subtask.status === "completed"
   const isAwaitingCompletion = subtask.status === "awaiting_completion"
@@ -70,7 +73,9 @@ export function StaffSessionBlock({
       } ${getStatusBorderColor(subtask.status)} ${
         isCompleted
           ? "bg-green-100/50 dark:bg-green-950/30"
-          : "bg-background"
+          : isMyBlock
+            ? "bg-primary/10 dark:bg-primary/20 border-primary/40"
+            : "bg-background"
       }`}
     >
       <div className="space-y-1">

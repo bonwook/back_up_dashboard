@@ -320,6 +320,7 @@ export async function PATCH(
       }
     }
 
+    // 담당자(assigned_to) 또는 staff/admin만 메인 task 수정 가능 — 상태 변경 시 task_assignments에 즉시 반영
     if (task.assigned_to !== decoded.id && !isAdminOrStaff) {
       return NextResponse.json({ error: "권한이 없습니다" }, { status: 403 })
     }
@@ -443,13 +444,11 @@ export async function PATCH(
       return NextResponse.json({ error: "업데이트할 필드가 없습니다" }, { status: 400 })
     }
 
-    // task_assignments 테이블 업데이트
-    if (updateFields.length > 1) {
-      await query(
-        `UPDATE task_assignments SET ${updateFields.join(", ")} WHERE id = ?`,
-        [...updateParams, taskId]
-      )
-    }
+    // task_assignments 테이블에 반영 (status 포함 시 DB에 즉시 저장)
+    await query(
+      `UPDATE task_assignments SET ${updateFields.join(", ")} WHERE id = ?`,
+      [...updateParams, taskId]
+    )
 
     // 상태가 변경된 경우 task_status_history에 기록
     if (statusChanged && status !== undefined) {
@@ -468,7 +467,26 @@ export async function PATCH(
         details: { from: oldStatus, to: status },
       })
 
-      // 본인이 본인에게 할당한 task를 완료한 경우, 모든 subtask도 완료 처리
+      // 공동 업무: 메인 task 상태 변경 시 본인 담당 subtask만 동일 상태로 갱신 (전체 그룹 X)
+      const mySubtasks = await query(
+        `SELECT id FROM task_subtasks WHERE task_id = ? AND assigned_to = ?`,
+        [taskId, decoded.id]
+      )
+      if (mySubtasks && mySubtasks.length > 0) {
+        if (status === "completed") {
+          await query(
+            `UPDATE task_subtasks SET status = ?, completed_at = NOW(), updated_at = NOW() WHERE task_id = ? AND assigned_to = ?`,
+            [status, taskId, decoded.id]
+          )
+        } else {
+          await query(
+            `UPDATE task_subtasks SET status = ?, completed_at = NULL, updated_at = NOW() WHERE task_id = ? AND assigned_to = ?`,
+            [status, taskId, decoded.id]
+          )
+        }
+      }
+
+      // 본인이 본인에게 할당한 task를 완료한 경우, 모든 subtask도 완료 처리 (위에서 이미 처리됐을 수 있음)
       if (status === 'completed' && task.assigned_by === task.assigned_to) {
         // 본인이 본인에게 할당한 경우, 모든 subtask를 완료로 변경
         const subtasksResult = await query(

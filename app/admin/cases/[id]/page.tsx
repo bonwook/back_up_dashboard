@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { ArrowLeft, Loader2, Calendar as CalendarIcon, FileText, X, Send, Bold, Italic, Underline, Minus, Grid3x3 as TableIcon } from "lucide-react"
 import Link from "next/link"
 import { SafeHtml } from "@/components/safe-html"
+import { cn } from "@/lib/utils"
 import { sanitizeHtml } from "@/lib/utils/sanitize"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
@@ -30,7 +31,8 @@ import {
   type ResolvedFileKey,
   type ResolvedSubtaskFile,
 } from "@/lib/utils/fileKeyHelpers"
-import { getStatusBadge, getStatusColor, getStatusBorderColor, getPriorityBadge } from "@/lib/utils/taskStatusHelpers"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { getStatusBadge, getStatusColor, getStatusBorderColor, getStatusTextColor, getPriorityBadge } from "@/lib/utils/taskStatusHelpers"
 import { FileListItem } from "./components/FileListItem"
 import { StaffSessionBlock } from "./components/StaffSessionBlock"
 import { useSubtaskCompletion } from "@/lib/hooks/useSubtaskCompletion"
@@ -86,6 +88,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [userRole, setUserRole] = useState<string | null>(null)
   const [selectedDueDate, setSelectedDueDate] = useState<Date | null>(null)
   const [isUpdatingDueDate, setIsUpdatingDueDate] = useState(false)
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
   const [isDuePopoverOpen, setIsDuePopoverOpen] = useState(false)
   const [resolvedFileKeys, setResolvedFileKeys] = useState<ResolvedFileKey[]>([])
   const [resolvedCommentFileKeys, setResolvedCommentFileKeys] = useState<ResolvedFileKey[]>([])
@@ -351,6 +354,41 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     if (!taskId) return
     loadSubtasks()
   }, [taskId, loadSubtasks])
+
+  type TaskStatusType = "pending" | "in_progress" | "on_hold" | "awaiting_completion" | "completed"
+  const handleStatusChange = useCallback(
+    async (id: string, newStatus: TaskStatusType) => {
+      setIsUpdatingStatus(true)
+      try {
+        const res = await fetch(`/api/tasks/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ status: newStatus }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.error || "상태 업데이트 실패")
+        }
+        await reloadTask()
+        await loadSubtasks()
+        if (taskId) {
+          window.dispatchEvent(new CustomEvent("task-content-updated", { detail: { taskId } }))
+        }
+        toast({ title: "상태가 변경되었습니다." })
+        router.refresh()
+      } catch (e: any) {
+        toast({
+          title: "상태 변경 실패",
+          description: e?.message || "상태를 변경하는 중 오류가 발생했습니다.",
+          variant: "destructive",
+        })
+      } finally {
+        setIsUpdatingStatus(false)
+      }
+    },
+    [taskId, reloadTask, loadSubtasks, toast, router]
+  )
 
   // subtask 첨부파일 resolve
   useEffect(() => {
@@ -673,6 +711,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
 
   // 수정 권한: 요청자(assigned_by) 또는 admin만. 할당받은 staff(assigned_to)는 수정 불가
   const canEditTask = userRole === "admin" || me?.id === task.assigned_by
+  // 담당자(staff/admin)만 상태 변경 가능, 요청자(assigned_by)는 상태 선택 블록 미노출
+  const canChangeStatus =
+    (userRole === "staff" || userRole === "admin") && me?.id !== task.assigned_by
 
   return (
     <div className="mx-auto max-w-7xl p-6">
@@ -685,7 +726,48 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
 
       <Card className="mb-6">
         <CardHeader className="pb-0.5 pt-3">
-          <CardTitle className="text-xl font-bold mb-1">{task.title}</CardTitle>
+          <div className="flex items-start justify-between gap-4 mb-1">
+            <CardTitle className="text-xl font-bold">{task.title}</CardTitle>
+            {canChangeStatus && (
+              <Select
+                value={task.status}
+                onValueChange={(value) => handleStatusChange(task.id, value as TaskStatusType)}
+                disabled={isUpdatingStatus}
+              >
+                <SelectTrigger
+                  className={cn(
+                    "h-7 min-w-22 w-auto max-w-26 text-xs shrink-0 border px-2.5 py-1 font-normal",
+                    getStatusColor(task.status),
+                    getStatusTextColor(task.status)
+                  )}
+                  aria-label="상태 변경"
+                >
+                  {isUpdatingStatus ? (
+                    <span className="flex items-center gap-1.5">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                      변경 중
+                    </span>
+                  ) : (
+                    <SelectValue placeholder="상태" />
+                  )}
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pending" className="text-gray-500 focus:text-gray-500">
+                    대기
+                  </SelectItem>
+                  <SelectItem value="in_progress" className="text-blue-500 focus:text-blue-500">
+                    작업중
+                  </SelectItem>
+                  <SelectItem value="on_hold" className="text-yellow-500 focus:text-yellow-500">
+                    보류
+                  </SelectItem>
+                  <SelectItem value="awaiting_completion" className="text-purple-500 focus:text-purple-500">
+                    완료대기
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
           {/* 중요도, 상태, 생성일, 마감일 */}
           <div className="flex items-center gap-3 text-xs mb-1">
             {/* 중요도 */}
@@ -1466,6 +1548,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                             onComplete={completeSubtask}
                             canCompleteSubtask={canEditTask}
                             hasAttachment={subtaskIdsWithResolvedFiles.has(subtask.id)}
+                            isMyBlock={subtask.assigned_to === me?.id}
                           />
                         ))}
                       </div>

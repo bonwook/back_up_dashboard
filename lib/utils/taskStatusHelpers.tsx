@@ -61,6 +61,26 @@ export function getStatusBorderColor(status: string): string {
 }
 
 /**
+ * 태스크 상태에 따른 글자 색상 클래스 반환 (Select 등에서 사용)
+ */
+export function getStatusTextColor(status: string): string {
+  switch (status) {
+    case "completed":
+      return "text-green-500"
+    case "awaiting_completion":
+      return "text-purple-500"
+    case "in_progress":
+      return "text-blue-500"
+    case "on_hold":
+      return "text-yellow-500"
+    case "pending":
+      return "text-gray-500"
+    default:
+      return "text-foreground"
+  }
+}
+
+/**
  * 중요도에 따른 Badge 컴포넌트 반환
  */
 export function getPriorityBadge(priority: string) {
