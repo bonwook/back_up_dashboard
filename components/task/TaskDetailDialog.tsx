@@ -138,7 +138,7 @@ function getStatusLabel(status: string) {
 }
 
 /** API 응답의 file_keys/comment_file_keys를 string[]로 통일 */
-function normalizeFileKeys(
+export function normalizeFileKeys(
   keys: string[] | { key: string; uploaded_at?: string | null }[] | undefined
 ): string[] {
   if (!keys?.length) return []

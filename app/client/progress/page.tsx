@@ -23,7 +23,7 @@ import { downloadWithProgress } from "@/lib/utils/download-with-progress"
 import { calculateFileExpiry, formatDateShort } from "@/lib/utils/dateHelpers"
 import { Task, TaskStatus, ResolvedFileKey } from "./types"
 import { TaskBlock } from "./components/TaskBoard/TaskBlock"
-import { TaskCommentSection, TaskDetailDialog } from "@/components/task"
+import { TaskCommentSection, TaskDetailDialog, normalizeFileKeys } from "@/components/task"
 import { useWorkEditor } from "./hooks/useWorkEditor"
 import { useCommentEditor } from "./hooks/useCommentEditor"
 
@@ -2136,7 +2136,7 @@ export default function ClientProgressPage() {
         showDueDateEditor={true}
         onEditTask={async (task) => {
           let mainTaskContent = task.content || ""
-          let mainTaskFileKeys: string[] = task.file_keys || []
+          let mainTaskFileKeys: string[] = normalizeFileKeys(task.file_keys) ?? []
 
           if (task.is_subtask && (task as Task).task_id) {
             try {
@@ -2144,7 +2144,7 @@ export default function ClientProgressPage() {
               if (mainTaskRes.ok) {
                 const mainTaskData = await mainTaskRes.json()
                 mainTaskContent = mainTaskData.task?.content || ""
-                mainTaskFileKeys = mainTaskData.task?.file_keys || []
+                mainTaskFileKeys = normalizeFileKeys(mainTaskData.task?.file_keys) ?? []
               }
             } catch (error) {
               console.error("main task 로드 오류:", error)
