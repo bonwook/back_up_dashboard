@@ -56,6 +56,7 @@ interface Task {
   created_at: string
   updated_at: string
   completed_at: string | null
+  is_multi_assign?: boolean
 }
 
 interface Subtask {
@@ -657,6 +658,10 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             
             {/* 상태 */}
             {getStatusBadge(task.status)}
+            {/* 개별/공동 */}
+            <Badge variant={task.is_multi_assign ? "secondary" : "outline"} className="font-normal">
+              {task.is_multi_assign ? "공동" : "개별"}
+            </Badge>
             
             {/* 생성일 */}
             <div className="flex items-center gap-1.5">
