@@ -104,7 +104,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [isPostingComment, setIsPostingComment] = useState(false)
   const [subtasks, setSubtasks] = useState<Subtask[]>([])
   const [selectedSubtask, setSelectedSubtask] = useState<Subtask | null>(null)
-  /** 공동 업무에서 부제 태그 클릭 시 선택된 부제 (요청자 내용 수정 시 편집 대상, showMyAssignment 시 분담 블록 필터) */
+  /** 공동: 요청자 내용 수정 시 편집 대상 부제 */
   const [selectedSubtitle, setSelectedSubtitle] = useState<string | null>(null)
   /** 그룹별 선택된 담당자 블록 (분담내용에서 블록 선택 시) — subtitle -> subtask id */
   const [selectedSubtaskIdBySubtitle, setSelectedSubtaskIdBySubtitle] = useState<Record<string, string | null>>({})
@@ -1304,16 +1304,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             <>
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <CardTitle className="text-lg">내 담당업무</CardTitle>
-                    <Badge
-                      variant="outline"
-                      className="text-[11px] font-normal cursor-pointer shrink-0"
-                      onClick={() => setShowMyAssignment(false)}
-                    >
-                      요청자 내용
-                    </Badge>
-                  </div>
+                  <CardTitle className="text-lg">내 담당업무</CardTitle>
                   {mySubtaskForComment && !isEditingMyComment && (
                     <Button variant="outline" size="sm" onClick={() => setIsEditingMyComment(true)}>
                       수정
@@ -1364,15 +1355,15 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                     <div
                       className="border rounded-md overflow-hidden bg-background"
                       style={{
-                        height: "300px",
-                        minHeight: "300px",
-                        maxHeight: "300px",
+                        height: "420px",
+                        minHeight: "420px",
+                        maxHeight: "420px",
                         display: "flex",
                         flexDirection: "column",
                       }}
                     >
                       <div
-                        className="text-sm bg-muted/50 p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 dark:prose-invert custom-scrollbar"
+                        className="text-base bg-muted/50 p-4 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-base max-w-none flex-1 dark:prose-invert custom-scrollbar"
                         dangerouslySetInnerHTML={{ __html: sanitizeHtml(commentDisplay) }}
                         style={{ userSelect: "none", cursor: "default", whiteSpace: "pre-wrap" }}
                       />
@@ -1404,14 +1395,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="border rounded-md overflow-hidden" style={{ height: "500px", display: "flex", gap: "8px" }}>
+              <div className="border rounded-md overflow-hidden" style={{ height: "560px", display: "flex", gap: "8px" }}>
                 <div className="flex-1 overflow-hidden flex flex-col min-w-0">
                   {selectedSubtask ? (
                     <div className="h-full overflow-y-auto custom-scrollbar">
                       {selectedSubtask.comment && selectedSubtask.comment.trim() ? (
                         <div
                           id="worklist-subtask-content"
-                          className="text-sm bg-muted/50 p-4 prose prose-sm max-w-none dark:prose-invert h-full"
+                          className="text-base bg-muted/50 p-4 prose prose-base max-w-none dark:prose-invert h-full"
                           dangerouslySetInnerHTML={{ __html: sanitizeHtml(selectedSubtask.comment.startsWith('\n') ? selectedSubtask.comment.substring(1) : selectedSubtask.comment) }}
                           style={{
                             userSelect: "none",
@@ -1439,7 +1430,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                     </div>
                   ) : (
-                    (selectedSubtitle ? groupedSubtasks.filter((g) => g.subtitle === selectedSubtitle) : groupedSubtasks).map((group) => (
+                    groupedSubtasks.map((group) => (
                       <div key={group.subtitle} className="border-2 border-muted rounded-lg p-2 bg-background/50 space-y-1.5">
                         <div className="text-[11px] font-semibold text-foreground/80 mb-1 px-1">{group.subtitle}</div>
                         {group.tasks.map((subtask) => (
@@ -1466,25 +1457,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       ) : (
         /* 요청자 내용 보기: 그룹별 요청자 내용 + 분담내용 카드 */
         <>
-          <div className="flex items-center gap-2 flex-wrap mb-2">
-            <CardTitle className="text-lg">요청자 내용</CardTitle>
-            {mySubtasks.length > 0 && (
-              <Badge
-                variant="outline"
-                className="text-[11px] font-normal cursor-pointer shrink-0"
-                onClick={() => {
-                  setShowMyAssignment(true)
-                  const mySub = mySubtasks[0]
-                  if (mySub) {
-                    setSelectedSubtask(mySub)
-                    setSelectedSubtitle(mySub.subtitle)
-                  }
-                }}
-              >
-                담당업무 표시
-              </Badge>
-            )}
-          </div>
           {canEditTask && isEditingRequesterContent && selectedSubtitle && (() => {
             const group = groupedSubtasks.find((g) => g.subtitle === selectedSubtitle)
             if (!group) return null
@@ -1707,27 +1679,27 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 <CardContent className="space-y-4">
                   <div>
                     <p className="text-[11px] font-medium text-muted-foreground mb-1">요청자 내용</p>
-                    <div className="border rounded-md bg-muted/30 p-2 min-h-[80px] overflow-y-auto max-h-[200px]">
+                    <div className="border rounded-md bg-muted/30 p-4 min-h-[280px] overflow-y-auto" style={{ maxHeight: "420px" }}>
                       {groupRequesterContent ? (
                         <div
-                          className="text-sm p-2 prose prose-sm max-w-none dark:prose-invert"
+                          className="text-base p-3 prose prose-base max-w-none dark:prose-invert"
                           dangerouslySetInnerHTML={{ __html: sanitizeHtml(groupRequesterContent) }}
                           style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
                         />
                       ) : (
-                        <span className="text-muted-foreground text-sm">내용이 없습니다</span>
+                        <span className="text-muted-foreground">내용이 없습니다</span>
                       )}
                     </div>
                   </div>
                   <div>
                     <p className="text-[11px] font-medium text-muted-foreground mb-1">분담내용</p>
-                    <div className="border rounded-md overflow-hidden" style={{ height: "400px", display: "flex", gap: "8px" }}>
+                    <div className="border rounded-md overflow-hidden" style={{ height: "520px", display: "flex", gap: "8px" }}>
                       <div className="flex-1 overflow-hidden flex flex-col min-w-0">
                         {selectedSubtaskInGroup ? (
                           <div className="h-full overflow-y-auto custom-scrollbar">
                             {selectedSubtaskInGroup.comment && selectedSubtaskInGroup.comment.trim() ? (
                               <div
-                                className="text-sm bg-muted/50 p-4 prose prose-sm max-w-none dark:prose-invert h-full"
+                                className="text-base bg-muted/50 p-4 prose prose-base max-w-none dark:prose-invert h-full"
                                 dangerouslySetInnerHTML={{
                                   __html: sanitizeHtml(
                                     selectedSubtaskInGroup.comment.startsWith("\n")
