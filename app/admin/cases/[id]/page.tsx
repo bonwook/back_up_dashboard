@@ -104,8 +104,10 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [isPostingComment, setIsPostingComment] = useState(false)
   const [subtasks, setSubtasks] = useState<Subtask[]>([])
   const [selectedSubtask, setSelectedSubtask] = useState<Subtask | null>(null)
-  /** 공동 업무에서 부제 태그 클릭 시 선택된 부제 (해당 부제의 요청자 내용 + 분담 블록만 표시) */
+  /** 공동 업무에서 부제 태그 클릭 시 선택된 부제 (요청자 내용 수정 시 편집 대상, showMyAssignment 시 분담 블록 필터) */
   const [selectedSubtitle, setSelectedSubtitle] = useState<string | null>(null)
+  /** 그룹별 선택된 담당자 블록 (분담내용에서 블록 선택 시) — subtitle -> subtask id */
+  const [selectedSubtaskIdBySubtitle, setSelectedSubtaskIdBySubtitle] = useState<Record<string, string | null>>({})
   const [isLoadingSubtasks, setIsLoadingSubtasks] = useState(false)
   const [isEditingRequesterContent, setIsEditingRequesterContent] = useState(false)
   const [isSavingRequesterContent, setIsSavingRequesterContent] = useState(false)
@@ -1297,70 +1299,29 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       {/* 공동 할당: subtasks가 있을 때 */}
       {subtasks.length > 0 && (
         <div className="space-y-6 mb-6">
-          {/* 요청자 내용 / 내 담당업무 - 토글로 전환 */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <div className="flex items-center gap-2 flex-wrap">
-                <CardTitle className="text-lg">
-                  {showMyAssignment ? "내 담당업무" : "요청자 내용"}
-                </CardTitle>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {mySubtasks.length > 0 &&
-                    (showMyAssignment ? (
-                      <Badge
-                        variant="outline"
-                        className="text-[11px] font-normal cursor-pointer shrink-0"
-                        onClick={() => setShowMyAssignment(false)}
-                      >
-                        요청자 내용
-                      </Badge>
-                    ) : (
-                      <Badge
-                        variant="outline"
-                        className="text-[11px] font-normal cursor-pointer shrink-0"
-                        onClick={() => {
-                          setShowMyAssignment(true)
-                          const mySub = mySubtasks[0]
-                          if (mySub) {
-                            setSelectedSubtask(mySub)
-                            setSelectedSubtitle(mySub.subtitle)
-                          }
-                        }}
-                      >
-                        담당업무 표시
-                      </Badge>
-                    ))}
-                  {!showMyAssignment && groupedSubtasks.map((group) => (
+          {showMyAssignment ? (
+            /* 내 담당업무 보기: 기존 단일 카드 + 분담내용 카드 */
+            <>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <CardTitle className="text-lg">내 담당업무</CardTitle>
                     <Badge
-                      key={group.subtitle}
-                      variant={selectedSubtitle === group.subtitle ? "default" : "outline"}
+                      variant="outline"
                       className="text-[11px] font-normal cursor-pointer shrink-0"
-                      onClick={() => {
-                        const next = selectedSubtitle === group.subtitle ? null : group.subtitle
-                        setSelectedSubtitle(next)
-                        setSelectedSubtask(next ? group.tasks[0] ?? null : selectedSubtask)
-                      }}
+                      onClick={() => setShowMyAssignment(false)}
                     >
-                      {group.subtitle}
+                      요청자 내용
                     </Badge>
-                  ))}
-                </div>
-              </div>
-              {!showMyAssignment && canEditTask && !isEditingRequesterContent && (
-                <Button variant="outline" size="sm" onClick={() => setIsEditingRequesterContent(true)}>
-                  수정
-                </Button>
-              )}
-              {showMyAssignment && mySubtaskForComment && !isEditingMyComment && (
-                <Button variant="outline" size="sm" onClick={() => setIsEditingMyComment(true)}>
-                  수정
-                </Button>
-              )}
-            </CardHeader>
-            <CardContent>
-              {showMyAssignment ? (
-                /* 내 담당업무(분담내용) 표시 및 수정 */
-                (() => {
+                  </div>
+                  {mySubtaskForComment && !isEditingMyComment && (
+                    <Button variant="outline" size="sm" onClick={() => setIsEditingMyComment(true)}>
+                      수정
+                    </Button>
+                  )}
+                </CardHeader>
+                <CardContent>
+                  {(() => {
                   const commentRaw = mySubtaskForComment?.comment ?? ""
                   const commentDisplay = commentRaw.startsWith("\n") ? commentRaw.substring(1) : commentRaw
                   if (isEditingMyComment && mySubtaskForComment) {
@@ -1431,9 +1392,109 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       내가 작성한 분담내용이 없습니다. 수정 버튼으로 작성해 보세요.
                     </div>
                   )
-                })()
-              ) : canEditTask && isEditingRequesterContent ? (
-                <>
+                  })()}
+                </CardContent>
+          </Card>
+
+          {/* 분담내용 (내 담당업무 보기 시 단일 카드) */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">
+                분담내용 {selectedSubtask && <span className="text-sm text-muted-foreground ml-2">- {selectedSubtask.assigned_to_name || selectedSubtask.assigned_to_email}</span>}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="border rounded-md overflow-hidden" style={{ height: "500px", display: "flex", gap: "8px" }}>
+                <div className="flex-1 overflow-hidden flex flex-col min-w-0">
+                  {selectedSubtask ? (
+                    <div className="h-full overflow-y-auto custom-scrollbar">
+                      {selectedSubtask.comment && selectedSubtask.comment.trim() ? (
+                        <div
+                          id="worklist-subtask-content"
+                          className="text-sm bg-muted/50 p-4 prose prose-sm max-w-none dark:prose-invert h-full"
+                          dangerouslySetInnerHTML={{ __html: sanitizeHtml(selectedSubtask.comment.startsWith('\n') ? selectedSubtask.comment.substring(1) : selectedSubtask.comment) }}
+                          style={{
+                            userSelect: "none",
+                            cursor: "default",
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-word",
+                            overflowWrap: "break-word",
+                          }}
+                        />
+                      ) : (
+                        <div className="bg-muted/30 p-4 text-center text-muted-foreground h-full flex items-center justify-center">
+                          담당자가 작성한 내용이 없습니다
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="bg-muted/30 p-4 text-center text-muted-foreground h-full flex items-center justify-center">
+                      서브태스크를 선택하세요
+                    </div>
+                  )}
+                </div>
+                <div className="w-[240px] bg-muted/30 overflow-y-auto custom-scrollbar p-2 space-y-3">
+                  {isLoadingSubtasks ? (
+                    <div className="flex items-center justify-center h-full">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : (
+                    (selectedSubtitle ? groupedSubtasks.filter((g) => g.subtitle === selectedSubtitle) : groupedSubtasks).map((group) => (
+                      <div key={group.subtitle} className="border-2 border-muted rounded-lg p-2 bg-background/50 space-y-1.5">
+                        <div className="text-[11px] font-semibold text-foreground/80 mb-1 px-1">{group.subtitle}</div>
+                        {group.tasks.map((subtask) => (
+                          <StaffSessionBlock
+                            key={subtask.id}
+                            subtask={subtask}
+                            isSelected={selectedSubtask?.id === subtask.id}
+                            isCompleting={isCompletingSubtask}
+                            onSelect={() => setSelectedSubtask(selectedSubtask?.id === subtask.id ? null : subtask)}
+                            onComplete={completeSubtask}
+                            canCompleteSubtask={canEditTask}
+                            hasAttachment={subtaskIdsWithResolvedFiles.has(subtask.id)}
+                            isMyBlock={subtask.assigned_to === me?.id}
+                          />
+                        ))}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      ) : (
+        /* 요청자 내용 보기: 그룹별 요청자 내용 + 분담내용 카드 */
+        <>
+          <div className="flex items-center gap-2 flex-wrap mb-2">
+            <CardTitle className="text-lg">요청자 내용</CardTitle>
+            {mySubtasks.length > 0 && (
+              <Badge
+                variant="outline"
+                className="text-[11px] font-normal cursor-pointer shrink-0"
+                onClick={() => {
+                  setShowMyAssignment(true)
+                  const mySub = mySubtasks[0]
+                  if (mySub) {
+                    setSelectedSubtask(mySub)
+                    setSelectedSubtitle(mySub.subtitle)
+                  }
+                }}
+              >
+                담당업무 표시
+              </Badge>
+            )}
+          </div>
+          {canEditTask && isEditingRequesterContent && selectedSubtitle && (() => {
+            const group = groupedSubtasks.find((g) => g.subtitle === selectedSubtitle)
+            if (!group) return null
+            return (
+              <Card className="mb-4">
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle className="text-lg">요청자 내용 수정 - {selectedSubtitle}</CardTitle>
+                  <Button variant="outline" size="sm" onClick={() => setIsEditingRequesterContent(false)}>취소</Button>
+                </CardHeader>
+                <CardContent>
                   <div
                     className="border rounded-md overflow-hidden bg-background flex flex-col"
                     style={{
@@ -1619,127 +1680,115 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       취소
                     </Button>
                   </div>
-                </>
-              ) : (() => {
-                  const displayContent = selectedSubtitle
-                    ? (groupedSubtasks.find((g) => g.subtitle === selectedSubtitle)?.tasks[0]?.content ?? null)
-                    : task.content
-                  return displayContent ? (
-                    <div
-                      className="border rounded-md overflow-hidden bg-background"
-                      style={{
-                        height: "300px",
-                        minHeight: "300px",
-                        maxHeight: "300px",
-                        display: "flex",
-                        flexDirection: "column",
+                </CardContent>
+              </Card>
+            )
+          })()}
+          {groupedSubtasks.map((group) => {
+            const selectedSubtaskInGroup = group.tasks.find((t) => t.id === selectedSubtaskIdBySubtitle[group.subtitle]) ?? null
+            const groupRequesterContent = group.tasks[0]?.content ?? ""
+            return (
+              <Card key={group.subtitle}>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle className="text-lg">{group.subtitle}</CardTitle>
+                  {canEditTask && !isEditingRequesterContent && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setSelectedSubtitle(group.subtitle)
+                        setIsEditingRequesterContent(true)
                       }}
                     >
-                      <div
-                        id="worklist-content-display-joint"
-                        className="text-sm bg-muted/50 p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 dark:prose-invert custom-scrollbar"
-                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(displayContent) }}
-                        style={{
-                          userSelect: "none",
-                          cursor: "default",
-                          whiteSpace: "pre-wrap",
-                        }}
-                      />
-                    </div>
-                  ) : (
-                    <div
-                      className="border rounded-md bg-muted/30 p-4 text-center text-muted-foreground"
-                      style={{
-                        height: "300px",
-                        minHeight: "300px",
-                        maxHeight: "300px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      {selectedSubtitle ? "해당 부제의 요청자 내용이 없습니다" : "내용이 없습니다"}
-                    </div>
-                  )
-                })()}
-            </CardContent>
-          </Card>
-
-          {/* 분담내용 (서브태스크) */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">
-                분담내용 {selectedSubtask && <span className="text-sm text-muted-foreground ml-2">- {selectedSubtask.assigned_to_name || selectedSubtask.assigned_to_email}</span>}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="border rounded-md overflow-hidden" style={{ height: "500px", display: "flex", gap: "8px" }}>
-                {/* 분담내용 영역 */}
-                <div className="flex-1 overflow-hidden flex flex-col min-w-0">
-                  {selectedSubtask ? (
-                    /* 담당자가 작성한 내용 (comment) - 전체 영역 사용 */
-                    <div className="h-full overflow-y-auto custom-scrollbar">
-                      {selectedSubtask.comment && selectedSubtask.comment.trim() ? (
+                      수정
+                    </Button>
+                  )}
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <p className="text-[11px] font-medium text-muted-foreground mb-1">요청자 내용</p>
+                    <div className="border rounded-md bg-muted/30 p-2 min-h-[80px] overflow-y-auto max-h-[200px]">
+                      {groupRequesterContent ? (
                         <div
-                          id="worklist-subtask-content"
-                          className="text-sm bg-muted/50 p-4 prose prose-sm max-w-none dark:prose-invert h-full"
-                          dangerouslySetInnerHTML={{ __html: sanitizeHtml(selectedSubtask.comment.startsWith('\n') ? selectedSubtask.comment.substring(1) : selectedSubtask.comment) }}
-                          style={{
-                            userSelect: "none",
-                            cursor: "default",
-                            whiteSpace: "pre-wrap",
-                            wordBreak: "break-word",
-                            overflowWrap: "break-word",
-                          }}
+                          className="text-sm p-2 prose prose-sm max-w-none dark:prose-invert"
+                          dangerouslySetInnerHTML={{ __html: sanitizeHtml(groupRequesterContent) }}
+                          style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
                         />
                       ) : (
-                        <div className="bg-muted/30 p-4 text-center text-muted-foreground h-full flex items-center justify-center">
-                          담당자가 작성한 내용이 없습니다
-                        </div>
+                        <span className="text-muted-foreground text-sm">내용이 없습니다</span>
                       )}
                     </div>
-                  ) : (
-                    <div className="bg-muted/30 p-4 text-center text-muted-foreground h-full flex items-center justify-center">
-                      서브태스크를 선택하세요
-                    </div>
-                  )}
-                </div>
-
-                {/* 서브태스크 목록 스택 (부제 태그 선택 시 해당 부제 블록만 표시) */}
-                <div className="w-[240px] bg-muted/30 overflow-y-auto custom-scrollbar p-2 space-y-3">
-                  {isLoadingSubtasks ? (
-                    <div className="flex items-center justify-center h-full">
-                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                    </div>
-                  ) : (
-                    (selectedSubtitle
-                      ? groupedSubtasks.filter((g) => g.subtitle === selectedSubtitle)
-                      : groupedSubtasks
-                    ).map((group) => (
-                      <div key={group.subtitle} className="border-2 border-muted rounded-lg p-2 bg-background/50 space-y-1.5">
-                        <div className="text-[11px] font-semibold text-foreground/80 mb-1 px-1">
-                          {group.subtitle}
-                        </div>
-                        {group.tasks.map((subtask) => (
-                          <StaffSessionBlock
-                            key={subtask.id}
-                            subtask={subtask}
-                            isSelected={selectedSubtask?.id === subtask.id}
-                            isCompleting={isCompletingSubtask}
-                            onSelect={() => setSelectedSubtask(selectedSubtask?.id === subtask.id ? null : subtask)}
-                            onComplete={completeSubtask}
-                            canCompleteSubtask={canEditTask}
-                            hasAttachment={subtaskIdsWithResolvedFiles.has(subtask.id)}
-                            isMyBlock={subtask.assigned_to === me?.id}
-                          />
-                        ))}
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-medium text-muted-foreground mb-1">분담내용</p>
+                    <div className="border rounded-md overflow-hidden" style={{ height: "400px", display: "flex", gap: "8px" }}>
+                      <div className="flex-1 overflow-hidden flex flex-col min-w-0">
+                        {selectedSubtaskInGroup ? (
+                          <div className="h-full overflow-y-auto custom-scrollbar">
+                            {selectedSubtaskInGroup.comment && selectedSubtaskInGroup.comment.trim() ? (
+                              <div
+                                className="text-sm bg-muted/50 p-4 prose prose-sm max-w-none dark:prose-invert h-full"
+                                dangerouslySetInnerHTML={{
+                                  __html: sanitizeHtml(
+                                    selectedSubtaskInGroup.comment.startsWith("\n")
+                                      ? selectedSubtaskInGroup.comment.substring(1)
+                                      : selectedSubtaskInGroup.comment
+                                  ),
+                                }}
+                                style={{
+                                  userSelect: "none",
+                                  cursor: "default",
+                                  whiteSpace: "pre-wrap",
+                                  wordBreak: "break-word",
+                                  overflowWrap: "break-word",
+                                }}
+                              />
+                            ) : (
+                              <div className="bg-muted/30 p-4 text-center text-muted-foreground h-full flex items-center justify-center">
+                                담당자가 작성한 내용이 없습니다
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="bg-muted/30 p-4 text-center text-muted-foreground h-full flex items-center justify-center">
+                            서브태스크를 선택하세요
+                          </div>
+                        )}
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+                      <div className="w-[220px] bg-muted/30 overflow-y-auto custom-scrollbar p-2 space-y-2">
+                        {isLoadingSubtasks ? (
+                          <div className="flex items-center justify-center py-8">
+                            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : (
+                          group.tasks.map((subtask) => (
+                            <StaffSessionBlock
+                              key={subtask.id}
+                              subtask={subtask}
+                              isSelected={selectedSubtaskInGroup?.id === subtask.id}
+                              isCompleting={isCompletingSubtask}
+                              onSelect={() =>
+                                setSelectedSubtaskIdBySubtitle((prev) => ({
+                                  ...prev,
+                                  [group.subtitle]: prev[group.subtitle] === subtask.id ? null : subtask.id,
+                                }))
+                              }
+                              onComplete={completeSubtask}
+                              canCompleteSubtask={canEditTask}
+                              hasAttachment={subtaskIdsWithResolvedFiles.has(subtask.id)}
+                              isMyBlock={subtask.assigned_to === me?.id}
+                            />
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </>
+      )}
         </div>
       )}
 
