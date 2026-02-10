@@ -1755,6 +1755,63 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       </div>
                     </div>
                   </div>
+                  {/* 그룹별 첨부파일 — 해당 그룹의 요청자 + 담당자 첨부만 */}
+                  {(() => {
+                    const groupSubtaskIds = new Set(group.tasks.map((t) => t.id))
+                    const groupAssigneeFiles = resolvedSubtaskFileKeys.filter((f) => groupSubtaskIds.has(f.subtaskId))
+                    const hasRequester = resolvedFileKeys.length > 0
+                    const hasAssignee = groupAssigneeFiles.length > 0
+                    if (!hasRequester && !hasAssignee) return null
+                    return (
+                      <div className="space-y-3 pt-4 mt-4 border-t">
+                        <h4 className="text-sm font-semibold text-foreground/90">첨부파일</h4>
+                        {isDownloading && (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-xs text-muted-foreground">
+                              <span className="truncate">다운로드 중: {downloadingFileName}</span>
+                              <span className="shrink-0">{downloadProgress}%</span>
+                            </div>
+                            <Progress value={downloadProgress} />
+                          </div>
+                        )}
+                        {hasRequester && (
+                          <div className="space-y-1.5">
+                            <p className="text-xs font-medium text-muted-foreground">{task.assigned_by_name || "요청자"} 첨부</p>
+                            <div className="space-y-1 pl-2">
+                              {resolvedFileKeys.map((f, index) => (
+                                <FileListItem
+                                  key={`g-req-${group.subtitle}-${index}`}
+                                  fileName={f.fileName}
+                                  s3Key={f.s3Key}
+                                  uploadedAt={f.uploadedAt}
+                                  fallbackDate={task.created_at}
+                                  onDownload={handleDownload}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {hasAssignee && (
+                          <div className="space-y-1.5">
+                            <p className="text-xs font-medium text-muted-foreground">담당자 첨부</p>
+                            <div className="space-y-1 pl-2">
+                              {groupAssigneeFiles.map((f, index) => (
+                                <FileListItem
+                                  key={`g-ast-${group.subtitle}-${index}`}
+                                  fileName={f.fileName}
+                                  s3Key={f.s3Key}
+                                  uploadedAt={f.uploadedAt}
+                                  fallbackDate={task.updated_at}
+                                  assignedToName={f.assignedToName}
+                                  onDownload={handleDownload}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </CardContent>
               </Card>
             )
@@ -1970,7 +2027,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         )}
       </div>
 
-      {/* 첨부파일 */}
+      {/* 첨부파일 — 개별 업무일 때만 페이지 하단에 표시 (공동 업무는 그룹 카드 하단에 표시) */}
+      {subtasks.length === 0 && (
       <Card className="mb-6">
         <CardHeader>
           <CardTitle>첨부파일</CardTitle>
@@ -1987,7 +2045,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               </div>
             )}
             
-            {/* 요청자 첨부파일 */}
             <div className="space-y-2">
               <h4 className="text-sm font-semibold text-foreground/90">요청자 첨부파일</h4>
               {resolvedFileKeys.length > 0 ? (
@@ -2008,60 +2065,29 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               )}
             </div>
             
-            {/* 담당자 첨부파일 (개별 - 메인 태스크) */}
-            {subtasks.length === 0 && (
-              <div className="space-y-2">
-                <h4 className="text-sm font-semibold text-foreground/90">담당자 첨부파일</h4>
-                {resolvedCommentFileKeys.length > 0 ? (
-                  <div className="space-y-2 pl-2">
-                    {resolvedCommentFileKeys.map((f, index) => (
-                      <FileListItem
-                        key={`user-${index}`}
-                        fileName={f.fileName}
-                        s3Key={f.s3Key}
-                        uploadedAt={f.uploadedAt}
-                        fallbackDate={task.updated_at}
-                        onDownload={handleDownload}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground pl-2">첨부파일이 없습니다</p>
-                )}
-              </div>
-            )}
-            
-            {/* 담당자 첨부파일 (공동 - 서브태스크별) */}
-            {subtasks.length > 0 && (
-              <div className="space-y-2">
-                <h4 className="text-sm font-semibold text-foreground/90">담당자 첨부파일</h4>
-                {resolvedSubtaskFileKeys.length > 0 ? (
-                  <div className="space-y-2 pl-2">
-                    {resolvedSubtaskFileKeys.map((f, index) => (
-                      <FileListItem
-                        key={`subtask-${index}`}
-                        fileName={f.fileName}
-                        s3Key={f.s3Key}
-                        uploadedAt={f.uploadedAt}
-                        fallbackDate={task.updated_at}
-                        assignedToName={f.assignedToName}
-                        onDownload={handleDownload}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground pl-2">첨부파일이 없습니다</p>
-                )}
-              </div>
-            )}
-            
-            {(resolvedFileKeys.length > 0 || resolvedCommentFileKeys.length > 0 || resolvedSubtaskFileKeys.length > 0) && (
-              <p className="text-xs text-muted-foreground mt-3 pt-3 border-t">
-              </p>
-            )}
+            <div className="space-y-2">
+              <h4 className="text-sm font-semibold text-foreground/90">담당자 첨부파일</h4>
+              {resolvedCommentFileKeys.length > 0 ? (
+                <div className="space-y-2 pl-2">
+                  {resolvedCommentFileKeys.map((f, index) => (
+                    <FileListItem
+                      key={`user-${index}`}
+                      fileName={f.fileName}
+                      s3Key={f.s3Key}
+                      uploadedAt={f.uploadedAt}
+                      fallbackDate={task.updated_at}
+                      onDownload={handleDownload}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground pl-2">첨부파일이 없습니다</p>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
+      )}
 
       {/* 완료대기이거나 모든 서브태스크가 완료된 경우: 작업완료 버튼 표시 (요청자 또는 admin만) */}
       {canEditTask &&
