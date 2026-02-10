@@ -598,8 +598,8 @@ export function TaskDetailDialog({
             </>
           )}
 
-          {/* 개별 업무 전용: 요청자/담당자 첨부파일 */}
-          {!isJointTask && (
+          {/* 개별 업무 전용: 요청자/담당자 첨부파일 (첨부가 있을 때만 표시) */}
+          {!isJointTask && (displayFileKeys.length > 0 || displayCommentFileKeys.length > 0) && (
             <>
               <div className="space-y-2">
                 <Label className="text-sm font-semibold">요청자 첨부파일</Label>
@@ -775,6 +775,7 @@ export function TaskDetailDialog({
                   </div>
                 ))}
 
+              {(displayFileKeys.length > 0 || displayCommentFileKeys.length > 0) && (
               <div className="space-y-2 pt-2">
                 <Label className="text-sm font-semibold">첨부파일</Label>
                 <div className="flex flex-wrap gap-2 p-2 border border-transparent rounded-md bg-transparent min-h-[52px]">
@@ -844,6 +845,7 @@ export function TaskDetailDialog({
                   )}
                 </div>
               </div>
+              )}
             </div>
           )})()}
 

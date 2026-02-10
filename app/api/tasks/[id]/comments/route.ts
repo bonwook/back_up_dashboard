@@ -57,9 +57,9 @@ async function canAccessComments(userId: string, role: string | null, taskId: st
     return Array.isArray(subtaskAssign) && subtaskAssign.length > 0
   }
   
-  // 서브태스크 확인
+  // 서브태스크 확인: 담당자·요청자 또는 메인 태스크의 요청자/담당자도 허용
   const subtaskRows = await query(
-    `SELECT ts.assigned_to, ta.assigned_by 
+    `SELECT ts.assigned_to, ts.task_id, ta.assigned_by, ta.assigned_to AS main_assigned_to
      FROM task_subtasks ts 
      INNER JOIN task_assignments ta ON ts.task_id = ta.id 
      WHERE ts.id = ?`,
@@ -67,9 +67,10 @@ async function canAccessComments(userId: string, role: string | null, taskId: st
   )
   const subtask = (subtaskRows as any[])?.[0]
   if (subtask) {
-    return subtask.assigned_to === userId || subtask.assigned_by === userId
+    // 서브태스크 담당자, 메인 태스크 요청자(assigned_by), 메인 태스크 담당자(main_assigned_to) 허용
+    return subtask.assigned_to === userId || subtask.assigned_by === userId || subtask.main_assigned_to === userId
   }
-  
+
   return false
 }
 
