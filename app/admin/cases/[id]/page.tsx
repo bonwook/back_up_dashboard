@@ -1424,7 +1424,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                     </div>
                   )}
                 </div>
-                <div className="w-[240px] bg-muted/30 overflow-y-auto custom-scrollbar p-2 space-y-3">
+                <div className="w-[240px] bg-muted/30 overflow-y-auto custom-scrollbar p-3 space-y-3">
                   {isLoadingSubtasks ? (
                     <div className="flex items-center justify-center h-full">
                       <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -1727,7 +1727,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                           </div>
                         )}
                       </div>
-                      <div className="w-[220px] bg-muted/30 overflow-y-auto custom-scrollbar p-2 space-y-2">
+                      <div className="w-[240px] bg-muted/30 overflow-y-auto custom-scrollbar p-3 space-y-3">
                         {isLoadingSubtasks ? (
                           <div className="flex items-center justify-center py-8">
                             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
