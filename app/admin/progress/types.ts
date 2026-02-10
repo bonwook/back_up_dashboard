@@ -23,6 +23,8 @@ export interface Task {
   is_multi_assign?: boolean
   is_subtask?: boolean
   task_id?: string
+  /** progress 탭에서 구분: 내가 요청한 업무 vs 요청받은 업무 */
+  taskType?: 'requested' | 'received'
 }
 
 export interface Profile {

@@ -166,7 +166,7 @@ export function TaskCommentSection({
         {comments.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-8">아직 댓글이 없습니다.</p>
         ) : (
-          comments.map((c) => {
+          comments.map((c, index) => {
             const canDelete =
               allowDelete && ((me?.id && c.user_id === me.id) || userRole === "admin")
             const isMe = me?.id && c.user_id === me.id
@@ -175,10 +175,12 @@ export function TaskCommentSection({
             const bubbleClass = isMe
               ? "bg-primary text-primary-foreground"
               : bubbleColors[userIndex % bubbleColors.length]
+            // 여러 task 댓글 합치거나 API 중복 시 동일 id가 올 수 있으므로 index 포함해 고유 key 보장
+            const uniqueKey = `${c.task_id ?? primaryTaskId}-${c.id}-${index}`
 
             return (
               <div
-                key={c.id}
+                key={uniqueKey}
                 className={`flex ${isMe ? "justify-end" : "justify-start"}`}
               >
                 <div

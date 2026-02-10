@@ -114,6 +114,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const didSetInitialRequesterContent = useRef(false)
   /** 공동 수정 시 에디터에 마지막으로 로드한 소스(부제) 추적 — 부제 전환 시 에디터 내용 갱신용 */
   const lastRequesterContentSourceRef = useRef<{ taskId: string; subtitle: string | null } | null>(null)
+  /** 공동: 수정 버튼 클릭 시점에 편집 대상 부제를 동기 저장 — 상태 배칭 전에도 올바른 부제 매핑 보장 */
+  const editingSubtitleRef = useRef<string | null>(null)
   /** 공동: 요청자 내용 카드에서 "담당업무 표시" 선택 시 true → 내가 작성한 분담내용 표시 */
   const [showMyAssignment, setShowMyAssignment] = useState(false)
   const [isEditingMyComment, setIsEditingMyComment] = useState(false)
@@ -549,13 +551,16 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   }, [mySubtaskForComment, taskId, loadSubtasks, toast, router])
 
   // 요청자 내용 편집 시 에디터에 초기값 설정 (개별: task.content, 공동: 선택/기본 부제의 첫 서브태스크 content) + 테이블 리사이즈
+  // 공동 업무 시 수정 버튼 클릭 직후에도 올바른 부제 매핑을 위해 editingSubtitleRef 사용
   useEffect(() => {
     if (!isEditingRequesterContent || !task) return
     const t = setTimeout(() => {
       const el = document.getElementById("requester-content-editor") as HTMLElement | null
       if (!el) return
       const isJoint = subtasks.length > 0
-      const effectiveSubtitle = isJoint ? (selectedSubtitle ?? groupedSubtasks[0]?.subtitle ?? null) : null
+      const effectiveSubtitle = isJoint
+        ? (selectedSubtitle ?? editingSubtitleRef.current ?? groupedSubtasks[0]?.subtitle ?? null)
+        : null
       const contentToLoad = effectiveSubtitle
         ? (groupedSubtasks.find((g) => g.subtitle === effectiveSubtitle)?.tasks[0]?.content ?? "")
         : (task.content ?? "")
@@ -582,7 +587,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     setIsSavingRequesterContent(true)
     try {
       if (subtasks.length > 0) {
-        const effectiveSubtitle = selectedSubtitle ?? groupedSubtasks[0]?.subtitle ?? null
+        const effectiveSubtitle = selectedSubtitle ?? editingSubtitleRef.current ?? groupedSubtasks[0]?.subtitle ?? null
         const group = effectiveSubtitle ? groupedSubtasks.find((g) => g.subtitle === effectiveSubtitle) : groupedSubtasks[0]
         if (!group) {
           toast({ title: "저장 실패", description: "선택된 부제를 찾을 수 없습니다.", variant: "destructive" })
@@ -615,6 +620,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       toast({ title: "저장됨", description: "요청자 내용이 저장되었습니다." })
       await reloadTask()
       await loadSubtasks()
+      editingSubtitleRef.current = null
       setIsEditingRequesterContent(false)
       window.dispatchEvent(new CustomEvent("task-content-updated", { detail: { taskId } }))
       router.refresh()
@@ -806,7 +812,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         <CardHeader className="pb-0.5 pt-3">
           <div className="flex items-start justify-between gap-4 mb-1">
             <CardTitle className="text-xl font-bold">{task.title}</CardTitle>
-            {canChangeStatus && (
+            {canChangeStatus && task.status !== "completed" && (
               <Select
                 value={task.status}
                 onValueChange={(value) => handleStatusChange(task.id, value as TaskStatusType)}
@@ -1195,14 +1201,17 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       }}
                     />
                   </div>
-                  <div className="flex gap-2 mt-3">
+                  <div className="flex gap-2 mt-3 justify-end">
                     <Button size="sm" onClick={handleSaveRequesterContent} disabled={isSavingRequesterContent}>
                       {isSavingRequesterContent ? <Loader2 className="h-4 w-4 animate-spin" /> : "저장"}
                     </Button>
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => setIsEditingRequesterContent(false)}
+                      onClick={() => {
+                        editingSubtitleRef.current = null
+                        setIsEditingRequesterContent(false)
+                      }}
                       disabled={isSavingRequesterContent}
                     >
                       취소
@@ -1455,207 +1464,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           </Card>
         </>
       ) : (
-        /* 요청자 내용 보기: 그룹별 요청자 내용 + 분담내용 카드 */
+        /* 요청자 내용 보기: 그룹별 요청자 내용 + 분담내용 카드 (수정 시 해당 카드 내부에서 인라인 편집) */
         <>
-          {canEditTask && isEditingRequesterContent && selectedSubtitle && (() => {
-            const group = groupedSubtasks.find((g) => g.subtitle === selectedSubtitle)
-            if (!group) return null
-            return (
-              <Card className="mb-4">
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <CardTitle className="text-lg">요청자 내용 수정 - {selectedSubtitle}</CardTitle>
-                  <Button variant="outline" size="sm" onClick={() => setIsEditingRequesterContent(false)}>취소</Button>
-                </CardHeader>
-                <CardContent>
-                  <div
-                    className="border rounded-md overflow-hidden bg-background flex flex-col"
-                    style={{
-                      height: "350px",
-                      minHeight: "350px",
-                      maxHeight: "350px",
-                    }}
-                  >
-                    <div className="flex items-center gap-1 p-2 flex-wrap shrink-0 border-b">
-                      <Button
-                        type="button"
-                        variant={requesterEditorState.bold ? "secondary" : "ghost"}
-                        size="sm"
-                        className={`h-8 w-8 p-0 ${requesterEditorState.bold ? "bg-primary/10" : ""}`}
-                        onClick={(e) => {
-                          e.preventDefault()
-                          const editor = document.getElementById("requester-content-editor")
-                          if (editor) {
-                            editor.focus()
-                            document.execCommand("bold", false)
-                            updateRequesterEditorState()
-                          }
-                        }}
-                        title="굵게 (Ctrl+B)"
-                      >
-                        <Bold className={`h-4 w-4 ${requesterEditorState.bold ? "text-primary" : ""}`} />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant={requesterEditorState.italic ? "secondary" : "ghost"}
-                        size="sm"
-                        className={`h-8 w-8 p-0 ${requesterEditorState.italic ? "bg-primary/10" : ""}`}
-                        onClick={(e) => {
-                          e.preventDefault()
-                          const editor = document.getElementById("requester-content-editor")
-                          if (editor) {
-                            editor.focus()
-                            document.execCommand("italic", false)
-                            updateRequesterEditorState()
-                          }
-                        }}
-                        title="기울임 (Ctrl+I)"
-                      >
-                        <Italic className={`h-4 w-4 ${requesterEditorState.italic ? "text-primary" : ""}`} />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant={requesterEditorState.underline ? "secondary" : "ghost"}
-                        size="sm"
-                        className={`h-8 w-8 p-0 ${requesterEditorState.underline ? "bg-primary/10" : ""}`}
-                        onClick={(e) => {
-                          e.preventDefault()
-                          const editor = document.getElementById("requester-content-editor")
-                          if (editor) {
-                            editor.focus()
-                            document.execCommand("underline", false)
-                            updateRequesterEditorState()
-                          }
-                        }}
-                        title="밑줄"
-                      >
-                        <Underline className={`h-4 w-4 ${requesterEditorState.underline ? "text-primary" : ""}`} />
-                      </Button>
-                      <div className="w-px h-6 bg-border mx-1" />
-                      <div className="relative">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={(e) => {
-                            e.preventDefault()
-                            setRequesterTableGridHover(
-                              requesterTableGridHover.show
-                                ? { row: 0, col: 0, show: false }
-                                : { row: 0, col: 0, show: true }
-                            )
-                          }}
-                          title="테이블"
-                        >
-                          <TableIcon className="h-4 w-4" />
-                        </Button>
-                        {requesterTableGridHover.show && (
-                          <div
-                            className="absolute top-full left-0 mt-2 bg-background border rounded-lg shadow-xl p-4 z-50 min-w-[280px]"
-                            onMouseLeave={() => setRequesterTableGridHover({ row: 0, col: 0, show: false })}
-                          >
-                            <div className="grid grid-cols-10 gap-1 mb-3">
-                              {Array.from({ length: 100 }).map((_, idx) => {
-                                const row = Math.floor(idx / 10) + 1
-                                const col = (idx % 10) + 1
-                                const isSelected =
-                                  row <= requesterTableGridHover.row && col <= requesterTableGridHover.col
-                                return (
-                                  <div
-                                    key={idx}
-                                    className={`w-5 h-5 border border-border rounded-sm transition-colors ${
-                                      isSelected ? "bg-primary border-primary" : "bg-muted hover:bg-muted/80"
-                                    }`}
-                                    onMouseEnter={() => setRequesterTableGridHover({ row, col, show: true })}
-                                    onClick={() => {
-                                      createRequesterTable(row, col)
-                                      setRequesterTableGridHover({ row: 0, col: 0, show: false })
-                                    }}
-                                  />
-                                )
-                              })}
-                            </div>
-                            <div className="text-sm text-center font-medium text-foreground border-t pt-2">
-                              {requesterTableGridHover.row > 0 && requesterTableGridHover.col > 0
-                                ? `${requesterTableGridHover.row} x ${requesterTableGridHover.col} 테이블`
-                                : "테이블 크기 선택"}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                      <div className="w-px h-6 bg-border mx-1" />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-8 p-0"
-                        onClick={(e) => {
-                          e.preventDefault()
-                          const editor = document.getElementById("requester-content-editor") as HTMLElement
-                          if (editor) {
-                            editor.focus()
-                            const hr = document.createElement("hr")
-                            hr.style.border = "none"
-                            hr.style.borderTop = "2px solid #6b7280"
-                            hr.style.margin = "10px 0"
-                            const selection = window.getSelection()
-                            if (selection && selection.rangeCount > 0) {
-                              const range = selection.getRangeAt(0)
-                              range.deleteContents()
-                              range.insertNode(hr)
-                              range.setStartAfter(hr)
-                              range.collapse(true)
-                              selection.removeAllRanges()
-                              selection.addRange(range)
-                            }
-                          }
-                        }}
-                        title="구분선"
-                      >
-                        <Minus className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <div
-                      id="requester-content-editor"
-                      contentEditable
-                      suppressContentEditableWarning
-                      data-placeholder="내용을 입력하세요."
-                      onInput={() => {
-                        updateRequesterEditorState()
-                        const editor = document.getElementById("requester-content-editor")
-                        if (editor) {
-                          editor.querySelectorAll("table[data-resizable='true']").forEach((table) => {
-                            addResizeHandlersToRequesterTable(table as HTMLTableElement)
-                          })
-                        }
-                      }}
-                      onBlur={updateRequesterEditorState}
-                      onMouseUp={updateRequesterEditorState}
-                      onKeyUp={updateRequesterEditorState}
-                      className="text-sm p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 custom-scrollbar focus:outline-none focus:ring-0 resize-none w-full min-w-0"
-                      style={{
-                        minHeight: "280px",
-                        whiteSpace: "pre-wrap",
-                      }}
-                    />
-                  </div>
-                  <div className="flex gap-2 mt-3">
-                    <Button size="sm" onClick={handleSaveRequesterContent} disabled={isSavingRequesterContent}>
-                      {isSavingRequesterContent ? <Loader2 className="h-4 w-4 animate-spin" /> : "저장"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setIsEditingRequesterContent(false)}
-                      disabled={isSavingRequesterContent}
-                    >
-                      취소
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          })()}
           {groupedSubtasks.map((group) => {
             const selectedSubtaskInGroup = group.tasks.find((t) => t.id === selectedSubtaskIdBySubtitle[group.subtitle]) ?? null
             const groupRequesterContent = group.tasks[0]?.content ?? ""
@@ -1668,6 +1478,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       size="sm"
                       variant="outline"
                       onClick={() => {
+                        editingSubtitleRef.current = group.subtitle
                         setSelectedSubtitle(group.subtitle)
                         setIsEditingRequesterContent(true)
                       }}
@@ -1679,17 +1490,210 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 <CardContent className="space-y-4">
                   <div>
                     <p className="text-[11px] font-medium text-muted-foreground mb-1">요청자 내용</p>
-                    <div className="border rounded-md bg-muted/30 p-4 min-h-[280px] overflow-y-auto" style={{ maxHeight: "420px" }}>
-                      {groupRequesterContent ? (
+                    {canEditTask && isEditingRequesterContent && selectedSubtitle === group.subtitle ? (
+                      <>
                         <div
-                          className="text-base p-3 prose prose-base max-w-none dark:prose-invert"
-                          dangerouslySetInnerHTML={{ __html: sanitizeHtml(groupRequesterContent) }}
-                          style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
-                        />
-                      ) : (
-                        <span className="text-muted-foreground">내용이 없습니다</span>
-                      )}
-                    </div>
+                          className="border rounded-md overflow-hidden bg-background flex flex-col"
+                          style={{
+                            height: "350px",
+                            minHeight: "350px",
+                            maxHeight: "350px",
+                          }}
+                        >
+                          <div className="flex items-center gap-1 p-2 flex-wrap shrink-0 border-b">
+                            <Button
+                              type="button"
+                              variant={requesterEditorState.bold ? "secondary" : "ghost"}
+                              size="sm"
+                              className={`h-8 w-8 p-0 ${requesterEditorState.bold ? "bg-primary/10" : ""}`}
+                              onClick={(e) => {
+                                e.preventDefault()
+                                const editor = document.getElementById("requester-content-editor")
+                                if (editor) {
+                                  editor.focus()
+                                  document.execCommand("bold", false)
+                                  updateRequesterEditorState()
+                                }
+                              }}
+                              title="굵게 (Ctrl+B)"
+                            >
+                              <Bold className={`h-4 w-4 ${requesterEditorState.bold ? "text-primary" : ""}`} />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant={requesterEditorState.italic ? "secondary" : "ghost"}
+                              size="sm"
+                              className={`h-8 w-8 p-0 ${requesterEditorState.italic ? "bg-primary/10" : ""}`}
+                              onClick={(e) => {
+                                e.preventDefault()
+                                const editor = document.getElementById("requester-content-editor")
+                                if (editor) {
+                                  editor.focus()
+                                  document.execCommand("italic", false)
+                                  updateRequesterEditorState()
+                                }
+                              }}
+                              title="기울임 (Ctrl+I)"
+                            >
+                              <Italic className={`h-4 w-4 ${requesterEditorState.italic ? "text-primary" : ""}`} />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant={requesterEditorState.underline ? "secondary" : "ghost"}
+                              size="sm"
+                              className={`h-8 w-8 p-0 ${requesterEditorState.underline ? "bg-primary/10" : ""}`}
+                              onClick={(e) => {
+                                e.preventDefault()
+                                const editor = document.getElementById("requester-content-editor")
+                                if (editor) {
+                                  editor.focus()
+                                  document.execCommand("underline", false)
+                                  updateRequesterEditorState()
+                                }
+                              }}
+                              title="밑줄"
+                            >
+                              <Underline className={`h-4 w-4 ${requesterEditorState.underline ? "text-primary" : ""}`} />
+                            </Button>
+                            <div className="w-px h-6 bg-border mx-1" />
+                            <div className="relative">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  setRequesterTableGridHover(
+                                    requesterTableGridHover.show
+                                      ? { row: 0, col: 0, show: false }
+                                      : { row: 0, col: 0, show: true }
+                                  )
+                                }}
+                                title="테이블"
+                              >
+                                <TableIcon className="h-4 w-4" />
+                              </Button>
+                              {requesterTableGridHover.show && (
+                                <div
+                                  className="absolute top-full left-0 mt-2 bg-background border rounded-lg shadow-xl p-4 z-50 min-w-[280px]"
+                                  onMouseLeave={() => setRequesterTableGridHover({ row: 0, col: 0, show: false })}
+                                >
+                                  <div className="grid grid-cols-10 gap-1 mb-3">
+                                    {Array.from({ length: 100 }).map((_, idx) => {
+                                      const row = Math.floor(idx / 10) + 1
+                                      const col = (idx % 10) + 1
+                                      const isSelected =
+                                        row <= requesterTableGridHover.row && col <= requesterTableGridHover.col
+                                      return (
+                                        <div
+                                          key={idx}
+                                          className={`w-5 h-5 border border-border rounded-sm transition-colors ${
+                                            isSelected ? "bg-primary border-primary" : "bg-muted hover:bg-muted/80"
+                                          }`}
+                                          onMouseEnter={() => setRequesterTableGridHover({ row, col, show: true })}
+                                          onClick={() => {
+                                            createRequesterTable(row, col)
+                                            setRequesterTableGridHover({ row: 0, col: 0, show: false })
+                                          }}
+                                        />
+                                      )
+                                    })}
+                                  </div>
+                                  <div className="text-sm text-center font-medium text-foreground border-t pt-2">
+                                    {requesterTableGridHover.row > 0 && requesterTableGridHover.col > 0
+                                      ? `${requesterTableGridHover.row} x ${requesterTableGridHover.col} 테이블`
+                                      : "테이블 크기 선택"}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            <div className="w-px h-6 bg-border mx-1" />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={(e) => {
+                                e.preventDefault()
+                                const editor = document.getElementById("requester-content-editor") as HTMLElement
+                                if (editor) {
+                                  editor.focus()
+                                  const hr = document.createElement("hr")
+                                  hr.style.border = "none"
+                                  hr.style.borderTop = "2px solid #6b7280"
+                                  hr.style.margin = "10px 0"
+                                  const selection = window.getSelection()
+                                  if (selection && selection.rangeCount > 0) {
+                                    const range = selection.getRangeAt(0)
+                                    range.deleteContents()
+                                    range.insertNode(hr)
+                                    range.setStartAfter(hr)
+                                    range.collapse(true)
+                                    selection.removeAllRanges()
+                                    selection.addRange(range)
+                                  }
+                                }
+                              }}
+                              title="구분선"
+                            >
+                              <Minus className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          <div
+                            id="requester-content-editor"
+                            contentEditable
+                            suppressContentEditableWarning
+                            data-placeholder="내용을 입력하세요."
+                            onInput={() => {
+                              updateRequesterEditorState()
+                              const editor = document.getElementById("requester-content-editor")
+                              if (editor) {
+                                editor.querySelectorAll("table[data-resizable='true']").forEach((table) => {
+                                  addResizeHandlersToRequesterTable(table as HTMLTableElement)
+                                })
+                              }
+                            }}
+                            onBlur={updateRequesterEditorState}
+                            onMouseUp={updateRequesterEditorState}
+                            onKeyUp={updateRequesterEditorState}
+                            className="text-sm p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 custom-scrollbar focus:outline-none focus:ring-0 resize-none w-full min-w-0"
+                            style={{
+                              minHeight: "280px",
+                              whiteSpace: "pre-wrap",
+                            }}
+                          />
+                        </div>
+                        <div className="flex gap-2 mt-3 justify-end">
+                          <Button size="sm" onClick={handleSaveRequesterContent} disabled={isSavingRequesterContent}>
+                            {isSavingRequesterContent ? <Loader2 className="h-4 w-4 animate-spin" /> : "저장"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              editingSubtitleRef.current = null
+                              setIsEditingRequesterContent(false)
+                            }}
+                            disabled={isSavingRequesterContent}
+                          >
+                            취소
+                          </Button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="border rounded-md bg-muted/30 p-4 min-h-[280px] overflow-y-auto" style={{ maxHeight: "420px" }}>
+                        {groupRequesterContent ? (
+                          <div
+                            className="text-base p-3 prose prose-base max-w-none dark:prose-invert"
+                            dangerouslySetInnerHTML={{ __html: sanitizeHtml(groupRequesterContent) }}
+                            style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+                          />
+                        ) : (
+                          <span className="text-muted-foreground">내용이 없습니다</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <p className="text-[11px] font-medium text-muted-foreground mb-1">분담내용</p>

@@ -52,12 +52,13 @@ export default function TaskBlock({
         } ${
           workTaskId === task.id ? 'ring-2 ring-gray-400 ring-offset-1 border-gray-400' : ''
         }`}
-        style={{ 
-          borderLeftColor: task.status === 'completed' ? '#22c55e' : 
-                          task.status === 'awaiting_completion' ? '#a855f7' : 
-                          task.status === 'in_progress' ? '#3b82f6' : 
-                          task.status === 'on_hold' ? '#eab308' : '#6b7280' 
-        }}
+        style={
+          task.taskType === 'requested'
+            ? { borderLeftColor: '#f59e0b' }
+            : task.taskType === 'received'
+              ? { borderLeftColor: '#3b82f6' }
+              : undefined
+        }
       >
         <CardContent className="p-2 h-[55px] flex flex-col">
           <div className="flex-1 min-h-0 flex flex-col space-y-1">

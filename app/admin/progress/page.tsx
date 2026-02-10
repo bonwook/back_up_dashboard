@@ -90,6 +90,22 @@ export default function AdminProgressPage() {
     }
   }, [])
 
+  // 첨부파일 추가 등으로 리렌더 시 작성 내용(contentEditable)이 비어 있으면 state에서 복원
+  useEffect(() => {
+    if (!workTaskId) return
+    const t = setTimeout(() => {
+      const commentEl = document.getElementById("work-comment-content")
+      if (commentEl && workCommentContent.trim() && !commentEl.innerHTML.trim()) {
+        commentEl.innerHTML = workCommentContent
+      }
+      const workEl = document.getElementById("work-content")
+      if (workEl && workForm.content.trim() && !workEl.innerHTML.trim()) {
+        workEl.innerHTML = workForm.content
+      }
+    }, 0)
+    return () => clearTimeout(t)
+  }, [workTaskId, workCommentFiles.length, workCommentResolvedFileKeys.length, workCommentContent, workForm.content])
+
   useEffect(() => {
     const loadUser = async () => {
       try {
@@ -143,24 +159,39 @@ export default function AdminProgressPage() {
     }
   }, [])
 
+  // Progress 데이터 소스 vs Worklist(cases) 경계:
+  // - Progress: /api/tasks(내가 담당자) + /api/tasks/assigned-by(내가 요청자). staff끼리 할당해도
+  //   담당자는 Progress '요청받은 업무'에, 요청자는 '내가 요청한 업무'에 표시됨.
+  // - Worklist(admin/cases): /api/tasks/all → admin/staff 전원이 전체 task 목록 조회.
+  //   따라서 할당받은 업무는 Progress와 Worklist 둘 다에 나타남. Progress는 '내 업무' 뷰, Worklist는 '전체 케이스' 뷰.
   const loadTasks = useCallback(async () => {
     setIsLoading(true)
     try {
-      const response = await fetch("/api/tasks", {
-        credentials: "include",
-      })
+      const [receivedRes, requestedRes] = await Promise.all([
+        fetch("/api/tasks", { credentials: "include" }),
+        fetch("/api/tasks/assigned-by", { credentials: "include" }),
+      ])
 
-      if (!response.ok) {
-        const errorText = await response.text()
+      if (!receivedRes.ok) {
+        const errorText = await receivedRes.text()
         throw new Error("Task 목록을 불러오는데 실패했습니다")
       }
 
-      const data = await response.json()
-      const loadedTasks: Task[] = Array.isArray(data.tasks) ? data.tasks : []
-      
-      // task_assignments에서 가져온 지정된 task들을 상태에 설정
-      // 각 task는 개별 블록으로 표시됨
-      setTasks(loadedTasks)
+      const receivedData = await receivedRes.json()
+      const receivedTasks: Task[] = Array.isArray(receivedData.tasks) ? receivedData.tasks : []
+      const requestedData = requestedRes.ok ? await requestedRes.json() : { tasks: [] }
+      const requestedTasks: Task[] = Array.isArray(requestedData.tasks) ? requestedData.tasks : []
+
+      const receivedIds = new Set(receivedTasks.map((t) => t.id))
+      const withTypeReceived = receivedTasks.map((t) => ({ ...t, taskType: "received" as const }))
+      const withTypeRequested = requestedTasks
+        .filter((t) => !receivedIds.has(t.id))
+        .map((t) => ({ ...t, taskType: "requested" as const }))
+      const merged = [...withTypeReceived, ...withTypeRequested].sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      )
+
+      setTasks(merged)
     } catch (error: any) {
       console.error("[Progress] Task 로드 오류:", error)
       toast({
@@ -189,7 +220,7 @@ export default function AdminProgressPage() {
         const updated = data.task
         if (!updated) return
         setTasks((prev) =>
-          prev.map((t) => (t.id === taskId ? { ...t, ...updated } : t))
+          prev.map((t) => (t.id === taskId ? { ...t, ...updated, taskType: t.taskType } : t))
         )
       } catch {
         // 무시
@@ -473,18 +504,19 @@ export default function AdminProgressPage() {
       new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     ), [tasks]
   )
+  // 칸반 보드에는 '요청받은' 업무만 표시 (내가 요청한 업무는 상단 섹션에만)
   const inProgressTasks = useMemo(() => 
-    tasks.filter(t => t.status === 'in_progress').sort((a, b) => 
+    tasks.filter(t => t.status === 'in_progress' && t.taskType !== 'requested').sort((a, b) => 
       new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     ), [tasks]
   )
   const onHoldTasks = useMemo(() => 
-    tasks.filter(t => t.status === 'on_hold').sort((a, b) => 
+    tasks.filter(t => t.status === 'on_hold' && t.taskType !== 'requested').sort((a, b) => 
       new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     ), [tasks]
   )
   const awaitingCompletionTasks = useMemo(() => 
-    tasks.filter(t => t.status === 'awaiting_completion').sort((a, b) => 
+    tasks.filter(t => t.status === 'awaiting_completion' && t.taskType !== 'requested').sort((a, b) => 
       new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     ), [tasks]
   )
@@ -495,11 +527,19 @@ export default function AdminProgressPage() {
     [awaitingCompletionTasks, finalizedTaskIds]
   )
 
-  // 받은 업무는 '대기(pending)' 상태만 표시 (드래그로 작업/보류/완료대기로 이동하면 여기서 사라져야 함)
-  const allReceivedTasks = useMemo(
+  // 대기(pending) 업무 — 요청받은 것 / 내가 요청한 것 구분
+  const receivedPendingTasks = useMemo(
     () =>
       tasks
-        .filter((t) => t.status === "pending")
+        .filter((t) => t.status === "pending" && t.taskType !== "requested")
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+    [tasks],
+  )
+  // 내가 요청한 업무 전체 (상태 무관 — 이 섹션에만 표시)
+  const requestedTasks = useMemo(
+    () =>
+      tasks
+        .filter((t) => t.taskType === "requested")
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
     [tasks],
   )
@@ -541,23 +581,21 @@ export default function AdminProgressPage() {
         </div>
       ) : (
         <>
-          {/* 받은 업무 섹션 - 사용자 구분 없이 전체 표시, 가로 배치 */}
-          <div className="mb-8">
-            <h2 className="text-2xl font-semibold mb-4">받은 업무</h2>
-            {allReceivedTasks.length > 0 ? (
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
-                {allReceivedTasks.map((task) => (
+          {/* 요청받은 업무 / 내가 요청한 업무 — 한 행에 나란히, 개수 많아져도 스크롤로 UI 유지 */}
+          <div className="mb-8 grid grid-cols-1 lg:grid-cols-2 gap-6 min-w-0">
+            <div className="pl-4 border-l-4 border-blue-500 flex flex-col min-w-0">
+              <h2 className="text-xl font-semibold mb-1 text-blue-700 dark:text-blue-400 shrink-0">요청받은 업무</h2>
+              <p className="text-sm text-muted-foreground mb-2 shrink-0">나에게 할당된 업무 (대기 중)</p>
+              <div className="min-h-[88px] max-h-[320px] overflow-auto pr-1">
+              {receivedPendingTasks.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {receivedPendingTasks.map((task) => (
                   <Card
                     key={task.id}
                     draggable
                     onDragStart={(e) => handleDragStart(e, task)}
                     onDragEnd={handleDragEnd}
-                    className={`rounded-lg shadow-sm hover:shadow-md transition-all bg-linear-to-br from-background to-muted/30 hover:from-background hover:to-muted/50 border-2 ${
-                      task.priority === 'urgent' ? 'border-red-500/50 hover:border-red-500' :
-                      task.priority === 'high' ? 'border-orange-500/50 hover:border-orange-500' :
-                      task.priority === 'medium' ? 'border-yellow-500/50 hover:border-yellow-500' :
-                      'border-blue-500/50 hover:border-blue-500'
-                    } ${
+                    className={`rounded-lg shadow-sm hover:shadow-md transition-all bg-linear-to-br from-background to-muted/30 hover:from-background hover:to-muted/50 border-2 border-blue-500/50 hover:border-blue-500 ${
                       draggedTask?.id === task.id ? 'opacity-50 cursor-move scale-95' : 'opacity-100 cursor-pointer'
                     } ${
                       workTaskId === task.id ? 'ring-2 ring-gray-400 ring-offset-1 border-gray-400' : ''
@@ -594,10 +632,58 @@ export default function AdminProgressPage() {
                 ))}
               </div>
             ) : (
-              <div className="text-center py-8 text-muted-foreground">
-                받은 업무가 없습니다.
+              <div className="text-center py-6 text-muted-foreground text-sm">
+                요청받은 대기 업무가 없습니다.
               </div>
             )}
+              </div>
+            </div>
+            <div className="pl-4 border-l-4 border-amber-500 flex flex-col min-w-0">
+              <h2 className="text-xl font-semibold mb-1 text-amber-700 dark:text-amber-400 shrink-0">내가 요청한 업무</h2>
+              <p className="text-sm text-muted-foreground mb-2 shrink-0">내가 등록한 업무</p>
+              <div className="min-h-[88px] max-h-[320px] overflow-auto pr-1">
+              {requestedTasks.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {requestedTasks.map((task) => (
+                  <Card
+                    key={task.id}
+                    className={`rounded-lg shadow-sm hover:shadow-md transition-all bg-linear-to-br from-background to-muted/30 hover:from-background hover:to-muted/50 border-2 border-amber-500/50 hover:border-amber-500 ${
+                      workTaskId === task.id ? 'ring-2 ring-gray-400 ring-offset-1 border-gray-400' : 'cursor-pointer'
+                    }`}
+                    onClick={() => setSelectedTask(task)}
+                  >
+                    <CardContent className="p-2">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <h4 className="font-semibold text-xs truncate" title={task.title}>
+                            {task.title}
+                            {task.subtitle && task.is_subtask && (
+                              <span className="text-muted-foreground ml-1.5">({task.subtitle})</span>
+                            )}
+                          </h4>
+                          <Badge className={`${getPriorityColor(task.priority)} text-[9px] px-1.5 py-0.5 font-medium shrink-0`} variant="outline">
+                            {task.priority === 'urgent' ? '긴급' : task.priority === 'high' ? '높음' : task.priority === 'medium' ? '보통' : '낮음'}
+                          </Badge>
+                          <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0 text-muted-foreground">
+                            {getStatusLabel(task.status)}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="truncate text-[10px] text-muted-foreground">{task.assigned_to_name || task.assigned_to_email || "담당자"}</span>
+                          <span className="whitespace-nowrap text-[10px] text-muted-foreground">{new Date(task.created_at).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' })}</span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-6 text-muted-foreground text-sm">
+                내가 요청한 업무가 없습니다.
+              </div>
+            )}
+              </div>
+            </div>
           </div>
 
           {/* 구분선: 받은 업무 vs 상태 보드 */}
@@ -662,10 +748,19 @@ export default function AdminProgressPage() {
             ))}
           </div>
           
-          {/* 작업공간 섹션 */}
+          {/* 작업공간 섹션 — 요청받은=파랑/요청한=주황 왼쪽 테두리로 구분 */}
           <Card 
             className={`mt-8 transition-all duration-200 ${
               isWorkAreaDragOver ? 'border-4 border-primary shadow-lg ring-2 ring-primary/20' : ''
+            } ${
+              workTaskId
+                ? (() => {
+                    const t = tasks.find((x) => x.id === workTaskId)
+                    if (t?.taskType === "received") return "border-l-4 border-l-blue-500"
+                    if (t?.taskType === "requested") return "border-l-4 border-l-amber-500"
+                    return ""
+                  })()
+                : ""
             }`}
             onDragOver={handleWorkAreaDragOver}
             onDragLeave={handleWorkAreaDragLeave}
@@ -690,7 +785,7 @@ export default function AdminProgressPage() {
                   </div>
                 ) : (
                   <>
-                  {/* 개별/공동 업무 표시 - 스타일만 공동 업무 스타일로 통일 */}
+                  {/* 개별/공동 업무 표시 */}
                   {(() => {
                     const currentTask = tasks.find(t => t.id === workTaskId)
                     const isMulti = currentTask?.is_multi_assign === true
@@ -1280,7 +1375,11 @@ export default function AdminProgressPage() {
                               size="sm"
                               onClick={() => {
                                 if (!workTaskId) return
-                                
+                                // 파일 선택 전에 작성 중인 내용을 state에 반영 (리렌더 시 유지)
+                                const commentEl = document.getElementById("work-comment-content")
+                                if (commentEl?.innerHTML != null) setWorkCommentContent(commentEl.innerHTML)
+                                const workEl = document.getElementById("work-content")
+                                if (workEl?.innerHTML != null) setWorkForm((prev) => ({ ...prev, content: workEl.innerHTML }))
                                 const input = document.createElement('input')
                                 input.type = 'file'
                                 input.multiple = true
@@ -1844,7 +1943,11 @@ export default function AdminProgressPage() {
                               size="sm"
                               onClick={() => {
                                 if (!workTaskId) return
-                                
+                                // 파일 선택 전에 작성 중인 내용을 state에 반영 (리렌더 시 유지)
+                                const commentEl = document.getElementById("work-comment-content")
+                                if (commentEl?.innerHTML != null) setWorkCommentContent(commentEl.innerHTML)
+                                const workEl = document.getElementById("work-content")
+                                if (workEl?.innerHTML != null) setWorkForm((prev) => ({ ...prev, content: workEl.innerHTML }))
                                 const input = document.createElement('input')
                                 input.type = 'file'
                                 input.multiple = true
