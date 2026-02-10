@@ -355,13 +355,13 @@ export async function PATCH(
         return NextResponse.json({ error: "유효하지 않은 상태입니다" }, { status: 400 })
       }
 
-      // 완료대기 → 작업끝내기(completed): 업무를 준 사람(assigned_by) 또는 admin만 가능. 담당자(assigned_to)는 임의 완료 불가
-      if (status === 'completed' && oldStatus === 'awaiting_completion') {
+      // 작업끝내기(completed): 요청자(assigned_by) 또는 admin/staff 가능 (admin = staff 동일 취급)
+      if (status === 'completed') {
         const isAssigner = decoded.id === task.assigned_by
-        const isAdmin = userRole === 'admin'
-        if (!isAssigner && !isAdmin) {
+        const isAdminOrStaff = userRole === 'admin' || userRole === 'staff'
+        if (!isAssigner && !isAdminOrStaff) {
           return NextResponse.json(
-            { error: "완료대기에서 작업 끝내기는 업무를 준 사람(요청자)만 할 수 있습니다" },
+            { error: "작업 끝내기는 요청자 또는 담당자(admin/staff)만 할 수 있습니다" },
             { status: 403 }
           )
         }
@@ -476,33 +476,12 @@ export async function PATCH(
         details: { from: oldStatus, to: status },
       })
 
-      // 공동 업무: 메인 task 상태 변경 시 본인 담당 subtask만 동일 상태로 갱신 (전체 그룹 X)
-      const mySubtasks = await query(
-        `SELECT id FROM task_subtasks WHERE task_id = ? AND assigned_to = ?`,
-        [taskId, decoded.id]
-      )
-      if (mySubtasks && mySubtasks.length > 0) {
-        if (status === "completed") {
-          await query(
-            `UPDATE task_subtasks SET status = ?, completed_at = NOW(), updated_at = NOW() WHERE task_id = ? AND assigned_to = ?`,
-            [status, taskId, decoded.id]
-          )
-        } else {
-          await query(
-            `UPDATE task_subtasks SET status = ?, completed_at = NULL, updated_at = NOW() WHERE task_id = ? AND assigned_to = ?`,
-            [status, taskId, decoded.id]
-          )
-        }
-      }
-
-      // 본인이 본인에게 할당한 task를 완료한 경우, 모든 subtask도 완료 처리 (위에서 이미 처리됐을 수 있음)
-      if (status === 'completed' && task.assigned_by === task.assigned_to) {
-        // 본인이 본인에게 할당한 경우, 모든 subtask를 완료로 변경
+      // 메인 task 완료 시: 해당 task의 모든 서브태스크를 completed로 통일 (다른 담당자 task도 함께 완료 처리)
+      if (status === "completed") {
         const subtasksResult = await query(
           `SELECT id FROM task_subtasks WHERE task_id = ? AND status != 'completed'`,
           [taskId]
         )
-        
         if (subtasksResult && subtasksResult.length > 0) {
           await query(
             `UPDATE task_subtasks 
@@ -510,8 +489,6 @@ export async function PATCH(
              WHERE task_id = ? AND status != 'completed'`,
             [taskId]
           )
-          
-          // 각 subtask의 상태 변경 이력도 기록
           for (const subtask of subtasksResult) {
             const subtaskHistoryId = randomUUID()
             await query(
@@ -520,6 +497,18 @@ export async function PATCH(
               [subtaskHistoryId, taskId, 'completed', decoded.id]
             )
           }
+        }
+      } else {
+        // 완료가 아닌 상태로 변경 시: 본인 담당 subtask만 동일 상태로 갱신
+        const mySubtasks = await query(
+          `SELECT id FROM task_subtasks WHERE task_id = ? AND assigned_to = ?`,
+          [taskId, decoded.id]
+        )
+        if (mySubtasks && mySubtasks.length > 0) {
+          await query(
+            `UPDATE task_subtasks SET status = ?, completed_at = NULL, updated_at = NOW() WHERE task_id = ? AND assigned_to = ?`,
+            [status, taskId, decoded.id]
+          )
         }
       }
     }

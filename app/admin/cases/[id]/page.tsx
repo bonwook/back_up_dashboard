@@ -680,12 +680,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     }
   }, [taskId, toast, reloadTask, task?.due_date])
 
-  // 모든 서브태스크가 완료되었는지 확인
-  const allSubtasksCompleted = useMemo(() => {
-    if (subtasks.length === 0) return false
-    return subtasks.every(st => st.status === "completed")
-  }, [subtasks])
-
   const handlePostComment = useCallback(async () => {
     if (!taskId) return
     const content = newComment.trim()
@@ -718,12 +712,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const handleFinalizeTask = useCallback(async () => {
     if (!taskId || !task) return
     if (!(userRole === "admin" || userRole === "staff")) return
-    
-    // awaiting_completion 이거나, 모든 서브태스크가 완료된 경우 완료 가능
-    const canFinalize = task.status === "awaiting_completion" || 
-                        (subtasks.length > 0 && allSubtasksCompleted)
-    
-    if (!canFinalize) return
+    if (task.status === "completed") return
 
     setIsFinalizing(true)
     try {
@@ -766,7 +755,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     } finally {
       setIsFinalizing(false)
     }
-  }, [taskId, task, userRole, toast, reloadTask, subtasks, allSubtasksCompleted])
+  }, [taskId, task, userRole, toast, reloadTask])
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString)
@@ -793,9 +782,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     return null
   }
 
-  // 수정 권한: 요청자(assigned_by) 또는 admin만. 할당받은 staff(assigned_to)는 수정 불가
-  const canEditTask = userRole === "admin" || me?.id === task.assigned_by
-  // 담당자(staff/admin)만 상태 변경 가능, 요청자(assigned_by)는 상태 선택 블록 미노출
+  // 수정 권한: 요청자(assigned_by) 또는 admin (admin = staff 동일 취급)
+  const canEditTask = userRole === "admin" || userRole === "staff" || me?.id === task.assigned_by
+  // 담당자(admin = staff)만 상태 변경 가능, 요청자(assigned_by)는 상태 선택 블록 미노출
   const canChangeStatus =
     (userRole === "staff" || userRole === "admin") && me?.id !== task.assigned_by
 
@@ -1495,9 +1484,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                         <div
                           className="border rounded-md overflow-hidden bg-background flex flex-col"
                           style={{
-                            height: "350px",
-                            minHeight: "350px",
-                            maxHeight: "350px",
+                            height: "520px",
+                            minHeight: "520px",
+                            maxHeight: "520px",
                           }}
                         >
                           <div className="flex items-center gap-1 p-2 flex-wrap shrink-0 border-b">
@@ -1682,7 +1671,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                         </div>
                       </>
                     ) : (
-                      <div className="border rounded-md bg-muted/30 p-4 min-h-[280px] overflow-y-auto" style={{ maxHeight: "420px" }}>
+                      <div className="border rounded-md bg-muted/30 p-4 overflow-y-auto" style={{ height: "520px", minHeight: "520px" }}>
                         {groupRequesterContent ? (
                           <div
                             className="text-base p-3 prose prose-base max-w-none dark:prose-invert"
@@ -2093,10 +2082,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       </Card>
       )}
 
-      {/* 완료대기이거나 모든 서브태스크가 완료된 경우: 작업완료 버튼 표시 (요청자 또는 admin만) */}
+      {/* 작업완료 버튼: 담당자(admin = staff 동일)에게 항상 표시 (미완료 작업만) */}
       {canEditTask &&
        (userRole === "admin" || userRole === "staff") &&
-       (task.status === "awaiting_completion" || (subtasks.length > 0 && allSubtasksCompleted)) &&
        task.status !== "completed" && (
         <div className="mt-10 flex justify-center">
           <Button onClick={handleFinalizeTask} disabled={isFinalizing} className="min-w-[180px] cursor-pointer">
