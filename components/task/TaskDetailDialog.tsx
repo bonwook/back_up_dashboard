@@ -297,17 +297,6 @@ export function TaskDetailDialog({
     [subtasks]
   )
 
-  /** 공동 업무: 같은 부제(subtitle)를 가진 서브태스크끼리 그룹화 */
-  const subtasksBySubtitle = useMemo(() => {
-    const map = new Map<string, any[]>()
-    subtasks.forEach((st: any) => {
-      const key = st.subtitle != null && String(st.subtitle).trim() !== "" ? String(st.subtitle).trim() : "\u200b"
-      if (!map.has(key)) map.set(key, [])
-      map.get(key)!.push(st)
-    })
-    return Array.from(map.entries())
-  }, [subtasks])
-
   const commentTaskIds = useMemo(
     () => (displayTask ? [displayTask.id, ...subtasks.map((s: any) => s.id)] : []),
     [displayTask?.id, subtasks]
@@ -723,39 +712,56 @@ export function TaskDetailDialog({
             </>
           )}
 
-          {/* 공동 업무 전용: 같은 부제별로 한 블록 — 요청자 내용 + 담당자별 내용 */}
-          {isJointTask && (
-            <div className="space-y-4 pt-4 border-t">
-              {subtasksBySubtitle.map(([subtitleKey, group]) => {
-                const blockTitle = subtitleKey === "\u200b" ? "부제 없음" : subtitleKey
-                const firstContent = group[0]?.content ?? ""
-                return (
-                  <div key={subtitleKey} className="rounded-lg border bg-muted/20 p-3 space-y-3">
+          {/* 공동 업무 전용: 서브태스크 그룹별로 요청자 한 행 → 담당자들 한 행씩 표시 + 이름 표시 */}
+          {isJointTask && (() => {
+            const requesterName = displayTask?.assigned_by_name || displayTask?.assigned_by_email || "요청자"
+            const groupedBySubtitle = (() => {
+              const map = new Map<string, any[]>()
+              for (const st of subtasks) {
+                const key = st.subtitle || st.title || "서브태스크"
+                if (!map.has(key)) map.set(key, [])
+                map.get(key)!.push(st)
+              }
+              return Array.from(map.entries()).map(([subtitle, list]) => ({ subtitle, list }))
+            })()
+            return (
+              <div className="space-y-4 pt-4 border-t">
+                {groupedBySubtitle.map(({ subtitle, list }) => (
+                  <div
+                    key={subtitle}
+                    className="rounded-lg border-2 border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/30 p-3 space-y-3"
+                  >
                     <p className="text-xs font-medium text-muted-foreground">
-                      {blockTitle}
+                      {subtitle}
                     </p>
                     <div className="space-y-3">
+                      {/* 첫 행: 요청자 내용 */}
                       <div>
-                        <p className="text-[11px] font-medium text-muted-foreground mb-1">요청자 내용</p>
-                        <div className="text-sm border rounded-md bg-muted/30 p-2 min-h-[140px] overflow-y-auto max-h-[400px]">
-                          {firstContent ? (
-                            <div className="p-2 prose prose-sm max-w-none task-detail-prose" dangerouslySetInnerHTML={{ __html: sanitizeHtml(firstContent) }} />
+                        <p className="text-[11px] font-medium mb-1 inline-block px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">
+                          {requesterName}
+                        </p>
+                        <div className="text-sm border rounded-md bg-muted/30 p-2 min-h-[60px] overflow-y-auto max-h-[200px]">
+                          {(list[0]?.content ?? "") ? (
+                            <div className="p-2 prose prose-sm max-w-none task-detail-prose" dangerouslySetInnerHTML={{ __html: sanitizeHtml(list[0].content ?? "") }} />
                           ) : (
                             <span className="text-muted-foreground">내용이 없습니다</span>
                           )}
                         </div>
                       </div>
-                      {group.map((st: any) => {
+                      {/* 다음 행들: 담당자별 내용 */}
+                      {list.map((st: any) => {
+                        const assigneeName = st.assigned_to_name || st.assigned_to_email || "담당자"
                         const stComment = st.comment
                           ? st.comment.startsWith("\n")
                             ? st.comment.substring(1)
                             : st.comment
                           : ""
-                        const assigneeLabel = st.assigned_to_name || st.assigned_to_email || "담당자"
                         return (
                           <div key={st.id}>
-                            <p className="text-[11px] font-medium text-muted-foreground mb-1">담당자: {assigneeLabel}</p>
-                            <div className="text-sm border rounded-md bg-muted/30 p-2 min-h-[120px] overflow-y-auto max-h-[360px]">
+                            <p className="text-[11px] font-medium mb-1 inline-block px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200">
+                              {assigneeName}
+                            </p>
+                            <div className="text-sm border rounded-md bg-muted/30 p-2 min-h-[60px] overflow-y-auto max-h-[200px]">
                               {stComment ? (
                                 <div className="p-2 prose prose-sm max-w-none task-detail-prose" dangerouslySetInnerHTML={{ __html: sanitizeHtml(stComment) }} />
                               ) : (
@@ -767,8 +773,7 @@ export function TaskDetailDialog({
                       })}
                     </div>
                   </div>
-                )
-              })}
+                ))}
 
               <div className="space-y-2 pt-2">
                 <Label className="text-sm font-semibold">첨부파일</Label>
@@ -840,7 +845,7 @@ export function TaskDetailDialog({
                 </div>
               </div>
             </div>
-          )}
+          )})()}
 
           <div className="pt-4 border-t">
             <TaskCommentSection
@@ -855,7 +860,7 @@ export function TaskDetailDialog({
           </div>
         </div>
 
-        <div className="flex justify-end mt-4 pt-4 gap-2">
+        <div className="flex justify-end mt-4 pt-4 border-t gap-2">
           {onEditTask && displayTask.status !== "awaiting_completion" && (
             <Button
               type="button"

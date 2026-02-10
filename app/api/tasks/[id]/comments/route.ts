@@ -45,11 +45,16 @@ async function canAccessComments(userId: string, role: string | null, taskId: st
   const isAdminOrStaff = role === "admin" || role === "staff"
   if (isAdminOrStaff) return true
   
-  // 메인 태스크 확인
+  // 메인 태스크 확인 (서브태스크 담당자도 허용: 공동 업무)
   const taskRows = await query(`SELECT assigned_to, assigned_by FROM task_assignments WHERE id = ?`, [taskId])
   const task = (taskRows as any[])?.[0]
   if (task) {
-    return task.assigned_to === userId || task.assigned_by === userId
+    if (task.assigned_to === userId || task.assigned_by === userId) return true
+    const subtaskAssign = await query(
+      "SELECT 1 FROM task_subtasks WHERE task_id = ? AND assigned_to = ? LIMIT 1",
+      [taskId, userId]
+    )
+    return Array.isArray(subtaskAssign) && subtaskAssign.length > 0
   }
   
   // 서브태스크 확인

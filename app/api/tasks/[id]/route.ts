@@ -53,8 +53,17 @@ export async function GET(
     if (mainTasks && mainTasks.length > 0) {
       const task = mainTasks[0]
 
-      // 권한 확인: admin/staff는 모든 task 조회 가능, 그 외는 자신의 task만
-      if (!isAdminOrStaff && task.assigned_to !== decoded.id && task.assigned_by !== decoded.id) {
+      // 권한: admin/staff, 메인 담당자·요청자, 또는 이 메인 업무의 서브태스크 담당자(공동 업무)
+      const isMainParty = task.assigned_to === decoded.id || task.assigned_by === decoded.id
+      let isSubtaskAssignee = false
+      if (!isAdminOrStaff && !isMainParty) {
+        const subtaskAssign = await query(
+          "SELECT 1 FROM task_subtasks WHERE task_id = ? AND assigned_to = ? LIMIT 1",
+          [taskId, decoded.id]
+        )
+        isSubtaskAssignee = Array.isArray(subtaskAssign) && subtaskAssign.length > 0
+      }
+      if (!isAdminOrStaff && !isMainParty && !isSubtaskAssignee) {
         return NextResponse.json({ error: "권한이 없습니다" }, { status: 403 })
       }
 
