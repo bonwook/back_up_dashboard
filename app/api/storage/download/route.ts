@@ -34,7 +34,14 @@ export async function GET(request: NextRequest) {
     // Extract key from s3:// path or use as-is
     const key = path.startsWith("s3://") ? path.replace(`s3://${BUCKET_NAME}/`, "") : path
 
-    if (!isValidS3Key(key, userId)) {
+    // temp/attachment/ 경로: 작업 첨부파일(업로더 userId가 경로에 포함). 인증된 사용자는 다운로드 허용.
+    const isTempAttachment =
+      key.startsWith("temp/attachment/") &&
+      !key.includes("..") &&
+      !key.includes("../") &&
+      !key.includes("..\\")
+
+    if (!isTempAttachment && !isValidS3Key(key, userId)) {
       return NextResponse.json({ error: "권한이 없습니다" }, { status: 403 })
     }
 
