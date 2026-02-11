@@ -527,7 +527,7 @@ export default function AdminProgressPage() {
     [awaitingCompletionTasks, finalizedTaskIds]
   )
 
-  // 대기(pending) 업무 — 요청받은 것 / 내가 요청한 것 구분
+  // 대기(pending) 업무 — 요청받은 것
   const receivedPendingTasks = useMemo(
     () =>
       tasks
@@ -535,7 +535,7 @@ export default function AdminProgressPage() {
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
     [tasks],
   )
-  // 내가 요청한 업무 전체 (상태 무관 — 이 섹션에만 표시)
+  // 내가 요청한 업무 전체 (공동업무 지시 포함) — 색 구분용
   const requestedTasks = useMemo(
     () =>
       tasks
@@ -543,7 +543,6 @@ export default function AdminProgressPage() {
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
     [tasks],
   )
-
   const statusColumns = useMemo<Array<{ status: TaskStatus; label: string; tasks: Task[]; icon: React.ReactElement }>>(() => [
     {
       status: 'in_progress',
@@ -572,7 +571,7 @@ export default function AdminProgressPage() {
           <h1 className="text-3xl font-bold">Progress</h1>
           <Badge variant="secondary" className="text-sm font-medium">관리자</Badge>
         </div>
-        <p className="text-muted-foreground mt-2">공동업무 및 담당한 업무를 드래그하여 상태를 변경할 수 있습니다</p>
+        <p className="text-muted-foreground mt-2">요청하거나 받은 업무를 드래그하여 상태를 변경할 수 있습니다</p>
       </div>
 
       {isLoading ? (
@@ -581,30 +580,29 @@ export default function AdminProgressPage() {
         </div>
       ) : (
         <>
-          {/* 요청받은 업무 / 내가 요청한 업무 — 한 행에 나란히, 개수 많아져도 스크롤로 UI 유지 */}
-          <div className="mb-8 grid grid-cols-1 lg:grid-cols-2 gap-6 min-w-0">
-            <div className="pl-4 border-l-4 border-blue-500 flex flex-col min-w-0">
-              <h2 className="text-xl font-semibold mb-1 text-blue-700 dark:text-blue-400 shrink-0">요청받은 업무</h2>
-              <p className="text-sm text-muted-foreground mb-2 shrink-0">나에게 할당된 업무 (대기 중)</p>
+          {/* 요청하거나 받은 업무 — 파랑: 요청받은, 주황: 내가 요청한(공동업무 포함) */}
+          <div className="mb-8 min-w-0">
+            <div className="pl-4 border-l-4 border-border flex flex-col min-w-0">
+              <h2 className="text-xl font-semibold mb-1 shrink-0">요청하거나 받은 업무</h2>
+              <p className="text-sm text-muted-foreground mb-2 shrink-0">
+                <span className="text-blue-600 dark:text-blue-400 font-medium">파란색</span>: 요청받은 업무(대기 중) · <span className="text-amber-600 dark:text-amber-400 font-medium">주황색</span>: 내가 요청한 업무(공동업무 지시 포함)
+              </p>
               <div className="min-h-[88px] max-h-[320px] overflow-auto pr-1">
-              {receivedPendingTasks.length > 0 ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {receivedPendingTasks.length > 0 || requestedTasks.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
                   {receivedPendingTasks.map((task) => (
                   <Card
                     key={task.id}
                     draggable
                     onDragStart={(e) => handleDragStart(e, task)}
                     onDragEnd={handleDragEnd}
-                    className={`rounded-lg shadow-sm hover:shadow-md transition-all bg-linear-to-br from-background to-muted/30 hover:from-background hover:to-muted/50 border-2 border-blue-500/50 hover:border-blue-500 ${
+                    className={`rounded-lg shadow-sm hover:shadow-md transition-all bg-linear-to-br from-background to-muted/30 hover:from-background hover:to-muted/50 border-l-4 border-l-blue-500 border-2 border-blue-500/30 hover:border-blue-500 ${
                       draggedTask?.id === task.id ? 'opacity-50 cursor-move scale-95' : 'opacity-100 cursor-pointer'
                     } ${
                       workTaskId === task.id ? 'ring-2 ring-gray-400 ring-offset-1 border-gray-400' : ''
                     }`}
                     onClick={(e) => {
-                      // 드래그가 아닐 때만 팝업 열기
-                      if (!draggedTask || draggedTask.id !== task.id) {
-                        setSelectedTask(task)
-                      }
+                      if (!draggedTask || draggedTask.id !== task.id) setSelectedTask(task)
                     }}
                   >
                     <CardContent className="p-2">
@@ -617,9 +615,7 @@ export default function AdminProgressPage() {
                             )}
                           </h4>
                           <Badge className={`${getPriorityColor(task.priority)} text-[9px] px-1.5 py-0.5 font-medium shrink-0`} variant="outline">
-                            {task.priority === 'urgent' ? '긴급' : 
-                             task.priority === 'high' ? '높음' : 
-                             task.priority === 'medium' ? '보통' : '낮음'}
+                            {task.priority === 'urgent' ? '긴급' : task.priority === 'high' ? '높음' : task.priority === 'medium' ? '보통' : '낮음'}
                           </Badge>
                         </div>
                         <div className="flex items-center gap-1.5 flex-wrap">
@@ -629,25 +625,11 @@ export default function AdminProgressPage() {
                       </div>
                     </CardContent>
                   </Card>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-6 text-muted-foreground text-sm">
-                요청받은 대기 업무가 없습니다.
-              </div>
-            )}
-              </div>
-            </div>
-            <div className="pl-4 border-l-4 border-amber-500 flex flex-col min-w-0">
-              <h2 className="text-xl font-semibold mb-1 text-amber-700 dark:text-amber-400 shrink-0">내가 요청한 업무</h2>
-              <p className="text-sm text-muted-foreground mb-2 shrink-0">내가 등록한 업무</p>
-              <div className="min-h-[88px] max-h-[320px] overflow-auto pr-1">
-              {requestedTasks.length > 0 ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  ))}
                   {requestedTasks.map((task) => (
                   <Card
                     key={task.id}
-                    className={`rounded-lg shadow-sm hover:shadow-md transition-all bg-linear-to-br from-background to-muted/30 hover:from-background hover:to-muted/50 border-2 border-amber-500/50 hover:border-amber-500 ${
+                    className={`rounded-lg shadow-sm hover:shadow-md transition-all bg-linear-to-br from-background to-muted/30 hover:from-background hover:to-muted/50 border-l-4 border-l-amber-500 border-2 border-amber-500/30 hover:border-amber-500 ${
                       workTaskId === task.id ? 'ring-2 ring-gray-400 ring-offset-1 border-gray-400' : 'cursor-pointer'
                     }`}
                     onClick={() => setSelectedTask(task)}
@@ -669,19 +651,19 @@ export default function AdminProgressPage() {
                           </Badge>
                         </div>
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="truncate text-[10px] text-muted-foreground">{task.assigned_to_name || task.assigned_to_email || "담당자"}</span>
+                          <span className="truncate text-[10px] text-muted-foreground">{task.assigned_to_name || task.assigned_to_email || '담당자'}</span>
                           <span className="whitespace-nowrap text-[10px] text-muted-foreground">{new Date(task.created_at).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' })}</span>
                         </div>
                       </div>
                     </CardContent>
                   </Card>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-6 text-muted-foreground text-sm">
-                내가 요청한 업무가 없습니다.
-              </div>
-            )}
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-6 text-muted-foreground text-sm">
+                  요청하거나 받은 업무가 없습니다.
+                </div>
+              )}
               </div>
             </div>
           </div>
@@ -748,7 +730,7 @@ export default function AdminProgressPage() {
             ))}
           </div>
           
-          {/* 작업공간 섹션 — 요청받은=파랑/요청한=주황 왼쪽 테두리로 구분 */}
+          {/* 작업공간 섹션 */}
           <Card 
             className={`mt-8 transition-all duration-200 ${
               isWorkAreaDragOver ? 'border-4 border-primary shadow-lg ring-2 ring-primary/20' : ''

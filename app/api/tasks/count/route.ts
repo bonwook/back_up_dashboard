@@ -15,7 +15,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Invalid token" }, { status: 401 })
     }
 
-    const taskStats = await query(
+    // 메인 할당: 미완료만
+    const [mainStats] = await query(
       `SELECT 
         COUNT(*) as total,
         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
@@ -28,22 +29,37 @@ export async function GET(request: NextRequest) {
       [decoded.id]
     )
 
-    if (!taskStats || taskStats.length === 0) {
+    // 서브태스크 할당: 메인 task가 미완료인 것만 (메인 완료 시 받은 요청에서 제외)
+    const [subStats] = await query(
+      `SELECT COUNT(*) as total
+       FROM task_subtasks ts
+       INNER JOIN task_assignments ta ON ts.task_id = ta.id AND ta.status != 'completed'
+       WHERE ts.assigned_to = ?`,
+      [decoded.id]
+    )
+
+    const mainTotal = Number(mainStats?.total) || 0
+    const subTotal = Number(subStats?.total) || 0
+    const total = mainTotal + subTotal
+
+    if (total === 0) {
       return NextResponse.json({
         total: 0,
         pending: 0,
         in_progress: 0,
         on_hold: 0,
+        awaiting_completion: 0,
         completed: 0,
       })
     }
 
     return NextResponse.json({
-      total: Number(taskStats[0].total) || 0,
-      pending: Number(taskStats[0].pending) || 0,
-      in_progress: Number(taskStats[0].in_progress) || 0,
-      on_hold: Number(taskStats[0].on_hold) || 0,
-      completed: Number(taskStats[0].completed) || 0,
+      total,
+      pending: Number(mainStats?.pending) || 0,
+      in_progress: Number(mainStats?.in_progress) || 0,
+      on_hold: Number(mainStats?.on_hold) || 0,
+      awaiting_completion: Number(mainStats?.awaiting_completion) || 0,
+      completed: Number(mainStats?.completed) || 0,
     })
   } catch (error: unknown) {
     console.error("[Tasks Count API] Error fetching task counts:", error)

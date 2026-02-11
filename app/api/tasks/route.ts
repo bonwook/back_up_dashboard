@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const status = searchParams.get("status") // optional filter
 
-    // 메인 task 가져오기 (개별 할당 및 다중 할당의 메인 task 모두 포함)
+    // 메인 task 가져오기 (개별 할당) — 메인 완료된 건 받은 요청에서 제외
     let sql = `
       SELECT 
         ta.*,
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
       FROM task_assignments ta
       LEFT JOIN profiles p_assigned_by ON ta.assigned_by = p_assigned_by.id
       LEFT JOIN profiles p_assigned_to ON ta.assigned_to = p_assigned_to.id
-      WHERE ta.assigned_to = ?
+      WHERE ta.assigned_to = ? AND ta.status != 'completed'
     `
     const params: (string | number)[] = [decoded.id]
 
@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
 
     const singleTasks = await query(sql, params)
 
-    // 다중 할당 task의 subtask 가져오기 (subtitle 포함)
+    // 다중 할당 task의 subtask 가져오기 — 메인 task가 완료된 경우 받은 요청에서 제외
     let subtaskSql = `
       SELECT 
         ts.*,
@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
         p_assigned_to.full_name as assigned_to_name,
         p_assigned_to.email as assigned_to_email
       FROM task_subtasks ts
-      INNER JOIN task_assignments ta ON ts.task_id = ta.id
+      INNER JOIN task_assignments ta ON ts.task_id = ta.id AND ta.status != 'completed'
       LEFT JOIN profiles p_assigned_by ON ta.assigned_by = p_assigned_by.id
       LEFT JOIN profiles p_assigned_to ON ts.assigned_to = p_assigned_to.id
       WHERE ts.assigned_to = ?

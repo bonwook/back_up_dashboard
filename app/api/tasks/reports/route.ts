@@ -180,7 +180,7 @@ ${files.length ? `<h3>첨부파일</h3><ul>${files.map((k) => `<li>${escapeHtml(
       LEFT JOIN profiles p_assigned_by ON ta.assigned_by = p_assigned_by.id
       LEFT JOIN profiles p_assigned_to ON ta.assigned_to = p_assigned_to.id
       WHERE ta.status = 'completed'
-        AND (ta.assigned_by = ? OR ta.assigned_to = ?)
+        AND (ta.assigned_by = ? OR ta.assigned_to = ? OR ta.id IN (SELECT task_id FROM task_subtasks WHERE assigned_to = ?))
       ORDER BY ta.completed_at DESC
     ` : `
       SELECT 
@@ -212,10 +212,10 @@ ${files.length ? `<h3>첨부파일</h3><ul>${files.map((k) => `<li>${escapeHtml(
       LEFT JOIN profiles p_assigned_by ON ta.assigned_by = p_assigned_by.id
       LEFT JOIN profiles p_assigned_to ON ta.assigned_to = p_assigned_to.id
       WHERE ta.status = 'completed'
-        AND (ta.assigned_by = ? OR ta.assigned_to = ?)
+        AND (ta.assigned_by = ? OR ta.assigned_to = ? OR ta.id IN (SELECT task_id FROM task_subtasks WHERE assigned_to = ?))
       ORDER BY ta.completed_at DESC
     `
-    const params = [decoded.id, decoded.id]
+    const params = [decoded.id, decoded.id, decoded.id]
 
     const tasks = await query(sql, params)
 

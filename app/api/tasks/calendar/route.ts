@@ -107,7 +107,7 @@ export async function GET(request: NextRequest) {
             SELECT
               ta.id,
               ta.title,
-              ta.status,
+              (SELECT ts_ref.status FROM task_subtasks ts_ref WHERE ts_ref.task_id = ta.id AND ts_ref.assigned_to = ? LIMIT 1) as status,
               ta.priority,
               ta.assigned_by,
               ta.assigned_to,
@@ -133,9 +133,9 @@ export async function GET(request: NextRequest) {
               AND ta.assigned_by != ?
               AND (ta.assigned_to IS NULL OR ta.assigned_to != ?)
           ) combined
-          ORDER BY combined.task_datetime, combined.created_at DESC
+        ORDER BY combined.task_datetime, combined.created_at DESC
         `
-        params = [userId, userId, userId, userId, userId, userId, userId, userId, userId]
+        params = [userId, userId, userId, userId, userId, userId, userId, userId, userId, userId]
       } else {
         // Staff + 전체: 모든 태스크 조회 (내 업무만 보기 OFF)
         sql = `
@@ -266,7 +266,7 @@ export async function GET(request: NextRequest) {
           SELECT
             ta.id,
             ta.title,
-            ta.status,
+            (SELECT ts_ref.status FROM task_subtasks ts_ref WHERE ts_ref.task_id = ta.id AND ts_ref.assigned_to = ? LIMIT 1) as status,
             ta.priority,
             ta.assigned_by,
             ta.assigned_to,
@@ -294,7 +294,7 @@ export async function GET(request: NextRequest) {
         ) combined
         ORDER BY combined.task_datetime, combined.created_at DESC
       `
-      params = [userId, userId, userId, userId, userId, userId, userId, userId]
+      params = [userId, userId, userId, userId, userId, userId, userId, userId, userId]
     }
 
     const tasks = await query(sql, params)
