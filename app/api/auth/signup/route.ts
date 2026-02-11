@@ -26,14 +26,15 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     console.log("Request body:", { email: body.email, hasPassword: !!body.password })
 
-    const { email, password, fullName, organization } = body
+    const { email, password, fullName, organization, role: bodyRole } = body
 
     if (!email || !password) {
       return NextResponse.json({ error: "Email and password are required" }, { status: 400 })
     }
 
-    // 회원가입은 client만 허용 (서버에서 강제)
-    const validRole: "client" = "client"
+    // 회원가입은 client, staff만 허용 (admin은 불가)
+    const validRoles = ["client", "staff"] as const
+    const validRole = validRoles.includes(bodyRole) ? bodyRole : "client"
 
     const { getPool } = await import("@/lib/db/mysql")
     try {

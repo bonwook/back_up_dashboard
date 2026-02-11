@@ -68,12 +68,13 @@ export default async function ReportViewPage({ params }: { params: Promise<{ id:
         ts.subtitle,
         ts.content,
         ts.assigned_to,
+        ts.created_at,
         p.full_name as assigned_to_name,
         p.email as assigned_to_email
       FROM task_subtasks ts
       LEFT JOIN profiles p ON ts.assigned_to = p.id
       WHERE ts.task_id = ?
-      ORDER BY ts.subtitle ASC
+      ORDER BY ts.subtitle ASC, ts.created_at ASC, ts.id ASC
     `,
     [id],
   )
@@ -95,10 +96,29 @@ export default async function ReportViewPage({ params }: { params: Promise<{ id:
 
   const fileKeys = parseFileKeys(task.file_keys)
   const commentFileKeys = parseFileKeys(task.comment_file_keys)
-  const htmlContent = task.report_html || ""
 
   const requesterName = task.assigned_by_name || task.assigned_by_email || "요청자"
   const isMultiAssign = Array.isArray(subtasks) && subtasks.length > 0
+
+  // 공동업무: 부제(subtitle)별 그룹 → 각 그룹당 요청자 내용 1개 + 담당자들 내용 순서대로
+  type SubtitleGroup = { subtitle: string; requesterBlock: any | null; assigneeBlocks: any[] }
+  const subtitleGroups: SubtitleGroup[] = isMultiAssign
+    ? (() => {
+        const bySubtitle = new Map<string, any[]>()
+        for (const st of subtasks) {
+          const key = st.subtitle ?? ""
+          if (!bySubtitle.has(key)) bySubtitle.set(key, [])
+          bySubtitle.get(key)!.push(st)
+        }
+        const groups: SubtitleGroup[] = []
+        for (const [subtitle, list] of bySubtitle.entries()) {
+          const requesterBlock = list.find((st: any) => st.assigned_to === task.assigned_by) ?? null
+          const assigneeBlocks = list.filter((st: any) => st.assigned_to !== task.assigned_by)
+          groups.push({ subtitle, requesterBlock, assigneeBlocks })
+        }
+        return groups.sort((a, b) => (a.subtitle || "").localeCompare(b.subtitle || ""))
+      })()
+    : []
 
   return (
     <div className="mx-auto max-w-7xl p-6">
@@ -125,65 +145,72 @@ export default async function ReportViewPage({ params }: { params: Promise<{ id:
         </CardHeader>
       </Card>
 
-      {/* 1) 요청자 내용 */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            {requesterName} 내용
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {task.description && String(task.description).trim() && (
-            <div className="text-sm text-muted-foreground whitespace-pre-wrap rounded-md bg-muted/50 p-3">
-              {String(task.description)}
-            </div>
-          )}
-          {isMultiAssign && (
-            <div className="space-y-3">
-              {subtasks.map((st: any) => (
-                <div key={st.id}>
-                  {st.content && String(st.content).trim() ? (
-                    <>
-                      <p className="text-xs font-medium text-muted-foreground mb-1">부제: {st.subtitle || "(없음)"}</p>
-                      <div className="prose prose-sm max-w-none dark:prose-invert rounded-md bg-muted/30 p-3">
-                        <SafeHtml html={String(st.content)} className="prose prose-sm max-w-none dark:prose-invert" />
-                      </div>
-                    </>
-                  ) : null}
+      {/* 개인 업무: 요청자 1블록 → 담당자 1블록 */}
+      {!isMultiAssign && (
+        <>
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle className="text-lg">{requesterName} 내용</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {task.description && String(task.description).trim() ? (
+                <div className="text-sm text-muted-foreground whitespace-pre-wrap rounded-md bg-muted/50 p-3">
+                  {String(task.description)}
                 </div>
-              ))}
-            </div>
-          )}
-          {!task.description?.trim() && (!isMultiAssign || !subtasks.some((st: any) => st.content?.trim())) && (
-            <p className="text-sm text-muted-foreground">내용 없음</p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* 2) 담당자 내용 */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="text-lg">담당자 내용</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {!isMultiAssign && (
-            <>
-              {hasAssigneeContent ? (
+              ) : (
+                <p className="text-sm text-muted-foreground">내용 없음</p>
+              )}
+            </CardContent>
+          </Card>
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle className="text-lg">담당자 내용</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {task.content && String(task.content).trim() ? (
                 <div className="prose prose-sm max-w-none dark:prose-invert">
                   <SafeHtml html={String(task.content)} className="prose prose-sm max-w-none dark:prose-invert" />
                 </div>
               ) : (
                 <p className="text-sm text-muted-foreground">내용 없음</p>
               )}
-            </>
-          )}
-          {isMultiAssign && (
-            <div className="space-y-4">
-              {subtasks.map((st: any) => (
-                <div key={st.id} className="rounded-md border p-3">
-                  <p className="text-sm font-medium text-muted-foreground mb-2">
-                    {st.assigned_to_name || st.assigned_to_email || "담당자"} {st.subtitle ? `· ${st.subtitle}` : ""}
-                  </p>
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {/* 공동업무: 부제별 [요청자 1블록 + 담당자들 순서대로] */}
+      {isMultiAssign &&
+        subtitleGroups.map((group) => (
+          <div key={group.subtitle} className="mb-6 space-y-4">
+            <h3 className="text-base font-semibold text-muted-foreground border-b pb-1">
+              부제: {group.subtitle || "(없음)"}
+            </h3>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">{requesterName} 내용</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {group.requesterBlock?.content && String(group.requesterBlock.content).trim() ? (
+                  <div className="prose prose-sm max-w-none dark:prose-invert">
+                    <SafeHtml
+                      html={String(group.requesterBlock.content)}
+                      className="prose prose-sm max-w-none dark:prose-invert"
+                    />
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">내용 없음</p>
+                )}
+              </CardContent>
+            </Card>
+            {group.assigneeBlocks.map((st: any) => (
+              <Card key={st.id}>
+                <CardHeader>
+                  <CardTitle className="text-lg">
+                    담당자: {st.assigned_to_name || st.assigned_to_email || "담당자"}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
                   {st.content && String(st.content).trim() ? (
                     <div className="prose prose-sm max-w-none dark:prose-invert">
                       <SafeHtml html={String(st.content)} className="prose prose-sm max-w-none dark:prose-invert" />
@@ -191,14 +218,13 @@ export default async function ReportViewPage({ params }: { params: Promise<{ id:
                   ) : (
                     <p className="text-sm text-muted-foreground">내용 없음</p>
                   )}
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ))}
 
-      {/* 3) 첨부파일 */}
+      {/* 첨부파일 */}
       <Card className="mb-6">
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
@@ -249,7 +275,7 @@ export default async function ReportViewPage({ params }: { params: Promise<{ id:
         </CardContent>
       </Card>
 
-      {/* 4) 댓글 */}
+      {/* 댓글 */}
       <Card className="mb-6">
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
@@ -274,45 +300,6 @@ export default async function ReportViewPage({ params }: { params: Promise<{ id:
           )}
         </CardContent>
       </Card>
-
-      {(task.staff_comments || task.client_comments) && (
-        <div className="grid gap-4 md:grid-cols-2 mb-6">
-          {task.staff_comments && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Staff Comments</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground whitespace-pre-wrap">{task.staff_comments}</p>
-              </CardContent>
-            </Card>
-          )}
-          {task.client_comments && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Client Comments</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground whitespace-pre-wrap">{task.client_comments}</p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {htmlContent && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Analysis Report</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <SafeHtml
-              html={htmlContent}
-              className="prose prose-sm max-w-none dark:prose-invert"
-            />
-          </CardContent>
-        </Card>
-      )}
     </div>
   )
 }

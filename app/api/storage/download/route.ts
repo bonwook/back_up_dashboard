@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { verifyToken } from "@/lib/auth"
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3"
+import { NoSuchKey } from "@aws-sdk/client-s3"
 import { Readable } from "node:stream"
 
 const s3Client = new S3Client({
@@ -86,6 +87,11 @@ export async function GET(request: NextRequest) {
       },
     })
   } catch (error) {
+    const err = error as { name?: string; Code?: string } | null
+    const isNoSuchKey = error instanceof NoSuchKey || (err && (err.name === "NoSuchKey" || err.Code === "NoSuchKey"))
+    if (isNoSuchKey) {
+      return NextResponse.json({ error: "File not found" }, { status: 404 })
+    }
     console.error("[v0] Error downloading file:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }

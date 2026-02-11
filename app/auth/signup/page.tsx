@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
@@ -16,6 +17,7 @@ export default function SignUpPage() {
   const [repeatPassword, setRepeatPassword] = useState("")
   const [fullName, setFullName] = useState("")
   const [organization, setOrganization] = useState("")
+  const [role, setRole] = useState<"client" | "staff">("client")
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
@@ -42,6 +44,7 @@ export default function SignUpPage() {
           password,
           fullName,
           organization,
+          role,
         }),
       });
 
@@ -102,6 +105,27 @@ export default function SignUpPage() {
                     value={organization}
                     onChange={(e) => setOrganization(e.target.value)}
                   />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Account Type</Label>
+                  <RadioGroup
+                    value={role}
+                    onValueChange={(v) => setRole(v as "client" | "staff")}
+                    className="flex gap-4"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="client" id="role-client" />
+                      <Label htmlFor="role-client" className="cursor-pointer font-normal">
+                        Client
+                      </Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="staff" id="role-staff" />
+                      <Label htmlFor="role-staff" className="cursor-pointer font-normal">
+                        Staff
+                      </Label>
+                    </div>
+                  </RadioGroup>
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="email">Email</Label>

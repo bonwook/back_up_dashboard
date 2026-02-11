@@ -394,7 +394,7 @@ export default function AdminFileUploadPage() {
                 <CardDescription>서버로 파일을 업로드 합니다</CardDescription>
               </div>
               <Button type="button" variant="outline" onClick={handleClear} className="ml-4">
-                초기화
+                새로고침
               </Button>
             </div>
           </CardHeader>
