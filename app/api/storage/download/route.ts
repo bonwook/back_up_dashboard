@@ -3,6 +3,7 @@ import { verifyToken } from "@/lib/auth"
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3"
 import { NoSuchKey } from "@aws-sdk/client-s3"
 import { Readable } from "node:stream"
+import { isValidS3Key } from "@/lib/utils/filename"
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION!,
@@ -22,6 +23,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Invalid token" }, { status: 401 })
     }
 
+    const userId = decoded.id
     const { searchParams } = new URL(request.url)
     const path = searchParams.get("path")
 
@@ -31,6 +33,10 @@ export async function GET(request: NextRequest) {
 
     // Extract key from s3:// path or use as-is
     const key = path.startsWith("s3://") ? path.replace(`s3://${BUCKET_NAME}/`, "") : path
+
+    if (!isValidS3Key(key, userId)) {
+      return NextResponse.json({ error: "권한이 없습니다" }, { status: 403 })
+    }
 
     const command = new GetObjectCommand({
       Bucket: BUCKET_NAME,

@@ -105,6 +105,12 @@ export default function ClientAnalyticsPage() {
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
 
+  const [extractPasswordDialogOpen, setExtractPasswordDialogOpen] = useState(false)
+  const [extractPasswordFile, setExtractPasswordFile] = useState<S3File | null>(null)
+  const [extractPasswordValue, setExtractPasswordValue] = useState("")
+
+  const [isBulkDeleteDialogOpen, setIsBulkDeleteDialogOpen] = useState(false)
+
   const { toast } = useToast()
   
   // Editor hook
@@ -136,6 +142,7 @@ export default function ClientAnalyticsPage() {
     cancelExtract,
     confirmDeleteFile,
     cancelDelete,
+    deleteSelectedItems,
     handleDownloadFile,
     handleDownloadZip,
   } = useFileManagement({
@@ -1202,27 +1209,40 @@ export default function ClientAnalyticsPage() {
                 {/* 파일 목록 */}
                 <Card className="flex flex-col min-h-0 h-full w-full min-w-0 overflow-hidden">
                   <CardHeader className="shrink-0 pb-3">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <div>
                         <CardTitle className="text-lg">파일 목록</CardTitle>
                       </div>
-                      <Button 
-                        onClick={() => {
-                          setSelectedFile(null)
-                          setPreviewData(null)
-                          setFileUrl(null)
-                          setSelectedFiles(new Set())
-                          setCurrentPath("")
-                          loadFiles(true, "")
-                        }} 
-                        disabled={isLoading}
-                        size="sm"
-                        variant="outline"
-                        className="shrink-0"
-                      >
-                        <RefreshCw className={`h-3 w-3 sm:h-4 sm:w-4 ${isLoading ? "animate-spin" : ""}`} />
-                        <span className="hidden sm:inline ml-2">새로고침</span>
-                      </Button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {selectedFiles.size > 0 && (
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            className="shrink-0"
+                            disabled={isDeleting}
+                            onClick={() => setIsBulkDeleteDialogOpen(true)}
+                          >
+                            <Trash2 className="h-3 w-3 sm:h-4 sm:w-4" />
+                            <span className="hidden sm:inline ml-2">선택 삭제</span>
+                          </Button>
+                        )}
+                        <Button 
+                          onClick={() => {
+                            setSelectedFile(null)
+                            setPreviewData(null)
+                            setFileUrl(null)
+                            setSelectedFiles(new Set())
+                            loadFiles(true)
+                          }} 
+                          disabled={isLoading}
+                          size="sm"
+                          variant="outline"
+                          className="shrink-0"
+                        >
+                          <RefreshCw className={`h-3 w-3 sm:h-4 sm:w-4 ${isLoading ? "animate-spin" : ""}`} />
+                          <span className="hidden sm:inline ml-2">새로고침</span>
+                        </Button>
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent className="flex-1 overflow-hidden flex flex-col min-h-0">
@@ -1349,11 +1369,21 @@ export default function ClientAnalyticsPage() {
                                   ) : (
                                     <div className="flex items-center gap-2 shrink-0">
                                       {/* zip 파일인 경우 압축 해제 버튼 추가 */}
-                                      {(file.fileName?.toLowerCase().endsWith('.zip') || file.key.toLowerCase().endsWith('.zip')) && (
+                                      {((file.fileName?.toLowerCase().endsWith('.zip') || file.fileName?.toLowerCase().endsWith('.7z')) || (file.key?.toLowerCase().endsWith('.zip') || file.key?.toLowerCase().endsWith('.7z'))) && (
                                         <Button
                                           variant="ghost"
                                           size="sm"
-                                          onClick={() => handleExtractZip(file)}
+                                          onClick={async () => {
+                                            try {
+                                              await handleExtractZip(file)
+                                            } catch (err) {
+                                              if ((err as Error & { code?: string }).code === "ZIP_MISSING_PASSWORD") {
+                                                setExtractPasswordFile(file)
+                                                setExtractPasswordValue("")
+                                                setExtractPasswordDialogOpen(true)
+                                              }
+                                            }
+                                          }}
                                           title="압축 해제"
                                           disabled={isExtracting}
                                         >
@@ -1817,6 +1847,108 @@ export default function ClientAnalyticsPage() {
                   삭제
                 </Button>
               )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* 다중 선택 삭제 확인 다이얼로그 */}
+        <AlertDialog open={isBulkDeleteDialogOpen} onOpenChange={setIsBulkDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>선택 항목 삭제</AlertDialogTitle>
+              <AlertDialogDescription>
+                선택한 {getSelectedFilesForAssignment().length}개 파일/폴더를 삭제하시겠습니까? 폴더는 그 안의 모든 파일이 함께 삭제되며, 이 작업은 되돌릴 수 없습니다.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isDeleting}>취소</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={async () => {
+                  const items = getSelectedFilesForAssignment()
+                  if (items.length > 0) {
+                    setIsBulkDeleteDialogOpen(false)
+                    await deleteSelectedItems(items)
+                  }
+                }}
+                disabled={isDeleting}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {isDeleting ? `삭제 중... ${deleteProgress}%` : "삭제"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* ZIP 비밀번호 입력 다이얼로그 */}
+        <Dialog open={extractPasswordDialogOpen} onOpenChange={(open) => {
+          if (!open) {
+            setExtractPasswordDialogOpen(false)
+            setExtractPasswordFile(null)
+            setExtractPasswordValue("")
+          }
+        }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>ZIP 비밀번호</DialogTitle>
+              <DialogDescription>
+                비밀번호가 설정된 ZIP 파일입니다. 압축 해제를 위해 비밀번호를 입력해 주세요.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-4 space-y-4">
+              {extractPasswordFile && (
+                <p className="text-sm text-muted-foreground">
+                  파일: {extractPasswordFile.fileName || extractPasswordFile.key?.split("/").pop() || ""}
+                </p>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="zip-password">비밀번호</Label>
+                <Input
+                  id="zip-password"
+                  type="password"
+                  value={extractPasswordValue}
+                  onChange={(e) => setExtractPasswordValue(e.target.value)}
+                  placeholder="ZIP 비밀번호 입력"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault()
+                      if (extractPasswordFile) {
+                        const file = extractPasswordFile
+                        const pwd = extractPasswordValue
+                        setExtractPasswordDialogOpen(false)
+                        setExtractPasswordFile(null)
+                        setExtractPasswordValue("")
+                        handleExtractZip(file, pwd)
+                      }
+                    }
+                  }}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setExtractPasswordDialogOpen(false)
+                  setExtractPasswordFile(null)
+                  setExtractPasswordValue("")
+                }}
+              >
+                취소
+              </Button>
+              <Button
+                onClick={() => {
+                  if (extractPasswordFile) {
+                    setExtractPasswordDialogOpen(false)
+                    const file = extractPasswordFile
+                    const pwd = extractPasswordValue
+                    setExtractPasswordFile(null)
+                    setExtractPasswordValue("")
+                    handleExtractZip(file, pwd)
+                  }
+                }}
+              >
+                압축 해제
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

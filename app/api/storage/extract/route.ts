@@ -1,28 +1,98 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { verifyToken } from "@/lib/auth"
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3"
-import { uploadToS3, listFiles } from "@/lib/aws/s3"
+import { uploadToS3 } from "@/lib/aws/s3"
 import { query } from "@/lib/db/mysql"
 import { randomUUID } from "crypto"
 import { isValidS3Key } from "@/lib/utils/filename"
-import unzipper from "unzipper"
-import { Readable } from "stream"
+import {
+  formatSize,
+  getContentType,
+  getFileTypeFromExtension,
+  isSupportedArchiveExt,
+  extractZipEntries,
+  getZipEntryStats,
+  extract7zEntries,
+  get7zEntryStats,
+  inBatches,
+  type ExtractEntry,
+} from "@/lib/archive"
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
 })
 
 const BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME!
+const BATCH_SIZE = 15
 
-// POST /api/storage/extract - zip 파일 압축 해제
+/** 배치 단위로 S3 업로드 + DB 삽입 후 레코드 반환 */
+async function processBatch(
+  batch: ExtractEntry[],
+  targetFolderPath: string,
+  userId: string
+): Promise<
+  Array<{
+    fileId: string
+    fileName: string
+    targetKey: string
+    fileSize: number
+    contentType: string
+    fileType: string
+  }>
+> {
+  const prefix = targetFolderPath ? targetFolderPath + "/" : ""
+  const results = await Promise.all(
+    batch.map(async (entry) => {
+      const normalizedPath = entry.path.replace(/^\/+/, "").replace(/\\/g, "/")
+      const targetKey = prefix + normalizedPath
+      const fileExtension = entry.path.split(".").pop()?.toLowerCase() ?? "bin"
+      const contentType = getContentType(fileExtension)
+      const fileType = getFileTypeFromExtension(fileExtension)
+
+      await uploadToS3(entry.buffer, targetKey, contentType)
+
+      return {
+        fileId: randomUUID(),
+        fileName: normalizedPath.split("/").pop() ?? normalizedPath,
+        targetKey,
+        fileSize: entry.buffer.length,
+        contentType,
+        fileType,
+      }
+    })
+  )
+
+  for (const record of results) {
+    await query(
+      `INSERT INTO user_files (
+        id, user_id, file_name, file_path, s3_key, s3_bucket,
+        file_size, content_type, file_type, uploaded_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        record.fileId,
+        userId,
+        record.fileName,
+        `s3://${BUCKET_NAME}/${record.targetKey}`,
+        record.targetKey,
+        BUCKET_NAME,
+        record.fileSize,
+        record.contentType,
+        record.fileType,
+      ]
+    )
+  }
+
+  return results
+}
+
+// POST /api/storage/extract - zip/7z 파일 압축 해제
 export async function POST(request: NextRequest) {
   try {
     const token = request.cookies.get("auth-token")?.value
-    
     if (!token) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
-    
+
     const decoded = verifyToken(token)
     if (!decoded) {
       return NextResponse.json({ error: "Invalid token" }, { status: 401 })
@@ -30,53 +100,80 @@ export async function POST(request: NextRequest) {
 
     const userId = decoded.id
     const body = await request.json()
-    const { zipKey } = body
+    const { zipKey, zipPassword, targetPath: requestedTargetPath } = body as {
+      zipKey: string
+      zipPassword?: string
+      targetPath?: string
+    }
+
+    console.log("[Extract] Request:", {
+      zipKey: zipKey?.slice(0, 80),
+      targetPath: requestedTargetPath ?? "(none)",
+      userId,
+    })
 
     if (!zipKey) {
       return NextResponse.json({ error: "zipKey is required" }, { status: 400 })
     }
 
-    // S3 키 보안 검증
     if (!isValidS3Key(zipKey, userId)) {
       return NextResponse.json({ error: "권한이 없습니다" }, { status: 403 })
     }
 
-    // zip 파일이 존재하는지 확인
-    const key = zipKey.startsWith("s3://") ? zipKey.replace(`s3://${BUCKET_NAME}/`, "") : zipKey
+    const key = zipKey.startsWith("s3://")
+      ? zipKey.replace(`s3://${BUCKET_NAME}/`, "")
+      : zipKey
 
-    // zip 파일의 경로에서 폴더명 생성
-    // 예: userId/zip/test.zip -> userId/zip/test (폴더)
-    const keyParts = key.split('/')
-    const zipFileName = keyParts[keyParts.length - 1]
-    const zipFileNameWithoutExt = zipFileName.replace(/\.zip$/i, '')
-    const targetFolderPath = keyParts.slice(0, -1).join('/') + '/' + zipFileNameWithoutExt
+    if (!isSupportedArchiveExt(key)) {
+      return NextResponse.json(
+        { error: "지원하지 않는 압축 형식입니다. .zip 또는 .7z만 가능합니다." },
+        { status: 400 }
+      )
+    }
+
+    // 압축 해제 대상: 현재 경로 + 압축파일명(확장자 제외) 폴더 안에 파일들이 나오도록
+    const archiveFileName = key.split("/").pop() ?? ""
+    const archiveBaseName = archiveFileName.replace(/\.(zip|7z)$/i, "") || "extracted"
+
+    let basePath: string
+    if (requestedTargetPath != null && requestedTargetPath !== "") {
+      const normalized = requestedTargetPath.replace(/\/+$/, "")
+      const prefix = normalized === "" ? "" : normalized + "/"
+      if (!key.startsWith(prefix)) {
+        return NextResponse.json(
+          { error: "대상 경로가 압축 파일 위치와 일치하지 않습니다." },
+          { status: 400 }
+        )
+      }
+      if (normalized !== "" && !isValidS3Key(normalized + "/dummy", userId)) {
+        return NextResponse.json({ error: "권한이 없습니다" }, { status: 403 })
+      }
+      basePath = normalized
+    } else {
+      const parts = key.split("/")
+      basePath = parts.length > 1 ? parts.slice(0, -1).join("/") : ""
+    }
+    const targetFolderPath = basePath ? `${basePath}/${archiveBaseName}` : archiveBaseName
+    const is7z = key.toLowerCase().endsWith(".7z")
 
     console.log(`[Extract] Extracting ${key} to ${targetFolderPath}`)
 
-    // S3에서 zip 파일 다운로드
     const getObjectCommand = new GetObjectCommand({
       Bucket: BUCKET_NAME,
       Key: key,
     })
-
     const response = await s3Client.send(getObjectCommand)
     if (!response.Body) {
-      return NextResponse.json({ error: "Failed to download zip file" }, { status: 500 })
+      return NextResponse.json({ error: "Failed to download archive" }, { status: 500 })
     }
 
-    // Body를 Buffer로 변환
     const chunks: Uint8Array[] = []
-    const bodyStream = response.Body as any
-    
+    const bodyStream = response.Body as AsyncIterable<Uint8Array>
     for await (const chunk of bodyStream) {
       chunks.push(chunk)
     }
-    
     const buffer = Buffer.concat(chunks)
 
-    // zip 파일 압축 해제 (스트리밍 방식)
-    const directory = await unzipper.Open.buffer(buffer)
-    
     const encoder = new TextEncoder()
     const stream = new ReadableStream({
       async start(controller) {
@@ -84,193 +181,169 @@ export async function POST(request: NextRequest) {
           let extractedCount = 0
           let extractedSize = 0
           const extractedFiles: string[] = []
-          
-          // 유효한 파일만 필터링
-          const validFiles = directory.files.filter(file => {
-            if (file.type === 'Directory') return false
-            if (file.path.includes('__MACOSX') || file.path.startsWith('.')) return false
-            return true
-          })
-          
-          const totalFiles = validFiles.length
-          // 전체 파일 크기 계산 (압축 해제 전 크기)
-          const totalSize = validFiles.reduce((sum, file) => sum + (file.uncompressedSize || 0), 0)
 
-          if (totalFiles === 0) {
-            controller.enqueue(encoder.encode(JSON.stringify({ 
-              type: 'complete',
-              progress: 100,
-              success: true,
-              message: '압축 해제할 파일이 없습니다',
-              extractedCount: 0,
-              extractedSize: 0,
-              totalSize: 0
-            }) + '\n'))
+          let stats: { count: number; totalUncompressedSize: number }
+          if (is7z) {
+            try {
+              stats = await get7zEntryStats(buffer)
+            } catch {
+              stats = { count: 0, totalUncompressedSize: 0 }
+            }
+          } else {
+            stats = await getZipEntryStats(buffer)
+          }
+          const totalFiles = stats.count
+          const totalSize = stats.totalUncompressedSize
+          console.log("[Extract] Archive stats:", { totalFiles, totalSize })
+
+          if (!is7z && totalFiles === 0) {
+            console.log("[Extract] Zip has 0 extractable files (skipped or empty), returning early")
+            controller.enqueue(
+              encoder.encode(
+                JSON.stringify({
+                  type: "complete",
+                  progress: 100,
+                  success: true,
+                  message: "압축 해제할 파일이 없습니다",
+                  extractedCount: 0,
+                  extractedSize: 0,
+                  totalSize: 0,
+                }) + "\n"
+              )
+            )
             controller.close()
             return
           }
 
-          const formatSize = (bytes: number) => {
-            if (bytes < 1024) return `${bytes}B`
-            if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)}KB`
-            if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)}MB`
-            return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)}GB`
-          }
+          const progressMessage =
+            totalSize > 0
+              ? `${totalFiles}개 파일 확인됨 (총 ${formatSize(totalSize)})`
+              : `${totalFiles}개 파일 확인됨`
 
-          controller.enqueue(encoder.encode(JSON.stringify({ 
-            type: 'progress',
-            progress: 5,
-            message: `${totalFiles}개 파일 확인됨 (총 ${formatSize(totalSize)})`,
-            extractedCount: 0,
-            totalFiles,
-            extractedSize: 0,
-            totalSize
-          }) + '\n'))
+          controller.enqueue(
+            encoder.encode(
+              JSON.stringify({
+                type: "progress",
+                progress: 5,
+                message: progressMessage,
+                extractedCount: 0,
+                totalFiles,
+                extractedSize: 0,
+                totalSize,
+              }) + "\n"
+            )
+          )
 
-          // MIME 타입 매핑
-          const mimeTypes: Record<string, string> = {
-            'txt': 'text/plain',
-            'pdf': 'application/pdf',
-            'jpg': 'image/jpeg',
-            'jpeg': 'image/jpeg',
-            'png': 'image/png',
-            'gif': 'image/gif',
-            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'xls': 'application/vnd.ms-excel',
-            'csv': 'text/csv',
-            'dcm': 'application/dicom',
-            'dicom': 'application/dicom',
-            'nii': 'application/octet-stream',
-            'zip': 'application/zip',
-          }
+          const entriesGen = is7z
+            ? extract7zEntries(buffer, zipPassword)
+            : extractZipEntries(buffer, zipPassword)
 
-          // 병렬 처리를 위한 배치 크기 (동시에 15개씩 처리 - 성능 개선)
-          const batchSize = 15
-          
-          for (let i = 0; i < validFiles.length; i += batchSize) {
-            const batch = validFiles.slice(i, i + batchSize)
-            
-            // DB 배치 삽입을 위한 데이터 수집
-            const dbRecords: any[] = []
-            
-            // 배치 내 파일들을 병렬로 처리
-            const batchResults = await Promise.all(batch.map(async (file) => {
-              // 파일 내용 추출
-              const fileBuffer = await file.buffer()
-              const fileSize = fileBuffer.length
-
-              // S3에 업로드할 경로 구성
-              const targetKey = `${targetFolderPath}/${file.path}`
-
-              // 파일 타입 추정
-              const fileExtension = file.path.split('.').pop()?.toLowerCase() || 'bin'
-              let contentType = mimeTypes[fileExtension] || 'application/octet-stream'
-
-              // S3에 업로드
-              await uploadToS3(fileBuffer, targetKey, contentType)
-
-              // 파일 타입 결정
-              let fileType = 'other'
-              if (['xlsx', 'xls', 'csv'].includes(fileExtension)) {
-                fileType = 'excel'
-              } else if (fileExtension === 'pdf') {
-                fileType = 'pdf'
-              } else if (['dcm', 'dicom'].includes(fileExtension)) {
-                fileType = 'dicom'
-              } else if (['nii'].includes(fileExtension)) {
-                fileType = 'nifti'
-              } else if (fileExtension === 'zip' || fileExtension === '7z') {
-                fileType = 'zip'
-              }
-
-              return {
-                fileId: randomUUID(),
-                fileName: file.path.split('/').pop() || file.path,
-                targetKey,
-                fileSize,
-                contentType,
-                fileType
-              }
-            }))
-
-            // DB 배치 삽입
-            for (const record of batchResults) {
-              await query(
-                `INSERT INTO user_files (
-                  id, user_id, file_name, file_path, s3_key, s3_bucket, 
-                  file_size, content_type, file_type, uploaded_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-                [
-                  record.fileId,
-                  userId,
-                  record.fileName,
-                  `s3://${BUCKET_NAME}/${record.targetKey}`,
-                  record.targetKey,
-                  BUCKET_NAME,
-                  record.fileSize,
-                  record.contentType,
-                  record.fileType,
-                ]
-              )
-              extractedFiles.push(record.targetKey)
-              extractedSize += record.fileSize
+          for await (const batch of inBatches(entriesGen, BATCH_SIZE)) {
+            const records = await processBatch(batch, targetFolderPath, userId)
+            for (const r of records) {
+              extractedFiles.push(r.targetKey)
+              extractedSize += r.fileSize
             }
-
             extractedCount += batch.length
+            console.log("[Extract] Batch done:", { batchSize: batch.length, extractedCount, totalFiles })
 
-            // 진행률 계산 (5% ~ 95%)
-            const progress = 5 + Math.floor((extractedCount / totalFiles) * 90)
-            const sizeProgress = totalSize > 0 ? Math.floor((extractedSize / totalSize) * 100) : 0
-            
-            controller.enqueue(encoder.encode(JSON.stringify({ 
-              type: 'progress',
-              progress,
-              message: `${extractedCount}/${totalFiles} 파일 압축 해제 중 (${formatSize(extractedSize)} / ${formatSize(totalSize)})`,
-              extractedCount,
-              totalFiles,
-              extractedSize,
-              totalSize,
-              sizeProgress
-            }) + '\n'))
+            const progress =
+              totalFiles > 0
+                ? 5 + Math.floor((extractedCount / totalFiles) * 90)
+                : 5 + Math.min(85, extractedCount * 2)
+            const sizeProgress =
+              totalSize > 0 ? Math.floor((extractedSize / totalSize) * 100) : 0
+
+            const progressMessage =
+              totalFiles > 0
+                ? `${extractedCount}/${totalFiles} 파일 압축 해제 중` +
+                  (totalSize > 0
+                    ? ` (${formatSize(extractedSize)} / ${formatSize(totalSize)})`
+                    : "")
+                : `${extractedCount}개 파일 압축 해제 중 (${formatSize(extractedSize)})`
+            controller.enqueue(
+              encoder.encode(
+                JSON.stringify({
+                  type: "progress",
+                  progress,
+                  message: progressMessage,
+                  extractedCount,
+                  totalFiles,
+                  extractedSize,
+                  totalSize,
+                  sizeProgress,
+                }) + "\n"
+              )
+            )
           }
 
-          // 완료
-          controller.enqueue(encoder.encode(JSON.stringify({ 
-            type: 'complete',
-            progress: 100,
-            success: true,
-            message: `${extractedCount}개의 파일이 압축 해제되었습니다 (총 ${formatSize(extractedSize)})`,
-            extractedCount,
-            totalFiles,
-            extractedSize,
-            totalSize,
-            targetFolder: targetFolderPath,
-            files: extractedFiles,
-          }) + '\n'))
-          
+          console.log("[Extract] Complete:", { extractedCount, totalFiles, sampleKeys: extractedFiles.slice(0, 5) })
+
+          if (totalFiles > 0 && extractedCount === 0) {
+            const errMsg =
+              "7z 압축 해제 후 파일이 생성되지 않았습니다. 비밀번호가 필요하거나 7za 실행/경로 문제일 수 있습니다."
+            console.warn("[Extract]", errMsg)
+            controller.enqueue(
+              encoder.encode(
+                JSON.stringify({ type: "error", error: errMsg }) + "\n"
+              )
+            )
+            controller.close()
+            return
+          }
+
+          controller.enqueue(
+            encoder.encode(
+              JSON.stringify({
+                type: "complete",
+                progress: 100,
+                success: true,
+                message: `${extractedCount}개의 파일이 압축 해제되었습니다 (총 ${formatSize(extractedSize)})`,
+                extractedCount,
+                totalFiles,
+                extractedSize,
+                totalSize,
+                targetFolder: targetFolderPath,
+                files: extractedFiles,
+              }) + "\n"
+            )
+          )
           controller.close()
         } catch (error) {
           console.error("[Extract API] Error:", error)
-          controller.enqueue(encoder.encode(JSON.stringify({ 
-            type: 'error',
-            error: error instanceof Error ? error.message : '압축 해제 실패'
-          }) + '\n'))
+          const message = error instanceof Error ? error.message : "압축 해제 실패"
+          const code =
+            message === "ZIP_MISSING_PASSWORD" ? "ZIP_MISSING_PASSWORD" : undefined
+          controller.enqueue(
+            encoder.encode(
+              JSON.stringify({
+                type: "error",
+                error: code
+                  ? "비밀번호가 설정된 압축 파일입니다. 비밀번호를 입력해 주세요."
+                  : message,
+                code,
+              }) + "\n"
+            )
+          )
           controller.close()
         }
-      }
+      },
     })
 
     return new Response(stream, {
       headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
       },
     })
   } catch (error) {
-    console.error("[Extract API] Error extracting zip file:", error)
+    console.error("[Extract API] Error:", error)
     if (error instanceof Error) {
-      return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 })
+      return NextResponse.json(
+        { error: error.message || "Internal server error" },
+        { status: 500 }
+      )
     }
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }

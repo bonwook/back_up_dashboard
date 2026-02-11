@@ -22,6 +22,7 @@ import { downloadWithProgress } from "@/lib/utils/download-with-progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   filterValidFileKeys,
+  normalizeFileKeyArray,
   extractFileName,
   resolveFileKeys,
   mapResolvedKeys,
@@ -202,12 +203,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   // 첨부파일 resolve + 업로더 기준으로 분리(기존 데이터에서 file_keys에 섞여 있는 사용자 파일도 분리)
   useEffect(() => {
     const run = async () => {
-      const rawFileKeys = Array.isArray(task?.file_keys) ? task!.file_keys : []
-      const rawCommentKeys = Array.isArray(task?.comment_file_keys) ? task!.comment_file_keys : []
-
-      // 유효한 문자열 키만 필터링
-      const fileKeys = filterValidFileKeys(rawFileKeys)
-      const commentKeys = filterValidFileKeys(rawCommentKeys)
+      // API가 { key, uploaded_at }[] 형태로 줄 수 있으므로 string[]로 정규화
+      const fileKeys = normalizeFileKeyArray(task?.file_keys)
+      const commentKeys = normalizeFileKeyArray(task?.comment_file_keys)
 
       if (fileKeys.length === 0 && commentKeys.length === 0) {
         setResolvedFileKeys([])
@@ -406,9 +404,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       const subtaskFileKeys: SubtaskFileKeyItem[] = []
       
       subtasks.forEach((subtask) => {
-        if (subtask.comment_file_keys && subtask.comment_file_keys.length > 0) {
-          const validKeys = filterValidFileKeys(subtask.comment_file_keys)
-          validKeys.forEach((key) => {
+        const commentKeys = normalizeFileKeyArray(subtask.comment_file_keys)
+        if (commentKeys.length > 0) {
+          commentKeys.forEach((key) => {
             subtaskFileKeys.push({
               key,
               subtaskId: subtask.id,

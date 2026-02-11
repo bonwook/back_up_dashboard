@@ -4,10 +4,17 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { FileText, Eye, CheckCircle2, Loader2, MousePointerClick, X, Download, ChevronDown, ChevronUp } from "lucide-react"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
+import { CheckCircle2, Loader2, Download, ChevronDown, ChevronUp } from "lucide-react"
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { getSignedDownloadUrl } from "@/lib/aws/s3"
 import { sanitizeHtml } from "@/lib/utils/sanitize"
 
@@ -42,7 +49,21 @@ export default function ClientReportsPage() {
   const [user, setUser] = useState<any>(null)
   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(new Set())
   const [resolvedFileKeys, setResolvedFileKeys] = useState<Record<string, Array<{ s3Key: string; fileName: string }>>>({})
+  const [monthFilter, setMonthFilter] = useState<string>("")
   const { toast } = useToast()
+
+  const availableMonths = (() => {
+    const set = new Set<string>()
+    completedTasks.forEach((t) => {
+      if (t.completed_at) set.add(t.completed_at.slice(0, 7))
+    })
+    return Array.from(set).sort((a, b) => b.localeCompare(a))
+  })()
+
+  const filteredTasks =
+    monthFilter === ""
+      ? completedTasks
+      : completedTasks.filter((t) => t.completed_at && t.completed_at.slice(0, 7) === monthFilter)
 
   useEffect(() => {
     const loadUser = async () => {
@@ -217,19 +238,39 @@ export default function ClientReportsPage() {
 
   return (
     <div className="mx-auto max-w-7xl p-6">
-      <div className="mb-8">
+      <div className="mb-8 flex items-baseline gap-2">
         <h1 className="text-3xl font-bold">Reports</h1>
+        <span className="text-sm text-muted-foreground">완료 {completedTasks.length}건</span>
       </div>
 
       <Tabs defaultValue="completed" className="space-y-4 mt-8">
-        <TabsList>
-          <TabsTrigger value="completed">완료된 작업 ({completedTasks.length})</TabsTrigger>
-        </TabsList>
+        <div className="flex items-center gap-3">
+          <Select value={monthFilter || "all"} onValueChange={(v) => setMonthFilter(v === "all" ? "" : v)}>
+            <SelectTrigger className="h-9 min-h-9 min-w-30 rounded-lg px-3 text-sm *:data-[slot=select-value]:line-clamp-none *:data-[slot=select-value]:whitespace-nowrap">
+              <SelectValue placeholder="필터" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">전체</SelectItem>
+              {availableMonths.map((ym) => {
+                const [y, m] = ym.split("-")
+                const label = `${y}년 ${parseInt(m, 10)}월`
+                return (
+                  <SelectItem key={ym} value={ym}>
+                    {label}
+                  </SelectItem>
+                )
+              })}
+            </SelectContent>
+          </Select>
+          <span className="text-sm text-muted-foreground">
+            집계 {filteredTasks.length}건
+          </span>
+        </div>
 
         <TabsContent value="completed">
           <div className="space-y-4">
-            {completedTasks && completedTasks.length > 0 ? (
-              completedTasks.map((task) => {
+            {filteredTasks && filteredTasks.length > 0 ? (
+              filteredTasks.map((task) => {
                 const isExpanded = expandedTaskIds.has(task.id)
                 const taskFiles = resolvedFileKeys[task.id] || []
                 
@@ -249,7 +290,10 @@ export default function ClientReportsPage() {
                 
                 return (
                   <Card key={task.id} className="overflow-hidden">
-                    <CardHeader className="cursor-pointer hover:bg-accent/50 transition-colors" onClick={() => toggleTaskExpansion(task.id)}>
+                    <CardHeader
+                      className="cursor-pointer"
+                      onClick={() => toggleTaskExpansion(task.id)}
+                    >
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-2">
@@ -275,57 +319,107 @@ export default function ClientReportsPage() {
                     </CardHeader>
                     
                     {isExpanded && (
-                      <CardContent className="pt-0 space-y-6">
-                        {/* 설명 */}
-                        {task.description && (
-                          <div>
-                            <h4 className="text-sm font-semibold mb-2">설명</h4>
-                            <div className="text-sm whitespace-pre-wrap bg-muted/30 p-3 rounded-md">
-                              {task.description}
-                            </div>
-                          </div>
-                        )}
+                      <CardContent className="pt-0">
+                        {/* 1줄에 하나씩: 요청자 내용 → 담당자 내용 → 첨부파일 → 댓글 */}
+                        <div className="grid grid-cols-1 gap-6">
+                          {/* 1행: 요청자 내용 */}
+                          <section className="w-full">
+                            <h4 className="text-sm font-semibold mb-2">요청자 내용</h4>
+                            {task.description && String(task.description).trim() ? (
+                              <div className="text-sm whitespace-pre-wrap bg-muted/30 p-3 rounded-md">
+                                {task.description}
+                              </div>
+                            ) : (
+                              <p className="text-sm text-muted-foreground bg-muted/30 p-3 rounded-md">내용 없음</p>
+                            )}
+                          </section>
 
-                        {/* 본문과 내용 */}
-                        <div className="grid grid-cols-2 gap-4">
-                          {/* 본문 (Staff) */}
-                          <div>
-                            <h4 className="text-sm font-semibold mb-2">본문</h4>
+                          {/* 2행: 담당자 내용 */}
+                          <section className="w-full">
+                            <h4 className="text-sm font-semibold mb-2">담당자 내용</h4>
                             {task.content ? (
-                              <div 
+                              <div
                                 id={`task-content-${task.id}`}
                                 className="text-sm bg-muted/50 p-3 rounded-md prose prose-sm max-w-none dark:prose-invert overflow-auto max-h-96"
                                 dangerouslySetInnerHTML={{ __html: sanitizeHtml(task.content) }}
                               />
                             ) : (
-                              <div className="text-sm text-muted-foreground bg-muted/30 p-3 rounded-md text-center">
-                                본문이 없습니다
-                              </div>
+                              <p className="text-sm text-muted-foreground bg-muted/30 p-3 rounded-md">내용 없음</p>
                             )}
-                          </div>
+                          </section>
 
-                          {/* 내용 (Client Comment) */}
-                          <div>
-                            <h4 className="text-sm font-semibold mb-2">내용</h4>
-                            {task.comment ? (
-                              <div 
+                          {/* 3행: 첨부파일 */}
+                          <section className="w-full">
+                            <h4 className="text-sm font-semibold mb-2">첨부파일</h4>
+                            {taskFiles.length > 0 ? (
+                              <div className="space-y-3">
+                                {adminFiles.length > 0 && (
+                                  <div>
+                                    <p className="text-xs text-muted-foreground mb-2">
+                                      {task.assigned_by_name || "요청자"} 첨부
+                                    </p>
+                                    <div className="flex flex-wrap gap-2">
+                                      {adminFiles.map((file, idx) => (
+                                        <Button
+                                          key={`admin-${idx}`}
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => handleFileDownload(file.s3Key, file.fileName)}
+                                          className="text-xs"
+                                        >
+                                          <Download className="h-3 w-3 mr-1" />
+                                          {file.fileName}
+                                        </Button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                {clientFiles.length > 0 && (
+                                  <div>
+                                    <p className="text-xs text-muted-foreground mb-2">
+                                      {task.assigned_to_name || "담당자"} 첨부
+                                    </p>
+                                    <div className="flex flex-wrap gap-2">
+                                      {clientFiles.map((file, idx) => (
+                                        <Button
+                                          key={`client-${idx}`}
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => handleFileDownload(file.s3Key, file.fileName)}
+                                          className="text-xs"
+                                        >
+                                          <Download className="h-3 w-3 mr-1" />
+                                          {file.fileName}
+                                        </Button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <p className="text-sm text-muted-foreground bg-muted/30 p-3 rounded-md">첨부파일 없음</p>
+                            )}
+                          </section>
+
+                          {/* 4행: 댓글 */}
+                          <section className="w-full">
+                            <h4 className="text-sm font-semibold mb-2">댓글</h4>
+                            {task.comment && String(task.comment).trim() ? (
+                              <div
                                 id={`task-comment-${task.id}`}
                                 className="text-sm bg-muted/50 p-3 rounded-md prose prose-sm max-w-none dark:prose-invert overflow-auto max-h-96"
-                                dangerouslySetInnerHTML={{ 
+                                dangerouslySetInnerHTML={{
                                   __html: sanitizeHtml(
-                                    task.comment.startsWith('\n') ? task.comment.slice(1) : task.comment
-                                  ) 
+                                    task.comment.startsWith("\n") ? task.comment.slice(1) : task.comment
+                                  ),
                                 }}
                               />
                             ) : (
-                              <div className="text-sm text-muted-foreground bg-muted/30 p-3 rounded-md text-center">
-                                내용이 없습니다
-                              </div>
+                              <p className="text-sm text-muted-foreground bg-muted/30 p-3 rounded-md">댓글 없음</p>
                             )}
-                          </div>
+                          </section>
                         </div>
-                        
-                        {/* 테이블 스타일 */}
+
                         <style jsx global>{`
                           #task-content-${task.id} table,
                           #task-comment-${task.id} table {
@@ -348,60 +442,6 @@ export default function ClientReportsPage() {
                             margin: 10px 0;
                           }
                         `}</style>
-
-                        {/* 첨부파일 */}
-                        {taskFiles.length > 0 && (
-                          <div>
-                            <h4 className="text-sm font-semibold mb-2">첨부파일</h4>
-                            <div className="space-y-3">
-                              {/* 관리자 첨부파일 */}
-                              {adminFiles.length > 0 && (
-                                <div>
-                                  <p className="text-xs text-muted-foreground mb-2">
-                                    {task.assigned_by_name || '관리자'} 첨부파일
-                                  </p>
-                                  <div className="flex flex-wrap gap-2">
-                                    {adminFiles.map((file, idx) => (
-                                      <Button
-                                        key={`admin-${idx}`}
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handleFileDownload(file.s3Key, file.fileName)}
-                                        className="text-xs"
-                                      >
-                                        <Download className="h-3 w-3 mr-1" />
-                                        {file.fileName}
-                                      </Button>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* 사용자 첨부파일 */}
-                              {clientFiles.length > 0 && (
-                                <div>
-                                  <p className="text-xs text-muted-foreground mb-2">
-                                    {task.assigned_to_name || '사용자'} 첨부파일
-                                  </p>
-                                  <div className="flex flex-wrap gap-2">
-                                    {clientFiles.map((file, idx) => (
-                                      <Button
-                                        key={`client-${idx}`}
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handleFileDownload(file.s3Key, file.fileName)}
-                                        className="text-xs"
-                                      >
-                                        <Download className="h-3 w-3 mr-1" />
-                                        {file.fileName}
-                                      </Button>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
                       </CardContent>
                     )}
                   </Card>
@@ -410,7 +450,9 @@ export default function ClientReportsPage() {
             ) : (
               <Card>
                 <CardContent className="py-12">
-                  <p className="text-center text-muted-foreground">완료된 작업이 없습니다</p>
+                  <p className="text-center text-muted-foreground">
+                    {monthFilter ? "해당 월에 완료된 작업이 없습니다" : "완료된 작업이 없습니다"}
+                  </p>
                 </CardContent>
               </Card>
             )}

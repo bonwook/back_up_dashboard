@@ -148,7 +148,7 @@ export function useFileManagement(props: UseFileManagementProps) {
     setIsDeleteDialogOpen(true)
   }, [])
 
-  const handleExtractZip = useCallback(async (file: S3File) => {
+  const handleExtractZip = useCallback(async (file: S3File, zipPassword?: string) => {
     setIsExtracting(true)
     setExtractProgress(0)
     setExtractInfo(null)
@@ -166,11 +166,22 @@ export function useFileManagement(props: UseFileManagementProps) {
         signal: abortController.signal,
         body: JSON.stringify({
           zipKey: file.key,
+          targetPath: currentPath,
+          ...(zipPassword ? { zipPassword } : {}),
         }),
       })
 
       if (!response.ok) {
-        throw new Error("압축 해제에 실패했습니다")
+        let errorMessage = "압축 해제에 실패했습니다"
+        try {
+          const text = await response.text()
+          const errData = text ? JSON.parse(text) : {}
+          if (errData?.error) errorMessage = errData.error
+          else if (text) errorMessage = text.slice(0, 200)
+        } catch {
+          // 파싱 실패 시 기본 메시지 유지
+        }
+        throw new Error(errorMessage)
       }
 
       const reader = response.body?.getReader()
@@ -218,9 +229,12 @@ export function useFileManagement(props: UseFileManagementProps) {
                 title: "압축 해제 완료",
                 description: data.message,
               })
-              await loadFiles(true)
+              await new Promise((r) => setTimeout(r, 800))
+              await loadFiles(true, currentPath)
             } else if (data.type === 'error') {
-              throw new Error(data.error)
+              const err = new Error(data.error) as Error & { code?: string }
+              if (data.code) err.code = data.code
+              throw err
             }
           } catch (parseError) {
             console.error("JSON 파싱 오류:", parseError)
@@ -233,6 +247,8 @@ export function useFileManagement(props: UseFileManagementProps) {
           title: "취소됨",
           description: "압축 해제가 취소되었습니다",
         })
+      } else if ((error as Error & { code?: string }).code === 'ZIP_MISSING_PASSWORD') {
+        throw error
       } else {
         toast({
           title: "오류",
@@ -246,7 +262,7 @@ export function useFileManagement(props: UseFileManagementProps) {
       setExtractInfo(null)
       setExtractAbortController(null)
     }
-  }, [toast, loadFiles])
+  }, [toast, loadFiles, currentPath])
 
   const cancelExtract = useCallback(() => {
     if (extractAbortController) {
@@ -406,90 +422,147 @@ export function useFileManagement(props: UseFileManagementProps) {
     setDeleteProgress(0)
   }, [deleteAbortController])
 
+  /** 다중 선택 삭제: 선택된 항목들을 순서대로 삭제 */
+  const deleteSelectedItems = useCallback(async (items: S3File[]) => {
+    if (items.length === 0) return
+
+    setIsDeleting(true)
+    setDeleteProgress(0)
+    const total = items.length
+    const deletedKeys = new Set<string>()
+
+    try {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i]
+        const isFolder = item.fileType === "folder"
+        const response = await fetch(
+          `/api/storage/delete?key=${encodeURIComponent(item.key)}&isFolder=${isFolder}`,
+          { method: "DELETE", credentials: "include" }
+        )
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}))
+          throw new Error(err?.error ?? (isFolder ? "폴더 삭제 실패" : "파일 삭제 실패"))
+        }
+        if (isFolder) {
+          const reader = response.body?.getReader()
+          if (reader) {
+            const decoder = new TextDecoder()
+            let buffer = ""
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              buffer += decoder.decode(value, { stream: true })
+            }
+          }
+        } else {
+          await response.json()
+        }
+        deletedKeys.add(item.key)
+        if (item.fileType === "folder") {
+          const prefix = item.key.endsWith("/") ? item.key : `${item.key}/`
+          items.forEach((f) => {
+            if (f.key.startsWith(prefix)) deletedKeys.add(f.key)
+          })
+        }
+        setDeleteProgress(Math.round(((i + 1) / total) * 100))
+      }
+
+      await loadFiles(true)
+      if (selectedFile && deletedKeys.has(selectedFile.key)) {
+        setSelectedFile(null)
+        setPreviewData(null)
+        setFileUrl(null)
+      }
+      setSelectedFiles((prev) => {
+        const next = new Set(prev)
+        deletedKeys.forEach((k) => next.delete(k))
+        prev.forEach((k) => {
+          if (Array.from(deletedKeys).some((d) => d !== k && (k.startsWith(d + "/") || k.startsWith(d)))) {
+            next.delete(k)
+          }
+        })
+        return next
+      })
+      toast({
+        title: "삭제 완료",
+        description: `${items.length}개 항목이 삭제되었습니다.`,
+      })
+    } catch (error) {
+      toast({
+        title: "삭제 실패",
+        description: error instanceof Error ? error.message : "선택 항목 삭제에 실패했습니다.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDeleting(false)
+      setDeleteProgress(0)
+    }
+  }, [loadFiles, selectedFile, setSelectedFile, setSelectedFiles, toast])
+
   const handleDownloadFile = useCallback(async (file: S3File) => {
     try {
       const fileName = file.fileName || file.key.split("/").pop() || "download"
       setDownloadProgress({ fileName, progress: 0 })
-      
-      const response = await fetch(`/api/storage/signed-url?path=${encodeURIComponent(file.key)}&expiresIn=3600`)
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        const errorMessage = errorData.error || "Failed to get download URL"
-        if (errorMessage.includes('존재하지 않') || errorMessage.includes('기간이 지났') || response.status === 404) {
-          throw new Error('파일이 존재하지 않거나 다운로드 기간이 지났습니다.')
+
+      const downloadResponse = await fetch(
+        `/api/storage/download?path=${encodeURIComponent(file.key)}`,
+        { credentials: "include" }
+      )
+
+      if (!downloadResponse.ok) {
+        const errorData = await downloadResponse.json().catch(() => ({}))
+        const errorMessage = errorData.error || "다운로드 실패"
+        if (downloadResponse.status === 404) {
+          throw new Error("파일이 존재하지 않습니다.")
+        }
+        if (downloadResponse.status === 403) {
+          throw new Error("다운로드 권한이 없습니다.")
         }
         throw new Error(errorMessage)
       }
-      const data = await response.json()
-      const signedUrl = data.signedUrl
-      
-      try {
-        const downloadResponse = await fetch(signedUrl, {
-          method: 'GET',
-          mode: 'cors',
-        })
-        
-        if (!downloadResponse.ok) {
-          throw new Error(`다운로드 실패: ${downloadResponse.status} ${downloadResponse.statusText}`)
-        }
-        
-        const contentLength = downloadResponse.headers.get('content-length')
-        const total = contentLength ? parseInt(contentLength, 10) : 0
-        
-        if (!downloadResponse.body) {
-          throw new Error('Response body가 없습니다')
-        }
-        
-        const reader = downloadResponse.body.getReader()
-        const chunks: Uint8Array[] = []
-        let receivedLength = 0
-        
-        while (true) {
-          const { done, value } = await reader.read()
-          
-          if (done) break
-          
-          chunks.push(value)
-          receivedLength += value.length
-          
-          if (total > 0) {
-            const progress = Math.round((receivedLength / total) * 100)
-            setDownloadProgress({ fileName, progress })
-          }
-        }
-        
-        const allChunks = new Uint8Array(receivedLength)
-        let position = 0
-        for (const chunk of chunks) {
-          allChunks.set(chunk, position)
-          position += chunk.length
-        }
-        
-        const blob = new Blob([allChunks])
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement("a")
-        a.href = url
-        a.download = fileName
-        document.body.appendChild(a)
-        a.click()
-        
-        setTimeout(() => {
-          window.URL.revokeObjectURL(url)
-          document.body.removeChild(a)
-          setDownloadProgress(null)
-        }, 100)
-      } catch (downloadError) {
-        console.warn("fetch 다운로드 실패, signedUrl 직접 사용:", downloadError)
-        setDownloadProgress(null)
-        const a = document.createElement("a")
-        a.href = signedUrl
-        a.download = fileName
-        a.target = "_blank"
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
+
+      const contentLength = downloadResponse.headers.get("content-length")
+      const total = contentLength ? parseInt(contentLength, 10) : 0
+
+      if (!downloadResponse.body) {
+        throw new Error("Response body가 없습니다")
       }
-      
+
+      const reader = downloadResponse.body.getReader()
+      const chunks: Uint8Array[] = []
+      let receivedLength = 0
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        chunks.push(value)
+        receivedLength += value.length
+        if (total > 0) {
+          const progress = Math.round((receivedLength / total) * 100)
+          setDownloadProgress({ fileName, progress })
+        }
+      }
+
+      const allChunks = new Uint8Array(receivedLength)
+      let position = 0
+      for (const chunk of chunks) {
+        allChunks.set(chunk, position)
+        position += chunk.length
+      }
+
+      const blob = new Blob([allChunks])
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      setTimeout(() => {
+        window.URL.revokeObjectURL(url)
+        document.body.removeChild(a)
+        setDownloadProgress(null)
+      }, 100)
+
       toast({
         title: "Success",
         description: "파일이 다운로드되었습니다",
@@ -595,6 +668,7 @@ export function useFileManagement(props: UseFileManagementProps) {
     cancelExtract,
     confirmDeleteFile,
     cancelDelete,
+    deleteSelectedItems,
     handleDownloadFile,
     handleDownloadZip,
   }

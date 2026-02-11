@@ -477,96 +477,61 @@ export default function ClientAnalyticsPage() {
 
   const handleDownloadFile = async (file: S3File) => {
     try {
-      const fileName = file.fileName || 
-        (typeof file.key === 'string' ? file.key.split("/").pop() : null) || 
+      const fileName = file.fileName ||
+        (typeof file.key === "string" ? file.key.split("/").pop() : null) ||
         "download"
       setDownloadProgress({ fileName, progress: 0 })
-      
-      // signed-url 사용하여 다운로드
-      const response = await fetch(`/api/storage/signed-url?path=${encodeURIComponent(file.key)}&expiresIn=3600`)
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        const errorMessage = errorData.error || "Failed to get download URL"
-        // NoSuchKey 에러 메시지 확인
-        if (errorMessage.includes('존재하지 않') || errorMessage.includes('기간이 지났') || response.status === 404) {
-          throw new Error('파일이 존재하지 않거나 다운로드 기간이 지났습니다.')
-        }
+
+      const downloadResponse = await fetch(
+        `/api/storage/download?path=${encodeURIComponent(file.key)}`,
+        { credentials: "include" }
+      )
+
+      if (!downloadResponse.ok) {
+        const errorData = await downloadResponse.json().catch(() => ({}))
+        const errorMessage = errorData.error || "다운로드 실패"
+        if (downloadResponse.status === 404) throw new Error("파일이 존재하지 않습니다.")
+        if (downloadResponse.status === 403) throw new Error("다운로드 권한이 없습니다.")
         throw new Error(errorMessage)
       }
-      const data = await response.json()
-      const signedUrl = data.signedUrl
-      
-      // 모든 파일을 fetch로 가져와서 blob으로 다운로드 (진행률 추적 가능)
-      try {
-        const downloadResponse = await fetch(signedUrl, {
-          method: 'GET',
-          mode: 'cors',
-        })
-        
-        if (!downloadResponse.ok) {
-          throw new Error(`다운로드 실패: ${downloadResponse.status} ${downloadResponse.statusText}`)
+
+      const contentLength = downloadResponse.headers.get("content-length")
+      const total = contentLength ? parseInt(contentLength, 10) : 0
+      if (!downloadResponse.body) throw new Error("Response body가 없습니다")
+
+      const reader = downloadResponse.body.getReader()
+      const chunks: Uint8Array[] = []
+      let receivedLength = 0
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        chunks.push(value)
+        receivedLength += value.length
+        if (total > 0) {
+          const progress = Math.round((receivedLength / total) * 100)
+          setDownloadProgress({ fileName, progress })
         }
-        
-        const contentLength = downloadResponse.headers.get('content-length')
-        const total = contentLength ? parseInt(contentLength, 10) : 0
-        
-        if (!downloadResponse.body) {
-          throw new Error('Response body가 없습니다')
-        }
-        
-        const reader = downloadResponse.body.getReader()
-        const chunks: Uint8Array[] = []
-        let receivedLength = 0
-        
-        while (true) {
-          const { done, value } = await reader.read()
-          
-          if (done) break
-          
-          chunks.push(value)
-          receivedLength += value.length
-          
-          if (total > 0) {
-            const progress = Math.round((receivedLength / total) * 100)
-            setDownloadProgress({ fileName, progress })
-          }
-        }
-        
-        // 모든 청크를 하나의 Uint8Array로 합치기
-        const allChunks = new Uint8Array(receivedLength)
-        let position = 0
-        for (const chunk of chunks) {
-          allChunks.set(chunk, position)
-          position += chunk.length
-        }
-        
-        const blob = new Blob([allChunks])
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement("a")
-        a.href = url
-        a.download = fileName
-        document.body.appendChild(a)
-        a.click()
-        
-        // 정리
-        setTimeout(() => {
-          window.URL.revokeObjectURL(url)
-          document.body.removeChild(a)
-          setDownloadProgress(null)
-        }, 100)
-      } catch (downloadError) {
-        // fetch 다운로드 실패 시 signedUrl 직접 사용
-        console.warn("fetch 다운로드 실패, signedUrl 직접 사용:", downloadError)
-        setDownloadProgress(null)
-        const a = document.createElement("a")
-        a.href = signedUrl
-        a.download = fileName
-        a.target = "_blank"
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
       }
-      
+
+      const allChunks = new Uint8Array(receivedLength)
+      let position = 0
+      for (const chunk of chunks) {
+        allChunks.set(chunk, position)
+        position += chunk.length
+      }
+      const blob = new Blob([allChunks])
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      setTimeout(() => {
+        window.URL.revokeObjectURL(url)
+        document.body.removeChild(a)
+        setDownloadProgress(null)
+      }, 100)
+
       toast({
         title: "Success",
         description: "파일이 다운로드되었습니다",
