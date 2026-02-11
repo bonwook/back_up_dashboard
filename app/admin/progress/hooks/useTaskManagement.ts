@@ -37,7 +37,7 @@ export function useTaskManagement(props: UseTaskManagementProps) {
   const loadTasks = useCallback(async () => {
     setIsLoading(true)
     try {
-      const response = await fetch("/api/admin/tasks", {
+      const response = await fetch("/api/tasks/all", {
         credentials: "include",
       })
 
