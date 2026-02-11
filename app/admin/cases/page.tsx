@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Activity, RefreshCw, Search, Paperclip, Trash2 } from "lucide-react"
+import { Activity, RefreshCw, Search, Paperclip, Trash2, Plus } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
+import Link from "next/link"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/hooks/use-toast"
 import { isTaskExpired } from "@/lib/utils/taskHelpers"
@@ -70,15 +71,10 @@ export default function WorklistPage() {
   const loadTasks = async () => {
     setIsLoading(true)
     try {
-      // Use API to get all tasks
       const response = await fetch("/api/tasks/all", {
         credentials: "include",
       })
-
-      if (!response.ok) {
-        throw new Error("Failed to load tasks")
-      }
-
+      if (!response.ok) throw new Error("Failed to load tasks")
       const data = await response.json()
       setTasks(data.tasks || [])
     } catch (error) {
@@ -306,6 +302,12 @@ export default function WorklistPage() {
           <h1 className="text-3xl font-bold">Worklist</h1>
           <p className="text-muted-foreground">모든 작업 목록을 확인하고 관리하세요</p>
         </div>
+        <Button asChild className="shrink-0">
+          <Link href="/admin/analytics?from=worklist">
+            <Plus className="mr-2 h-4 w-4" />
+            업무 추가
+          </Link>
+        </Button>
       </div>
 
       <Tabs value={activeTab} onValueChange={(v) => {

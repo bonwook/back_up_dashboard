@@ -1,7 +1,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { LayoutDashboard, Upload, Activity, FileText, BarChart3, Settings, LogOut, Stethoscope, Users, Shield, Box } from "lucide-react"
+import { LayoutDashboard, Upload, Activity, FileText, LogOut, Stethoscope, Users, Shield, Box, LayoutGrid } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import Image from "next/image"
@@ -89,22 +89,6 @@ export function AdminNav({ user }: AdminNavProps) {
               <Link href="/admin/cases">
                 <Activity className="mr-2 h-4 w-4" />
                 Worklist
-              </Link>
-            </Button>
-            <div className="h-6 w-px bg-border" />
-            <Button
-              variant={pathname.startsWith("/admin/analytics") ? "default" : "ghost"}
-              asChild
-              size="sm"
-              className={
-                pathname.startsWith("/admin/analytics")
-                  ? "bg-primary text-primary-foreground rounded-none"
-                  : "rounded-none"
-              }
-            >
-              <Link href="/admin/analytics">
-                <BarChart3 className="mr-2 h-4 w-4" />
-                Work
               </Link>
             </Button>
             <div className="h-6 w-px bg-border" />

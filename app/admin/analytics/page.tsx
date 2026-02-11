@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Progress } from "@/components/ui/progress"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
+import { useSearchParams } from "next/navigation"
 import { format } from "date-fns"
 import { ko } from "date-fns/locale"
 import { uploadWithProgress } from "@/lib/utils/upload-with-progress"
@@ -33,6 +34,9 @@ import { TaskFormHeader } from "./components/TaskFormHeader"
 import { FilePreviewSection } from "./components/FilePreviewSection"
 
 export default function ClientAnalyticsPage() {
+  const searchParams = useSearchParams()
+  const fromWorklist = searchParams.get("from") === "worklist"
+
   const [allFiles, setAllFiles] = useState<S3File[]>([]) // 전체 파일 목록
   const [files, setFiles] = useState<S3File[]>([]) // 현재 표시할 파일 목록
   const [currentPath, setCurrentPath] = useState<string>("") // 현재 폴더 경로
@@ -244,6 +248,8 @@ export default function ClientAnalyticsPage() {
         if (res.ok) {
           const me = await res.json()
           setUser(me)
+          setAssignForm((prev) => ({ ...prev, assigned_to: me.id }))
+          setSelectedUserId(me.id)
         }
       } catch (error) {
         console.error("[Analytics] 사용자 로드 오류:", error)
@@ -402,7 +408,14 @@ export default function ClientAnalyticsPage() {
       {/* 업무 등록 폼 */}
       <Card className="flex flex-col h-full w-full min-w-0 max-w-full overflow-hidden">
           <CardHeader className="shrink-0">
-            <CardTitle className="text-2xl">업무 등록</CardTitle>
+            <div className="flex items-center gap-2 flex-wrap">
+              <CardTitle className="text-2xl">업무 등록</CardTitle>
+              {fromWorklist && (
+                <Badge variant="secondary" className="font-normal">
+                  Worklist에서 업무 추가
+                </Badge>
+              )}
+            </div>
             <CardDescription className="text-base">
               업무 정보를 입력하세요.
             </CardDescription>

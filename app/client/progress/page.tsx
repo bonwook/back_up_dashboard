@@ -190,11 +190,13 @@ export default function ClientProgressPage() {
     return () => window.removeEventListener("task-content-updated", handler)
   }, [])
 
-  // 다른 탭에서 수정 후 이 탭으로 돌아오면 목록 새로고침
+  // 다른 탭에서 수정 후 이 탭으로 돌아오면 목록 새로고침 (visibilitychange 사용: 파일 첨부 다이얼로그 닫을 때는 새로고침 안 함)
   useEffect(() => {
-    const onFocus = () => loadTasks()
-    window.addEventListener("focus", onFocus)
-    return () => window.removeEventListener("focus", onFocus)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") loadTasks()
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange)
   }, [loadTasks])
 
   const handleStatusChange = useCallback(async (taskId: string, newStatus: TaskStatus) => {
