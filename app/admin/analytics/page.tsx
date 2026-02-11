@@ -1163,12 +1163,9 @@ export default function ClientAnalyticsPage() {
                             <Card key={subtask.id} className="p-3">
                               <div className="flex items-start justify-between mb-2">
                                 <div className="flex-1">
-                                  {/* 부제목 */}
                                   {subtask.subtitle && (
                                     <div className="font-semibold text-sm mb-2">{subtask.subtitle}</div>
                                   )}
-                                  
-                                  {/* 할당받은 인원 */}
                                   <div className="flex flex-wrap gap-1 mb-2">
                                     {subtask.assignedToList.map(userId => {
                                       const assignedUser = users.find(u => u.id === userId)
@@ -1179,8 +1176,6 @@ export default function ClientAnalyticsPage() {
                                       )
                                     })}
                                   </div>
-                                  
-                                  {/* 첨부파일 */}
                                   {subtask.fileKeys.length > 0 && (
                                     <div className="flex flex-wrap gap-1">
                                       {subtask.fileKeys.map((key) => {
@@ -1212,8 +1207,7 @@ export default function ClientAnalyticsPage() {
                         })
                       )}
                     </div>
-                  </div>
-                </div>
+                  </div></div>
             )}
 
             {/* 파일 목록 및 미리보기 섹션 */}
@@ -1756,6 +1750,7 @@ export default function ClientAnalyticsPage() {
                   </div>
                 </div>
               )}
+
             </div>
 
             <div className="flex gap-2 pt-8 mt-8 min-w-0 max-w-full justify-center">
