@@ -1,7 +1,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { LayoutDashboard, Upload, Activity, FileText, LogOut, Stethoscope, Users, Shield, Box, LayoutGrid } from "lucide-react"
+import { LayoutDashboard, Upload, Activity, FileText, LogOut, Stethoscope, Users, Shield, Box, LayoutGrid, Settings } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import Image from "next/image"
@@ -109,22 +109,6 @@ export function AdminNav({ user }: AdminNavProps) {
             </Button>
             <div className="h-6 w-px bg-border" />
             <Button
-              variant={pathname.startsWith("/admin/progress") ? "default" : "ghost"}
-              asChild
-              size="sm"
-              className={
-                pathname.startsWith("/admin/progress")
-                  ? "bg-primary text-primary-foreground rounded-none"
-                  : "rounded-none"
-              }
-            >
-              <Link href="/admin/progress">
-                <FileText className="mr-2 h-4 w-4" />
-                Progress
-              </Link>
-            </Button>
-            <div className="h-6 w-px bg-border" />
-            <Button
               variant={pathname.startsWith("/admin/reports") ? "default" : "ghost"}
               asChild
               size="sm"
@@ -141,14 +125,18 @@ export function AdminNav({ user }: AdminNavProps) {
             </Button>
             <div className="h-6 w-px bg-border" />
             <Button
-              variant="ghost"
+              variant={pathname.startsWith("/admin/settings") ? "default" : "ghost"}
               asChild
               size="sm"
-              className="rounded-l-none"
+              className={
+                pathname.startsWith("/admin/settings")
+                  ? "bg-primary text-primary-foreground rounded-r-none"
+                  : "rounded-r-none"
+              }
             >
-              <Link href="https://15.164.184.250/" target="_blank" rel="noopener noreferrer">
-                <Box className="mr-2 h-4 w-4" />
-                Streamliner
+              <Link href="/admin/settings">
+                <Settings className="mr-2 h-4 w-4" />
+                Settings
               </Link>
             </Button>
           </div>
@@ -174,6 +162,13 @@ export function AdminNav({ user }: AdminNavProps) {
               <div className="h-6 w-px bg-border" />
             </>
           )}
+          <Button variant="ghost" size="sm" asChild>
+            <Link href="https://15.164.184.250/" target="_blank" rel="noopener noreferrer">
+              <Box className="mr-2 h-4 w-4" />
+              Streamliner
+            </Link>
+          </Button>
+          <div className="h-6 w-px bg-border" />
           <p className="text-sm font-medium whitespace-nowrap max-w-[200px] truncate">
             환영합니다 {userFullName || user.full_name || "Staff"}님
           </p>

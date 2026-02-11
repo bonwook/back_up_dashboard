@@ -16,6 +16,7 @@ import { sanitizeHtml } from "@/lib/utils/sanitize"
 import { SafeHtml } from "@/components/safe-html"
 import { Calendar } from "@/components/ui/calendar"
 import { Progress } from "@/components/ui/progress"
+import { useSearchParams } from "next/navigation"
 import { format } from "date-fns"
 import { ko } from "date-fns/locale"
 import { uploadWithProgress } from "@/lib/utils/upload-with-progress"
@@ -28,6 +29,9 @@ import { useWorkEditor } from "./hooks/useWorkEditor"
 import { useCommentEditor } from "./hooks/useCommentEditor"
 
 export default function AdminProgressPage() {
+  const searchParams = useSearchParams()
+  const fromWorklist = searchParams.get("from") === "worklist"
+
   const [tasks, setTasks] = useState<Task[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [user, setUser] = useState<any>(null)
@@ -611,6 +615,9 @@ export default function AdminProgressPage() {
         <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-3xl font-bold">Progress</h1>
           <Badge variant="secondary" className="text-sm font-medium">관리자</Badge>
+          {fromWorklist && (
+            <Badge variant="outline" className="text-sm font-normal">Worklist에서 이동</Badge>
+          )}
         </div>
         <p className="text-muted-foreground mt-2">요청하거나 받은 업무를 드래그하여 상태를 변경할 수 있습니다</p>
       </div>

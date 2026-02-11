@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Download, Eye, RefreshCw, Loader2, ArrowLeft, Archive, Trash2, Upload, Search, Calendar as CalendarIcon, FolderOpen, Bold, Italic, Underline, Minus, Grid3x3 as TableIcon, UserPlus, X, Plus } from "lucide-react"
+import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -248,8 +249,7 @@ export default function ClientAnalyticsPage() {
         if (res.ok) {
           const me = await res.json()
           setUser(me)
-          setAssignForm((prev) => ({ ...prev, assigned_to: me.id }))
-          setSelectedUserId(me.id)
+          // 자기 자신은 배정 불가: 기본 담당자 선택 안 함
         }
       } catch (error) {
         console.error("[Analytics] 사용자 로드 오류:", error)
@@ -409,16 +409,15 @@ export default function ClientAnalyticsPage() {
       <Card className="flex flex-col h-full w-full min-w-0 max-w-full overflow-hidden">
           <CardHeader className="shrink-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <CardTitle className="text-2xl">업무 등록</CardTitle>
               {fromWorklist && (
-                <Badge variant="secondary" className="font-normal">
-                  Worklist에서 업무 추가
-                </Badge>
+                <Button variant="ghost" size="icon" className="shrink-0" asChild>
+                  <Link href="/admin/cases" aria-label="뒤로가기">
+                    <ArrowLeft className="h-5 w-5" />
+                  </Link>
+                </Button>
               )}
+              <CardTitle className="text-2xl">업무 등록</CardTitle>
             </div>
-            <CardDescription className="text-base">
-              업무 정보를 입력하세요.
-            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6 flex-1 flex flex-col min-w-0 max-w-full overflow-hidden">
             <TaskFormHeader
@@ -735,27 +734,28 @@ export default function ClientAnalyticsPage() {
                         className="space-y-0"
                       >
                         {users
-                          .filter(user => {
+                          .filter((u) => u.id !== user?.id)
+                          .filter((u) => {
                             const query = userSearchQuery.toLowerCase()
                             return (
-                              user.full_name?.toLowerCase().includes(query) ||
-                              user.email?.toLowerCase().includes(query) ||
-                              user.organization?.toLowerCase().includes(query)
+                              u.full_name?.toLowerCase().includes(query) ||
+                              u.email?.toLowerCase().includes(query) ||
+                              u.organization?.toLowerCase().includes(query)
                             )
                           })
-                          .map((user) => (
-                            <div key={user.id} className="flex items-center space-x-2 py-0.5 rounded px-2 transition-colors hover:bg-muted/30">
+                          .map((u) => (
+                            <div key={u.id} className="flex items-center space-x-2 py-0.5 rounded px-2 transition-colors hover:bg-muted/30">
                               <RadioGroupItem 
-                                value={user.id} 
-                                id={user.id} 
+                                value={u.id} 
+                                id={u.id} 
                               />
                               <Label 
-                                htmlFor={user.id} 
+                                htmlFor={u.id} 
                                 className="flex-1 flex items-center gap-2 cursor-pointer"
                               >
-                                <span className="font-medium text-sm">{user.full_name}</span>
-                                {user.organization && (
-                                  <span className="text-xs text-muted-foreground">({user.organization})</span>
+                                <span className="font-medium text-sm">{u.full_name}</span>
+                                {u.organization && (
+                                  <span className="text-xs text-muted-foreground">({u.organization})</span>
                                 )}
                               </Label>
                             </div>
@@ -2167,7 +2167,19 @@ export default function ClientAnalyticsPage() {
       </AlertDialog>
 
       {/* 인원 선택 다이얼로그 */}
-      <Dialog open={isUserSelectDialogOpen} onOpenChange={setIsUserSelectDialogOpen}>
+      <Dialog
+        open={isUserSelectDialogOpen}
+        onOpenChange={(open) => {
+          setIsUserSelectDialogOpen(open)
+          if (open && user?.id) {
+            setSelectedAssignees((prev) => {
+              const next = new Set(prev)
+              next.delete(user.id)
+              return next
+            })
+          }
+        }}
+      >
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>담당자 추가 (선택사항)</DialogTitle>
@@ -2178,6 +2190,7 @@ export default function ClientAnalyticsPage() {
           <div className="py-4">
             <div className="space-y-2">
               {users
+                .filter((u) => u.id !== user?.id)
                 .sort((a, b) => {
                   // 할당된 사용자를 먼저 표시
                   const aSelected = selectedAssignees.has(a.id)
@@ -2186,41 +2199,41 @@ export default function ClientAnalyticsPage() {
                   if (!aSelected && bSelected) return 1
                   return 0
                 })
-                .map((user) => (
+                .map((u) => (
                 <div
-                  key={user.id}
+                  key={u.id}
                   className="flex items-center space-x-3 p-3 border rounded-lg hover:bg-muted/50 cursor-pointer"
                   onClick={() => {
                     const newSet = new Set(selectedAssignees)
-                    if (newSet.has(user.id)) {
-                      newSet.delete(user.id)
+                    if (newSet.has(u.id)) {
+                      newSet.delete(u.id)
                     } else {
-                      newSet.add(user.id)
+                      newSet.add(u.id)
                     }
                     setSelectedAssignees(newSet)
                   }}
                 >
                   <Checkbox
-                    checked={selectedAssignees.has(user.id)}
+                    checked={selectedAssignees.has(u.id)}
                     onCheckedChange={(checked) => {
                       const newSet = new Set(selectedAssignees)
                       if (checked) {
-                        newSet.add(user.id)
+                        newSet.add(u.id)
                       } else {
-                        newSet.delete(user.id)
+                        newSet.delete(u.id)
                       }
                       setSelectedAssignees(newSet)
                     }}
                   />
                   <div className="flex-1">
                     <div className="font-medium">
-                      {user.full_name || user.email}
-                      {user.organization && (
-                        <span className="ml-2 text-sm text-muted-foreground font-normal">({user.organization})</span>
+                      {u.full_name || u.email}
+                      {u.organization && (
+                        <span className="ml-2 text-sm text-muted-foreground font-normal">({u.organization})</span>
                       )}
                     </div>
-                    {user.email && user.full_name && (
-                      <div className="text-sm text-muted-foreground">{user.email}</div>
+                    {u.email && u.full_name && (
+                      <div className="text-sm text-muted-foreground">{u.email}</div>
                     )}
                   </div>
                 </div>

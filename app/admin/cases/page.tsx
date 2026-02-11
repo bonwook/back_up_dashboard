@@ -44,7 +44,7 @@ export default function WorklistPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [priorityFilter, setPriorityFilter] = useState<string>("all")
-  const [onlyMyRequests, setOnlyMyRequests] = useState(false)
+  const [assignmentFilter, setAssignmentFilter] = useState<"all" | "requested" | "assigned">("all")
   const [activeTab, setActiveTab] = useState<"worklist" | "completed">("worklist")
   const [completedReports, setCompletedReports] = useState<any[]>([])
   const [isLoadingCompleted, setIsLoadingCompleted] = useState(false)
@@ -127,13 +127,17 @@ export default function WorklistPage() {
       filtered = filtered.filter((task) => task.priority === priorityFilter)
     }
 
-    // 요청자가 본인인 업무만
-    if (onlyMyRequests && me?.id) {
-      filtered = filtered.filter((task) => task.assigned_by === me.id)
+    // 요청/담당 필터
+    if (me?.id && assignmentFilter !== "all") {
+      if (assignmentFilter === "requested") {
+        filtered = filtered.filter((task) => task.assigned_by === me.id)
+      } else if (assignmentFilter === "assigned") {
+        filtered = filtered.filter((task) => task.assigned_to === me.id)
+      }
     }
 
     setFilteredTasks(filtered)
-  }, [tasks, searchQuery, statusFilter, priorityFilter, activeTab, onlyMyRequests, me?.id])
+  }, [tasks, searchQuery, statusFilter, priorityFilter, activeTab, assignmentFilter, me?.id])
 
   useEffect(() => {
     loadTasks()
@@ -167,7 +171,7 @@ export default function WorklistPage() {
     return () => window.removeEventListener("focus", onFocus)
   }, [])
 
-  // Dashboard에서 넘어오는 query 적용: tab/status/priority/q
+  // Dashboard에서 넘어오는 query 적용: tab/status/priority/q/filter
   useEffect(() => {
     const tab = searchParams.get("tab")
     if (tab === "completed") setActiveTab("completed")
@@ -176,13 +180,16 @@ export default function WorklistPage() {
     const status = searchParams.get("status")
     const priority = searchParams.get("priority")
     const q = searchParams.get("q")
+    const filter = searchParams.get("filter")
 
     const validStatuses = new Set(["all", "pending", "in_progress", "on_hold", "awaiting_completion", "expired"])
     const validPriorities = new Set(["all", "urgent", "high", "medium", "low"])
+    const validFilters = new Set(["all", "requested", "assigned"])
 
     if (status && validStatuses.has(status)) setStatusFilter(status)
     if (priority && validPriorities.has(priority)) setPriorityFilter(priority)
     if (q !== null) setSearchQuery(q)
+    if (filter && validFilters.has(filter)) setAssignmentFilter(filter as "all" | "requested" | "assigned")
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
 
@@ -302,7 +309,7 @@ export default function WorklistPage() {
           <h1 className="text-3xl font-bold">Worklist</h1>
           <p className="text-muted-foreground">모든 작업 목록을 확인하고 관리하세요</p>
         </div>
-        <Button asChild className="shrink-0">
+        <Button asChild size="default" className="shrink-0">
           <Link href="/admin/analytics?from=worklist">
             <Plus className="mr-2 h-4 w-4" />
             업무 추가
@@ -324,20 +331,38 @@ export default function WorklistPage() {
         <TabsContent value="worklist">
           <Card className="mb-6">
             <CardHeader>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <CardTitle>필터 및 검색</CardTitle>
-                <Button
-                  type="button"
-                  variant={onlyMyRequests ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setOnlyMyRequests((prev) => !prev)}
-                >
-                  내 요청
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant={assignmentFilter === "all" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setAssignmentFilter("all")}
+                  >
+                    전체
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={assignmentFilter === "requested" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setAssignmentFilter("requested")}
+                  >
+                    요청
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={assignmentFilter === "assigned" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setAssignmentFilter("assigned")}
+                  >
+                    담당
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:gap-6">
                 <div className="space-y-2">
                   <label className="text-sm font-medium">검색</label>
                   <div className="relative">
@@ -350,36 +375,38 @@ export default function WorklistPage() {
                     />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">상태</label>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">전체</SelectItem>
-                      <SelectItem value="pending">대기</SelectItem>
-                      <SelectItem value="in_progress">작업중</SelectItem>
-                      <SelectItem value="on_hold">보류</SelectItem>
-                      <SelectItem value="awaiting_completion">완료대기</SelectItem>
-                      <SelectItem value="expired">마감됨</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">우선순위</label>
-                  <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">전체</SelectItem>
-                      <SelectItem value="urgent">긴급</SelectItem>
-                      <SelectItem value="high">높음</SelectItem>
-                      <SelectItem value="medium">보통</SelectItem>
-                      <SelectItem value="low">낮음</SelectItem>
-                    </SelectContent>
-                  </Select>
+                <div className="flex flex-wrap items-end gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">상태</label>
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">전체</SelectItem>
+                        <SelectItem value="pending">대기</SelectItem>
+                        <SelectItem value="in_progress">작업중</SelectItem>
+                        <SelectItem value="on_hold">보류</SelectItem>
+                        <SelectItem value="awaiting_completion">완료대기</SelectItem>
+                        <SelectItem value="expired">마감됨</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">우선순위</label>
+                    <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">전체</SelectItem>
+                        <SelectItem value="urgent">긴급</SelectItem>
+                        <SelectItem value="high">높음</SelectItem>
+                        <SelectItem value="medium">보통</SelectItem>
+                        <SelectItem value="low">낮음</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </div>
             </CardContent>
