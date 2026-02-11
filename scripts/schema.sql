@@ -22,6 +22,17 @@ CREATE TABLE IF NOT EXISTS profiles (
   INDEX idx_role (role)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Staff 가입 대기 요청 (승인 전 저장)
+CREATE TABLE IF NOT EXISTS staff_signup_requests (
+  id CHAR(36) PRIMARY KEY,
+  email VARCHAR(255) NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  full_name VARCHAR(255),
+  organization VARCHAR(255),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ============================================
 -- 2. CASES TABLE (DICOM Data Management)
 -- ============================================

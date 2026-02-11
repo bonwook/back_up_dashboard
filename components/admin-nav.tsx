@@ -1,7 +1,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { LayoutDashboard, Upload, Activity, FileText, LogOut, Stethoscope, Users, Shield, Box, LayoutGrid, Settings } from "lucide-react"
+import { LayoutDashboard, Upload, Activity, FileText, LogOut, Stethoscope, Shield, Box, LayoutGrid, Settings } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import Image from "next/image"
@@ -142,26 +142,6 @@ export function AdminNav({ user }: AdminNavProps) {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          {userRole === "admin" && (
-            <>
-              <Button
-                variant={pathname.startsWith("/admin/users") ? "default" : "ghost"}
-                asChild
-                size="sm"
-                className={
-                  pathname.startsWith("/admin/users")
-                    ? "bg-primary text-primary-foreground"
-                    : ""
-                }
-              >
-                <Link href="/admin/users">
-                  <Users className="mr-2 h-4 w-4" />
-                  User Management
-                </Link>
-              </Button>
-              <div className="h-6 w-px bg-border" />
-            </>
-          )}
           <Button variant="ghost" size="sm" asChild>
             <Link href="https://15.164.184.250/" target="_blank" rel="noopener noreferrer">
               <Box className="mr-2 h-4 w-4" />

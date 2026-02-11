@@ -90,11 +90,11 @@ export function AdminSidebar() {
           )
         })}
         
-        {userRole === "admin" && (
+        {(userRole === "admin" || userRole === "staff") && (
           <>
             <div className="mb-2 mt-4 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
               <Shield className="h-3 w-3" />
-              Admin Only
+              Admin / Staff
             </div>
             {adminOnlyItems.map((item) => {
               const Icon = item.icon

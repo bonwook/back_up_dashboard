@@ -20,6 +20,7 @@ export default function SignUpPage() {
   const [role, setRole] = useState<"client" | "staff">("client")
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [pendingStaffBanner, setPendingStaffBanner] = useState(false)
   const router = useRouter()
 
   const handleSignUp = async (e: React.FormEvent) => {
@@ -66,7 +67,12 @@ export default function SignUpPage() {
         throw new Error(data.error || "Failed to sign up")
       }
 
-      // Redirect to login
+      // Staff 가입은 승인 대기이므로 배너만 표시
+      if (data.pendingStaff) {
+        setPendingStaffBanner(true)
+        return
+      }
+
       router.push("/auth/login")
     } catch (error: unknown) {
       console.error("[v0] Signup error:", error)
@@ -79,6 +85,17 @@ export default function SignUpPage() {
   return (
     <div className="flex min-h-screen w-full items-center justify-center p-6">
       <div className="w-full max-w-md">
+        {pendingStaffBanner && (
+          <div
+            role="alert"
+            className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+          >
+            <p className="font-medium">Staff 가입 요청이 접수되었습니다.</p>
+            <p className="mt-1 text-sm opacity-90">
+              검토 후 연락드리겠습니다. 가입 승인 전까지 로그인할 수 없습니다.
+            </p>
+          </div>
+        )}
         <Card>
           <CardHeader className="text-center">
             <CardTitle className="text-2xl">Create Account</CardTitle>

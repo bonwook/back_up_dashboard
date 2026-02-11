@@ -3,16 +3,25 @@
 import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Users, Shield, User, UserCog } from "lucide-react"
+import { Users, Shield, User, UserCog, Check, X } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+
+type PendingStaffRequest = {
+  id: string
+  email: string
+  full_name: string | null
+  organization: string | null
+  created_at: string
+}
 
 export default function UserManagementPage() {
   const [users, setUsers] = useState<any[]>([])
+  const [pendingStaffRequests, setPendingStaffRequests] = useState<PendingStaffRequest[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [userRole, setUserRole] = useState<string | null>(null)
+  const [actioningId, setActioningId] = useState<string | null>(null)
   const { toast } = useToast()
 
   useEffect(() => {
@@ -22,14 +31,8 @@ export default function UserManagementPage() {
         if (!response.ok) return
         const userData = await response.json()
         setUserRole(userData.role)
-        if (userData.role === "admin") {
+        if (userData.role === "admin" || userData.role === "staff") {
           loadUsers()
-        } else {
-          toast({
-            title: "Access Denied",
-            description: "Only administrators can access this page.",
-            variant: "destructive",
-          })
         }
       } catch (error) {
         console.error("Failed to load user:", error)
@@ -44,7 +47,10 @@ export default function UserManagementPage() {
       const response = await fetch("/api/profiles", { credentials: "include" })
       if (response.ok) {
         const data = await response.json()
-        setUsers(Array.isArray(data) ? data : data.profiles || [])
+        const profiles = Array.isArray(data) ? data : data.profiles ?? []
+        const pending = Array.isArray(data) ? [] : data.pendingStaffRequests ?? []
+        setUsers(profiles)
+        setPendingStaffRequests(pending)
       } else {
         toast({
           title: "Error",
@@ -64,7 +70,59 @@ export default function UserManagementPage() {
     }
   }
 
-  const getRoleBadge = (role: string) => {
+  const handleApprove = async (id: string) => {
+    setActioningId(id)
+    try {
+      const res = await fetch(`/api/notifications/pending-staff/${id}/approve`, {
+        method: "POST",
+        credentials: "include",
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast({
+          title: "승인 실패",
+          description: data.error || "Failed to approve",
+          variant: "destructive",
+        })
+        return
+      }
+      toast({ title: "승인 완료", description: "Staff 계정이 생성되었습니다." })
+      await loadUsers()
+    } finally {
+      setActioningId(null)
+    }
+  }
+
+  const handleReject = async (id: string) => {
+    setActioningId(id)
+    try {
+      const res = await fetch(`/api/notifications/pending-staff/${id}/reject`, {
+        method: "POST",
+        credentials: "include",
+      })
+      if (!res.ok) {
+        toast({
+          title: "거부 실패",
+          description: "Failed to reject",
+          variant: "destructive",
+        })
+        return
+      }
+      toast({ title: "거부 완료", description: "해당 가입 요청이 삭제되었습니다." })
+      await loadUsers()
+    } finally {
+      setActioningId(null)
+    }
+  }
+
+  const getRoleBadge = (role: string, isPending?: boolean) => {
+    if (isPending) {
+      return (
+        <Badge className="bg-amber-500/10 text-amber-600 border-amber-500/20">
+          Staff (대기)
+        </Badge>
+      )
+    }
     const roleConfig = {
       admin: { label: "Admin", className: "bg-purple-500/10 text-purple-500 border-purple-500/20" },
       staff: { label: "Staff", className: "bg-blue-500/10 text-blue-500 border-blue-500/20" },
@@ -85,14 +143,14 @@ export default function UserManagementPage() {
     }
   }
 
-  if (userRole !== "admin") {
+  if (userRole != null && userRole !== "admin" && userRole !== "staff") {
     return (
       <div className="mx-auto max-w-7xl p-6">
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <Shield className="h-12 w-12 text-muted-foreground mb-4" />
             <p className="text-muted-foreground">Access Denied</p>
-            <p className="text-sm text-muted-foreground">Only administrators can access this page.</p>
+            <p className="text-sm text-muted-foreground">관리자 또는 Staff만 접근할 수 있습니다.</p>
           </CardContent>
         </Card>
       </div>
@@ -104,7 +162,7 @@ export default function UserManagementPage() {
       <div className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">User Management</h1>
-          <p className="text-muted-foreground mt-2">관리자 전용: 사용자 계정 관리</p>
+          <p className="text-muted-foreground mt-2">사용자 계정 조회 및 관리</p>
         </div>
         <Button onClick={loadUsers} disabled={isLoading}>
           <Users className="mr-2 h-4 w-4" />
@@ -120,6 +178,18 @@ export default function UserManagementPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{users.length}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">Staff 가입 대기</CardTitle>
+            <UserCog className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-amber-600">
+              {pendingStaffRequests.length}
+            </div>
           </CardContent>
         </Card>
 
@@ -156,7 +226,7 @@ export default function UserManagementPage() {
         <CardContent>
           {isLoading ? (
             <p className="text-center text-muted-foreground py-8">Loading users...</p>
-          ) : users.length > 0 ? (
+          ) : users.length > 0 || pendingStaffRequests.length > 0 ? (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -166,6 +236,7 @@ export default function UserManagementPage() {
                     <TableHead>Organization</TableHead>
                     <TableHead>Role</TableHead>
                     <TableHead>Created At</TableHead>
+                    <TableHead className="w-[140px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -180,7 +251,54 @@ export default function UserManagementPage() {
                           {getRoleBadge(user.role)}
                         </div>
                       </TableCell>
-                      <TableCell>{new Date(user.created_at).toLocaleDateString()}</TableCell>
+                      <TableCell>
+                        {user.created_at
+                          ? new Date(user.created_at).toLocaleDateString()
+                          : "N/A"}
+                      </TableCell>
+                      <TableCell />
+                    </TableRow>
+                  ))}
+                  {pendingStaffRequests.map((req) => (
+                    <TableRow key={`pending-${req.id}`} className="bg-amber-50/50 dark:bg-amber-950/20">
+                      <TableCell className="font-medium">{req.full_name || "N/A"}</TableCell>
+                      <TableCell>{req.email}</TableCell>
+                      <TableCell>{req.organization || "N/A"}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <UserCog className="h-4 w-4" />
+                          {getRoleBadge("staff", true)}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {req.created_at
+                          ? new Date(req.created_at).toLocaleDateString()
+                          : "N/A"}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant="default"
+                            className="h-8"
+                            disabled={actioningId !== null}
+                            onClick={() => handleApprove(req.id)}
+                          >
+                            <Check className="h-4 w-4 mr-1" />
+                            승인
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8"
+                            disabled={actioningId !== null}
+                            onClick={() => handleReject(req.id)}
+                          >
+                            <X className="h-4 w-4 mr-1" />
+                            거부
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

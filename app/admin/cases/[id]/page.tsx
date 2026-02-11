@@ -1914,7 +1914,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             <p className="text-sm text-muted-foreground text-center py-8">아직 댓글이 없습니다.</p>
           ) : (
             comments.map((c) => {
-              const canDelete = (me?.id && c.user_id === me.id) || userRole === "admin"
+              const canDelete = (me?.id && c.user_id === me.id) || userRole === "admin" || userRole === "staff"
               const isMe = me?.id && c.user_id === me.id
 
               // 공동사용자별 말풍선 색 (등장 순서로 고정)

@@ -769,50 +769,103 @@ export default function ClientAnalyticsPage() {
             </div>
             )}
 
-            {/* [공동업무] 모드: 부제목 + 공동업무 추가 */}
+            {/* [공동업무] 모드: 부제목 + 공동업무 추가 — 한 덩어리(테두리) = 서브태스크 1개 입력 */}
             {contentMode === 'multi' && (
-              <div className="space-y-4">
-                {/* 부제 입력 */}
-                <div className="space-y-2" style={{ width: 'calc(70% - 8px)' }}>
-                  <div className="flex items-center gap-2">
-                    <Label htmlFor="subtitle" className="text-base font-semibold">부제</Label>
-                    {/* 개별/공동 슬라이딩 세그먼트 */}
-                    <div className="relative inline-flex items-center bg-muted rounded-full p-0.5 h-8 w-fit">
-                      <div 
-                        className="absolute h-7 rounded-full bg-background shadow-sm transition-all duration-200 ease-in-out"
-                        style={{
-                          width: '45px', 
-                          left: '47px',
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setContentMode('single' as const)}
-                        className="relative z-10 w-[45px] h-7 text-sm font-medium transition-colors duration-200 text-muted-foreground"
-                      >
-                        개별
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setContentMode('multi' as const)}
-                        className="relative z-10 w-[45px] h-7 text-sm font-medium transition-colors duration-200 text-foreground"
-                      >
-                        공동
-                      </button>
-                    </div>
+              <div className="grid gap-4 lg:grid-cols-[5.6fr_2.4fr] min-w-0 max-w-full">
+                {/* 왼쪽: 한 서브태스크 입력 덩어리 (테두리로 묶음) */}
+                <div className="border-2 border-primary/30 rounded-lg p-4 space-y-4 bg-muted/10 min-w-0 max-w-full">
+                  {/* 상단: 제목 + 공동업무 추가 버튼 */}
+                  <div className="flex items-center justify-between gap-4">
+                    <h3 className="text-lg font-semibold">공동 업무</h3>
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="sm"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        if (!currentSubtitle.trim()) {
+                          toast({
+                            title: "부제목 필요",
+                            description: "부제목을 입력해주세요.",
+                            variant: "destructive",
+                          })
+                          return
+                        }
+                        if (!subContent.trim()) {
+                          toast({
+                            title: "내용 필요",
+                            description: "추가 내용을 입력해주세요.",
+                            variant: "destructive",
+                          })
+                          return
+                        }
+                        const newSubtask = {
+                          id: crypto.randomUUID(),
+                          subtitle: currentSubtitle,
+                          assignedToList: Array.from(selectedAssignees),
+                          content: subContent,
+                          fileKeys: Array.from(selectedFiles)
+                        }
+                        setSubtasks([...subtasks, newSubtask])
+                        setCurrentSubtitle('')
+                        setSubContent('')
+                        const editor = document.getElementById('assign-content-multi')
+                        if (editor) editor.innerHTML = ''
+                        setSelectedFiles(new Set())
+                        setSelectedAssignees(new Set())
+                        const assigneeCount = newSubtask.assignedToList.length
+                        const currentUserName = user?.full_name || user?.email || '본인'
+                        toast({
+                          title: "공동 업무가 추가되었습니다",
+                          description: assigneeCount > 0 ? `${assigneeCount}명에게 할당됩니다` : `${currentUserName}에게 할당됩니다`
+                        })
+                      }}
+                      disabled={!currentSubtitle.trim()}
+                    >
+                      <Plus className="h-4 w-4 mr-1" />
+                      공동업무 추가
+                    </Button>
                   </div>
-                  
-                  <Input
-                    id="subtitle"
-                    value={currentSubtitle}
-                    onChange={(e) => setCurrentSubtitle(e.target.value)}
-                    placeholder="공동업무의 부제를 입력하세요"
-                  />
-                </div>
 
-                {/* 내용 에디터 + 업무 리스트 */}
-                <div className="grid gap-4 lg:grid-cols-[5.6fr_2.4fr] min-w-0 max-w-full">
-                  {/* 왼쪽: 내용 에디터 */}
+                  {/* 부제 입력 */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor="subtitle" className="text-base font-semibold">부제</Label>
+                      {/* 개별/공동 슬라이딩 세그먼트 */}
+                      <div className="relative inline-flex items-center bg-muted rounded-full p-0.5 h-8 w-fit">
+                        <div 
+                          className="absolute h-7 rounded-full bg-background shadow-sm transition-all duration-200 ease-in-out"
+                          style={{
+                            width: '45px', 
+                            left: '47px',
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setContentMode('single' as const)}
+                          className="relative z-10 w-[45px] h-7 text-sm font-medium transition-colors duration-200 text-muted-foreground"
+                        >
+                          개별
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setContentMode('multi' as const)}
+                          className="relative z-10 w-[45px] h-7 text-sm font-medium transition-colors duration-200 text-foreground"
+                        >
+                          공동
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <Input
+                      id="subtitle"
+                      value={currentSubtitle}
+                      onChange={(e) => setCurrentSubtitle(e.target.value)}
+                      placeholder="공동업무의 부제를 입력하세요"
+                    />
+                  </div>
+
+                  {/* 공동업무 내용 에디터 */}
                   <div className="space-y-2 min-w-0 max-w-full">
                     <Label htmlFor="assign-content-multi" className="text-base font-semibold">공동업무 내용</Label>
                     <div className="border rounded-md overflow-hidden bg-background" style={{
@@ -1003,7 +1056,7 @@ export default function ClientAnalyticsPage() {
                           </Button>
                         </div>
 
-                        {/* 오른쪽: 파일선택, 인원할당 및 추가 버튼 */}
+                        {/* 오른쪽: 담당자 추가 */}
                         <div className="flex items-center gap-2 ml-auto">
                           <Button
                             type="button"
@@ -1017,59 +1070,6 @@ export default function ClientAnalyticsPage() {
                           >
                             <UserPlus className="h-4 w-4 mr-1" />
                             담당자 추가 ({selectedAssignees.size})
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="default"
-                            size="sm"
-                            className="h-8"
-                            onClick={(e) => {
-                              e.preventDefault()
-                              
-                              if (!currentSubtitle.trim()) {
-                                toast({
-                                  title: "부제목 필요",
-                                  description: "부제목을 입력해주세요.",
-                                  variant: "destructive",
-                                })
-                                return
-                              }
-                              if (!subContent.trim()) {
-                                toast({
-                                  title: "내용 필요",
-                                  description: "추가 내용을 입력해주세요.",
-                                  variant: "destructive",
-                                })
-                                return
-                              }
-
-                              const newSubtask = {
-                                id: crypto.randomUUID(),
-                                subtitle: currentSubtitle,
-                                assignedToList: Array.from(selectedAssignees),
-                                content: subContent,
-                                fileKeys: Array.from(selectedFiles)
-                              }
-                              
-                              setSubtasks([...subtasks, newSubtask])
-                              setCurrentSubtitle('')
-                              setSubContent('')
-                              const editor = document.getElementById('assign-content-multi')
-                              if (editor) editor.innerHTML = ''
-                              setSelectedFiles(new Set())
-                              setSelectedAssignees(new Set())
-                              
-                              const assigneeCount = newSubtask.assignedToList.length
-                              const currentUserName = user?.full_name || user?.email || '본인'
-                              toast({ 
-                                title: "공동 업무가 추가되었습니다",
-                                description: assigneeCount > 0 ? `${assigneeCount}명에게 할당됩니다` : `${currentUserName}에게 할당됩니다`
-                              })
-                            }}
-                            disabled={!currentSubtitle.trim()}
-                          >
-                            <Plus className="h-4 w-4 mr-1" />
-                            추가
                           </Button>
                         </div>
                       </div>
@@ -1145,12 +1145,13 @@ export default function ClientAnalyticsPage() {
                       `}</style>
                     </div>
                   </div>
+                </div>
 
-                  {/* 오른쪽: 업무 블록 리스트 */}
-                  <div className="min-w-0 max-w-full">
-                    <div className="mb-2" style={{ height: '28px', display: 'flex', alignItems: 'center' }}>
-                      <Label className="text-base font-semibold">업무 목록 ({subtasks.length})</Label>
-                    </div>
+                {/* 오른쪽: 업무 블록 리스트 (추가된 서브태스크들) */}
+                <div className="min-w-0 max-w-full">
+                  <div className="mb-2" style={{ height: '28px', display: 'flex', alignItems: 'center' }}>
+                    <Label className="text-base font-semibold">업무 목록 ({subtasks.length})</Label>
+                  </div>
                     <div className="border rounded-md p-3 space-y-2 bg-muted/30" style={{ minHeight: '492px', maxHeight: '492px', overflowY: 'auto' }}>
                       {subtasks.length === 0 ? (
                         <p className="text-sm text-muted-foreground text-center py-8">
@@ -1213,7 +1214,6 @@ export default function ClientAnalyticsPage() {
                     </div>
                   </div>
                 </div>
-              </div>
             )}
 
             {/* 파일 목록 및 미리보기 섹션 */}
@@ -1793,7 +1793,11 @@ export default function ClientAnalyticsPage() {
                 disabled={isAssigning || !assignForm.title.trim() || (subtasks.length === 0 && !assignForm.assigned_to)}
                 className="w-auto min-w-[120px] cursor-pointer"
               >
-                {isAssigning ? "등록 중..." : "등록하기"}
+                {isAssigning
+                  ? "등록 중..."
+                  : contentMode === "multi" && subtasks.length > 0
+                    ? `등록하기 (${subtasks.length})`
+                    : "등록하기"}
               </Button>
             </div>
 

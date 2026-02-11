@@ -81,6 +81,29 @@ export async function createUser(
   }
 }
 
+/** 기존 password_hash로 사용자 생성 (Staff 승인 등) */
+export async function createUserWithHash(
+  email: string,
+  passwordHash: string,
+  fullName?: string,
+  organization?: string,
+  role: "admin" | "client" | "staff" = "client",
+): Promise<AuthUser> {
+  const id = uuidv4()
+  await query(
+    `INSERT INTO profiles (id, email, password_hash, full_name, organization, role, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+    [id, email, passwordHash, fullName || null, organization || null, role],
+  )
+  return {
+    id,
+    email,
+    role,
+    full_name: fullName || null,
+    organization: organization || null,
+  }
+}
+
 export async function getUserByEmail(email: string): Promise<(AuthUser & { password_hash: string }) | null> {
   return queryOne<AuthUser & { password_hash: string }>(
     "SELECT id, email, password_hash, full_name, organization, role FROM profiles WHERE email = ?",

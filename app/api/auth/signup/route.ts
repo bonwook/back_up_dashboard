@@ -1,5 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createUser } from "@/lib/db/auth"
+import { createUser, getUserByEmail, hashPassword } from "@/lib/db/auth"
+import {
+  ensureStaffSignupRequestsTable,
+  createStaffSignupRequest,
+} from "@/lib/database/staff-signup-requests"
 import { cookies } from "next/headers"
 import { authRateLimiter } from "@/lib/middleware/rate-limit"
 
@@ -50,7 +54,29 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Create user
+    // Staff 가입은 즉시 처리하지 않고 대기 요청으로 저장
+    if (validRole === "staff") {
+      const existing = await getUserByEmail(email)
+      if (existing) {
+        return NextResponse.json({ error: "Email already exists" }, { status: 409 })
+      }
+      await ensureStaffSignupRequestsTable()
+      const passwordHash = await hashPassword(password)
+      await createStaffSignupRequest(email, passwordHash, fullName, organization)
+      console.log("Staff signup request saved (pending)")
+      return NextResponse.json(
+        { success: true, pendingStaff: true },
+        {
+          headers: {
+            "X-RateLimit-Limit": "10",
+            "X-RateLimit-Remaining": rateLimit.remaining.toString(),
+            "X-RateLimit-Reset": new Date(rateLimit.resetTime).toISOString(),
+          },
+        },
+      )
+    }
+
+    // Create user (client만 즉시 가입)
     console.log("Creating user...")
     const user = await createUser(email, password, fullName, organization, validRole)
     console.log("User created:", user.id)

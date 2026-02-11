@@ -3,7 +3,8 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
-import { Settings, KeyRound, Mail, Server, Info } from "lucide-react"
+import Link from "next/link"
+import { Settings, KeyRound, Mail, Server, Info, Users } from "lucide-react"
 import { RoleSettingsSection } from "./components/RoleSettingsSection"
 
 export default function SettingsPage() {
@@ -20,6 +21,21 @@ export default function SettingsPage() {
       </div>
 
       <div className="space-y-6">
+        {/* 사용자 관리 진입 */}
+        <Link href="/admin/users">
+          <Card className="hover:bg-accent/50 transition-colors cursor-pointer">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="h-5 w-5" />
+                사용자 관리
+              </CardTitle>
+              <CardDescription>
+                사용자 목록 조회 및 Staff 가입 요청 검토
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </Link>
+
         {/* 사용자 권한 변경 (Client ↔ Staff, Admin은 admin만) */}
         <RoleSettingsSection />
 

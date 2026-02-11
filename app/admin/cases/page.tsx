@@ -488,7 +488,7 @@ export default function WorklistPage() {
                               {task.due_date ? formatDate(task.due_date) : "-"}
                             </TableCell>
                             <TableCell>
-                              {(me?.id === task.assigned_by || me?.role === "admin") && (
+                              {(me?.id === task.assigned_by || me?.role === "admin" || me?.role === "staff") && (
                                 <Button
                                   variant="ghost"
                                   size="icon"
@@ -574,7 +574,7 @@ export default function WorklistPage() {
                               {r.completed_at ? new Date(r.completed_at).toLocaleString("ko-KR") : "-"}
                             </TableCell>
                             <TableCell>
-                              {(me?.id === r.assigned_by || me?.role === "admin") && (
+                              {(me?.id === r.assigned_by || me?.role === "admin" || me?.role === "staff") && (
                                 <Button
                                   variant="ghost"
                                   size="icon"
