@@ -237,37 +237,73 @@ export default function AdminProgressPage() {
     return () => window.removeEventListener("focus", onFocus)
   }, [loadTasks])
 
+  // 공동업무: 같은 task_id인 서브태스크를 메인 하나로 병합 (handleStatusChange 등에서 사용하므로 상단 정의)
+  const displayTasks = useMemo(() => {
+    const groupKey = (t: Task) => (t.is_subtask && t.task_id ? t.task_id : t.id)
+    const groups = new Map<string, Task[]>()
+    for (const t of tasks) {
+      const key = groupKey(t)
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key)!.push(t)
+    }
+    const result: Task[] = []
+    for (const [, group] of groups) {
+      if (group.length === 1 && !group[0].is_subtask) {
+        result.push(group[0])
+        continue
+      }
+      if (group.length === 1 && group[0].is_subtask) {
+        result.push(group[0])
+        continue
+      }
+      const first = group[0]
+      const mergedContent = group
+        .map((s) => `[${s.subtitle || "담당"}]\n${s.content || ""}`.trim())
+        .filter(Boolean)
+        .join("\n\n")
+      const mergedFileKeys = [...new Set((group.flatMap((s) => s.file_keys || []) as string[]))]
+      const mergedCommentFileKeys = [...new Set((group.flatMap((s) => (s.comment_file_keys || []) as string[])))]
+      result.push({
+        ...first,
+        id: first.id,
+        content: mergedContent || first.content,
+        file_keys: mergedFileKeys.length ? mergedFileKeys : first.file_keys,
+        comment_file_keys: mergedCommentFileKeys.length ? mergedCommentFileKeys : first.comment_file_keys,
+        _subtaskIds: group.map((t) => t.id),
+      })
+    }
+    return result.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+  }, [tasks])
+
   const handleStatusChange = useCallback(async (taskId: string, newStatus: TaskStatus) => {
     setUpdatingTaskId(taskId)
     try {
-      // 해당 태스크 찾기
-      const task = tasks.find(t => t.id === taskId)
-      
-      const response = await fetch(`/api/tasks/${taskId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify({ 
-          status: newStatus,
-          is_subtask: task?.is_subtask || false
-        }),
-      })
+      // displayTasks에서 병합된 task 포함해 조회 (공동업무 시 _subtaskIds 사용)
+      const task = displayTasks.find((t) => t.id === taskId) ?? tasks.find((t) => t.id === taskId)
+      const idsToUpdate = task?._subtaskIds?.length ? task._subtaskIds : [taskId]
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "상태 업데이트 실패")
+      for (const id of idsToUpdate) {
+        const raw = tasks.find((t) => t.id === id)
+        const response = await fetch(`/api/tasks/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            status: newStatus,
+            is_subtask: raw?.is_subtask ?? false,
+          }),
+        })
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || "상태 업데이트 실패")
+        }
       }
 
-      // 현재 작업공간에 올려둔 task를 이동시키는 경우, 작업공간을 즉시 비움(잔상 방지)
       if (workTaskId === taskId) {
         clearWorkArea(taskId)
       }
 
-      // Task 목록 새로고침
       await loadTasks()
-
       toast({
         title: "상태 업데이트 완료",
         description: "Task 상태가 변경되었습니다",
@@ -281,12 +317,18 @@ export default function AdminProgressPage() {
     } finally {
       setUpdatingTaskId(null)
     }
-  }, [clearWorkArea, loadTasks, toast, workTaskId, tasks])
+  }, [clearWorkArea, loadTasks, toast, workTaskId, tasks, displayTasks])
 
   const handleDragStart = useCallback((e: React.DragEvent, task: Task) => {
     setDraggedTask(task)
-    e.dataTransfer.effectAllowed = "all" // copy와 move 모두 허용
+    e.dataTransfer.effectAllowed = "move"
     e.dataTransfer.setData("text/plain", task.id)
+    e.dataTransfer.setData("application/json", JSON.stringify({ taskId: task.id }))
+    // 드래그 이미지가 없으면 일부 브라우저에서 드래그가 취소될 수 있음
+    if (e.dataTransfer.setDragImage && e.currentTarget instanceof HTMLElement) {
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+      e.dataTransfer.setDragImage(e.currentTarget as HTMLElement, Math.min(rect.width / 2, 80), 20)
+    }
   }, [])
 
   const handleDragEnd = useCallback(() => {
@@ -498,27 +540,26 @@ export default function AdminProgressPage() {
     }
   }
 
-  // 상태별로 task 분류 (시간 순으로 정렬 - created_at 기준 오름차순) - 메모이제이션
+  // 상태별로 task 분류 — displayTasks 기준 (공동업무는 메인 하나로 표시)
   const pendingTasks = useMemo(() => 
-    tasks.filter(t => t.status === 'pending').sort((a, b) => 
+    displayTasks.filter(t => t.status === 'pending').sort((a, b) => 
       new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-    ), [tasks]
+    ), [displayTasks]
   )
-  // 칸반 보드에는 '요청받은' 업무만 표시 (내가 요청한 업무는 상단 섹션에만)
   const inProgressTasks = useMemo(() => 
-    tasks.filter(t => t.status === 'in_progress' && t.taskType !== 'requested').sort((a, b) => 
+    displayTasks.filter(t => t.status === 'in_progress' && t.taskType !== 'requested').sort((a, b) => 
       new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-    ), [tasks]
+    ), [displayTasks]
   )
   const onHoldTasks = useMemo(() => 
-    tasks.filter(t => t.status === 'on_hold' && t.taskType !== 'requested').sort((a, b) => 
+    displayTasks.filter(t => t.status === 'on_hold' && t.taskType !== 'requested').sort((a, b) => 
       new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-    ), [tasks]
+    ), [displayTasks]
   )
   const awaitingCompletionTasks = useMemo(() => 
-    tasks.filter(t => t.status === 'awaiting_completion' && t.taskType !== 'requested').sort((a, b) => 
+    displayTasks.filter(t => t.status === 'awaiting_completion' && t.taskType !== 'requested').sort((a, b) => 
       new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-    ), [tasks]
+    ), [displayTasks]
   )
 
   // 완료대기 탭에서 finalized된 task 제외
@@ -527,21 +568,21 @@ export default function AdminProgressPage() {
     [awaitingCompletionTasks, finalizedTaskIds]
   )
 
-  // 대기(pending) 업무 — 요청받은 것
+  // 대기(pending) 업무 — 요청받은 것 (displayTasks 기준)
   const receivedPendingTasks = useMemo(
     () =>
-      tasks
+      displayTasks
         .filter((t) => t.status === "pending" && t.taskType !== "requested")
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
-    [tasks],
+    [displayTasks],
   )
-  // 내가 요청한 업무 전체 (공동업무 지시 포함) — 색 구분용
+  // 내가 요청한 업무 전체 (공동업무 지시 포함) — displayTasks 기준
   const requestedTasks = useMemo(
     () =>
-      tasks
+      displayTasks
         .filter((t) => t.taskType === "requested")
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
-    [tasks],
+    [displayTasks],
   )
   const statusColumns = useMemo<Array<{ status: TaskStatus; label: string; tasks: Task[]; icon: React.ReactElement }>>(() => [
     {
@@ -593,11 +634,11 @@ export default function AdminProgressPage() {
                   {receivedPendingTasks.map((task) => (
                   <Card
                     key={task.id}
-                    draggable
+                    draggable={true}
                     onDragStart={(e) => handleDragStart(e, task)}
                     onDragEnd={handleDragEnd}
-                    className={`rounded-lg shadow-sm hover:shadow-md transition-all bg-linear-to-br from-background to-muted/30 hover:from-background hover:to-muted/50 border-l-4 border-l-blue-500 border-2 border-blue-500/30 hover:border-blue-500 ${
-                      draggedTask?.id === task.id ? 'opacity-50 cursor-move scale-95' : 'opacity-100 cursor-pointer'
+                    className={`select-none rounded-lg shadow-sm hover:shadow-md transition-all bg-linear-to-br from-background to-muted/30 hover:from-background hover:to-muted/50 border-l-4 border-l-blue-500 border-2 border-blue-500/30 hover:border-blue-500 ${
+                      draggedTask?.id === task.id ? 'opacity-50 scale-95 cursor-grabbing' : 'opacity-100 cursor-grab'
                     } ${
                       workTaskId === task.id ? 'ring-2 ring-gray-400 ring-offset-1 border-gray-400' : ''
                     }`}
@@ -605,7 +646,7 @@ export default function AdminProgressPage() {
                       if (!draggedTask || draggedTask.id !== task.id) setSelectedTask(task)
                     }}
                   >
-                    <CardContent className="p-2">
+                    <CardContent className="p-2 pointer-events-none">
                       <div className="space-y-1.5">
                         <div className="flex items-center gap-1.5">
                           <h4 className="font-semibold text-xs truncate" title={task.title}>
@@ -629,12 +670,19 @@ export default function AdminProgressPage() {
                   {requestedTasks.map((task) => (
                   <Card
                     key={task.id}
-                    className={`rounded-lg shadow-sm hover:shadow-md transition-all bg-linear-to-br from-background to-muted/30 hover:from-background hover:to-muted/50 border-l-4 border-l-amber-500 border-2 border-amber-500/30 hover:border-amber-500 ${
-                      workTaskId === task.id ? 'ring-2 ring-gray-400 ring-offset-1 border-gray-400' : 'cursor-pointer'
+                    draggable={true}
+                    onDragStart={(e) => handleDragStart(e, task)}
+                    onDragEnd={handleDragEnd}
+                    className={`select-none rounded-lg shadow-sm hover:shadow-md transition-all bg-linear-to-br from-background to-muted/30 hover:from-background hover:to-muted/50 border-l-4 border-l-amber-500 border-2 border-amber-500/30 hover:border-amber-500 ${
+                      workTaskId === task.id ? 'ring-2 ring-gray-400 ring-offset-1 border-gray-400' : 'cursor-grab'
+                    } ${
+                      draggedTask?.id === task.id ? 'opacity-50 scale-95 cursor-grabbing' : ''
                     }`}
-                    onClick={() => setSelectedTask(task)}
+                    onClick={(e) => {
+                      if (!draggedTask || draggedTask.id !== task.id) setSelectedTask(task)
+                    }}
                   >
-                    <CardContent className="p-2">
+                    <CardContent className="p-2 pointer-events-none">
                       <div className="space-y-1.5">
                         <div className="flex items-center gap-1.5">
                           <h4 className="font-semibold text-xs truncate" title={task.title}>

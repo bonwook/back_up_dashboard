@@ -25,6 +25,8 @@ export interface Task {
   task_id?: string
   /** progress 탭에서 구분: 내가 요청한 업무 vs 요청받은 업무 */
   taskType?: 'requested' | 'received'
+  /** 공동업무 병합 시 해당 메인에 속한 서브태스크 id 목록 (상태 변경 시 전체 PATCH용) */
+  _subtaskIds?: string[]
 }
 
 export interface Profile {
