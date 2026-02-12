@@ -32,17 +32,17 @@ export async function parseNifti(
     buf = decompressed.buffer.slice(
       decompressed.byteOffset,
       decompressed.byteOffset + decompressed.byteLength
-    )
+    ) as ArrayBuffer
   } else {
-    buf = data
+    buf = data as ArrayBuffer
   }
   const nifti = await getNifti()
   if (!nifti.isNIFTI(buf)) {
     throw new Error("유효한 NIfTI 파일이 아닙니다.")
   }
-  const header = nifti.readHeader(buf) as NiftiHeaderLike
-  const imageBuffer = nifti.readImage(header, buf)
-  return { header, imageBuffer, data: buf, wasGzipped }
+  const headerRaw = nifti.readHeader(buf)
+  const imageBuffer = nifti.readImage(headerRaw, buf)
+  return { header: headerRaw as NiftiHeaderLike, imageBuffer, data: buf, wasGzipped }
 }
 
 /** 헤더에서 슬라이스 크기·볼륨 크기 계산 */
@@ -85,20 +85,17 @@ function getSlicePixels(
 ): Uint8ClampedArray {
   const { nx, ny, nz, bytesPerVoxel, datatypeCode, littleEndian } = layout
   const dv = new DataView(imageBuffer)
+  /** NIfTI 표준: 첫 번째 차원이 가장 빠름 → 선형 인덱스 = i + j*nx + k*nx*ny (i,j,k = x,y,z) */
   const getVoxel = (x: number, y: number, z: number): number => {
-    let idx: number
-    if (axis === "axial") {
-      idx = (z * nx * ny + y * nx + x) * bytesPerVoxel
-    } else if (axis === "coronal") {
-      idx = (y * nx * nz + z * nx + x) * bytesPerVoxel
-    } else {
-      idx = (x * ny * nz + z * ny + y) * bytesPerVoxel
-    }
+    const voxelIndex = x + y * nx + z * nx * ny
+    const idx = voxelIndex * bytesPerVoxel
     let raw = 0
     if (datatypeCode === 2) raw = dv.getUint8(idx)
     else if (datatypeCode === 4) raw = littleEndian ? dv.getInt16(idx, true) : dv.getInt16(idx, false)
     else if (datatypeCode === 8) raw = littleEndian ? dv.getInt32(idx, true) : dv.getInt32(idx, false)
     else if (datatypeCode === 16) raw = dv.getFloat32(idx, littleEndian)
+    else if (datatypeCode === 512) raw = littleEndian ? dv.getUint16(idx, true) : dv.getUint16(idx, false)
+    else if (datatypeCode === 768) raw = littleEndian ? dv.getUint32(idx, true) : dv.getUint32(idx, false)
     else raw = dv.getUint8(idx)
     return scaleValue(raw, sclSlope, sclInter)
   }
@@ -187,6 +184,8 @@ export function getVolumeMinMax(
     else if (datatypeCode === 4) raw = dv.getInt16(idx, littleEndian)
     else if (datatypeCode === 8) raw = dv.getInt32(idx, littleEndian)
     else if (datatypeCode === 16) raw = dv.getFloat32(idx, littleEndian)
+    else if (datatypeCode === 512) raw = dv.getUint16(idx, littleEndian)
+    else if (datatypeCode === 768) raw = dv.getUint32(idx, littleEndian)
     else raw = dv.getUint8(idx)
     const v = scaleValue(raw, sclSlope, sclInter)
     if (Number.isFinite(v)) {
@@ -226,7 +225,10 @@ export function extractSlice(
       let v = 0
       if (layout.datatypeCode === 2) v = dv.getUint8(idx)
       else if (layout.datatypeCode === 4) v = dv.getInt16(idx, layout.littleEndian)
+      else if (layout.datatypeCode === 8) v = dv.getInt32(idx, layout.littleEndian)
       else if (layout.datatypeCode === 16) v = dv.getFloat32(idx, layout.littleEndian)
+      else if (layout.datatypeCode === 512) v = dv.getUint16(idx, layout.littleEndian)
+      else if (layout.datatypeCode === 768) v = dv.getUint32(idx, layout.littleEndian)
       else v = dv.getUint8(idx)
       if (v < lo) lo = v
       if (v > hi) hi = v
@@ -249,7 +251,7 @@ export function extractSlice(
   return { width, height, data }
 }
 
-/** 3D 마스크에서 2D 슬라이스 추출 (axial/coronal/sagittal) */
+/** 3D 마스크에서 2D 슬라이스 추출 (NIfTI 선형 인덱스: i + j*nx + k*nx*ny) */
 export function getSliceFrom3DMask(
   mask3D: Uint8Array,
   header: NiftiHeaderLike,
@@ -264,16 +266,16 @@ export function getSliceFrom3DMask(
   for (let j = 0; j < h; j++) {
     for (let i = 0; i < w; i++) {
       let idx: number
-      if (axis === "axial") idx = sliceIndex * nx * ny + j * nx + i
-      else if (axis === "coronal") idx = i + j * nx + sliceIndex * nx * nz
-      else idx = sliceIndex * ny * nz + i + j * ny
+      if (axis === "axial") idx = i + j * nx + sliceIndex * nx * ny
+      else if (axis === "coronal") idx = i + sliceIndex * nx + j * nx * ny
+      else idx = sliceIndex + i * nx + j * nx * ny
       out[j * w + i] = mask3D[idx] ?? 0
     }
   }
   return out
 }
 
-/** 2D 슬라이스 마스크를 3D 마스크에 반영 (getSlicePixels의 getVoxel 순서와 동일) */
+/** 2D 슬라이스 마스크를 3D 마스크에 반영 (NIfTI 선형 인덱스: i + j*nx + k*nx*ny) */
 export function setSliceIn3DMask(
   mask3D: Uint8Array,
   header: NiftiHeaderLike,
@@ -282,15 +284,15 @@ export function setSliceIn3DMask(
   sliceMask: Uint8Array
 ): void {
   const layout = getSliceLayout(header)
-  const { nx, ny, nz } = layout
+  const { nx, ny } = layout
   const w = axis === "axial" ? nx : axis === "coronal" ? nx : ny
-  const h = axis === "axial" ? ny : axis === "coronal" ? nz : nz
+  const h = axis === "axial" ? layout.ny : axis === "coronal" ? layout.nz : layout.nz
   for (let j = 0; j < h; j++) {
     for (let i = 0; i < w; i++) {
       let idx: number
-      if (axis === "axial") idx = sliceIndex * nx * ny + j * nx + i
-      else if (axis === "coronal") idx = i + j * nx + sliceIndex * nx * nz
-      else idx = sliceIndex * ny * nz + i + j * ny
+      if (axis === "axial") idx = i + j * nx + sliceIndex * nx * ny
+      else if (axis === "coronal") idx = i + sliceIndex * nx + j * nx * ny
+      else idx = sliceIndex + i * nx + j * nx * ny
       mask3D[idx] = sliceMask[j * w + i] ?? 0
     }
   }
@@ -336,7 +338,7 @@ export function buildNiftiBlobWithMask(
   }
   if (compressOutput) {
     const compressed = gzipSync(new Uint8Array(out))
-    return new Blob([compressed], { type: "application/octet-stream" })
+    return new Blob([compressed as BlobPart], { type: "application/octet-stream" })
   }
   return new Blob([out], { type: "application/octet-stream" })
 }

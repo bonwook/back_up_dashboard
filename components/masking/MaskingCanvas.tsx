@@ -12,9 +12,8 @@ import {
   getSliceRange,
   getSliceFrom3DMask,
   getVolumeMinMax,
-  type NiftiHeaderLike,
 } from "./niftiLoader"
-import type { SliceAxis } from "./types"
+import type { NiftiHeaderLike, SliceAxis } from "./types"
 
 type Tool = "brush" | "eraser"
 

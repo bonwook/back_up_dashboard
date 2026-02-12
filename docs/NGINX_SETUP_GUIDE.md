@@ -147,6 +147,16 @@ sudo ss -tlnp | grep :80
 - PM2로 앱이 3000에서 떠 있는지 확인: `pm2 list`, `curl http://127.0.0.1:3000`
 - `proxy_pass http://127.0.0.1:3000;` 주소/포트가 맞는지 확인
 
+### 브라우저에서 nginx 기본 페이지만 보일 때
+- **원인**: OS 기본 nginx 사이트가 80 포트를 먼저 잡고 있음.
+- **해결 1**: 레포의 `flonics-dashboard.conf`에 `listen 80 default_server;`가 있는지 확인 후, 서버에 다시 복사하고 `sudo nginx -t && sudo systemctl reload nginx` 실행.
+- **해결 2**: 기본 사이트 비활성화 후 리로드.
+  ```bash
+  sudo mv /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf.bak
+  sudo nginx -t && sudo systemctl reload nginx
+  ```
+  (파일 이름이 다를 수 있음: `ls /etc/nginx/conf.d/` 로 확인)
+
 ### 설정 수정 후 적용이 안 될 때
 ```bash
 sudo nginx -t && sudo systemctl reload nginx

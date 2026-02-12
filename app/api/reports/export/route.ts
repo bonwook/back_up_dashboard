@@ -24,10 +24,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const buffer = await workbook.xlsx.writeBuffer() as Buffer
+    const buffer = await workbook.xlsx.writeBuffer()
     const filename = `medical_report_${new Date().toISOString().slice(0, 10)}.xlsx`
 
-    return new NextResponse(buffer, {
+    return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
