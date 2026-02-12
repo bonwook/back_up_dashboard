@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import {
   LayoutDashboard,
   FileText,
-  Layers,
+  Paintbrush,
   LogOut,
   Stethoscope,
 } from "lucide-react"
@@ -19,7 +19,7 @@ interface ClientSidebarProps {
 
 const navItems = [
   { href: "/client", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/client/segmentation", label: "Segmentation", icon: Layers },
+  { href: "/client/masking", label: "Masking", icon: Paintbrush },
   { href: "/client/progress", label: "Progress", icon: FileText },
   { href: "/client/reports", label: "Reports", icon: FileText },
 ]

@@ -1,7 +1,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { FileText, Home, LogOut, FileSpreadsheet, Layers } from "lucide-react"
+import { FileText, Home, LogOut, FileSpreadsheet, Paintbrush } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import type { AuthUser } from "@/lib/db/auth"
@@ -75,9 +75,9 @@ export function ClientNav({ user }: ClientNavProps) {
                   : "rounded-none"
               }
             >
-              <Link href="/client/segmentation">
-                <Layers className="mr-2 h-4 w-4" />
-                Segmentation
+              <Link href="/client/masking">
+                <Paintbrush className="mr-2 h-4 w-4" />
+                Masking
               </Link>
             </Button>
             <div className="h-6 w-px bg-border" />
