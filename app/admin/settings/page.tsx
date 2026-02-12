@@ -5,7 +5,6 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import Link from "next/link"
 import { Settings, KeyRound, Mail, Server, Info, Users } from "lucide-react"
-import { RoleSettingsSection } from "./components/RoleSettingsSection"
 
 export default function SettingsPage() {
   return (
@@ -16,7 +15,7 @@ export default function SettingsPage() {
           Settings
         </h1>
         <p className="text-muted-foreground mt-1">
-          관리자·스태프용 설정. 사용자 권한, 접속 경로, 시스템 정보를 확인할 수 있습니다.
+          관리자·스태프용 설정. 접속 경로, 시스템 정보를 확인할 수 있습니다.
         </p>
       </div>
 
@@ -35,9 +34,6 @@ export default function SettingsPage() {
             </CardHeader>
           </Card>
         </Link>
-
-        {/* 사용자 권한 변경 (Client ↔ Staff, Admin은 admin만) */}
-        <RoleSettingsSection />
 
         {/* 접속 경로 및 세션 안내 */}
         <Card>

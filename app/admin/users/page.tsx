@@ -5,8 +5,23 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Users, Shield, User, UserCog, Check, X } from "lucide-react"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Users, Shield, User, UserCog, Check, X, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+
+type Role = "admin" | "staff" | "client"
+
+const ROLE_LABELS: Record<Role, string> = {
+  admin: "Admin",
+  staff: "Staff",
+  client: "Client",
+}
 
 type PendingStaffRequest = {
   id: string
@@ -22,7 +37,11 @@ export default function UserManagementPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [userRole, setUserRole] = useState<string | null>(null)
   const [actioningId, setActioningId] = useState<string | null>(null)
+  const [updatingRoleId, setUpdatingRoleId] = useState<string | null>(null)
   const { toast } = useToast()
+
+  const isAdmin = userRole === "admin"
+  const allowedRoles: Role[] = isAdmin ? ["admin", "staff", "client"] : ["staff", "client"]
 
   useEffect(() => {
     const loadUser = async () => {
@@ -115,6 +134,42 @@ export default function UserManagementPage() {
     }
   }
 
+  const changeRole = async (userId: string, newRole: Role) => {
+    setUpdatingRoleId(userId)
+    try {
+      const res = await fetch(`/api/profiles/${userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ role: newRole }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast({
+          title: "역할 변경 실패",
+          description: data.error || "다시 시도해 주세요.",
+          variant: "destructive",
+        })
+        return
+      }
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
+      )
+      toast({
+        title: "저장됨",
+        description: `역할이 ${ROLE_LABELS[newRole]}(으)로 변경되었습니다.`,
+      })
+    } catch {
+      toast({
+        title: "오류",
+        description: "역할 변경에 실패했습니다.",
+        variant: "destructive",
+      })
+    } finally {
+      setUpdatingRoleId(null)
+    }
+  }
+
   const getRoleBadge = (role: string, isPending?: boolean) => {
     if (isPending) {
       return (
@@ -204,47 +259,43 @@ export default function UserManagementPage() {
             </div>
           </CardContent>
         </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Clients</CardTitle>
-            <User className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-500">
-              {users.filter((u) => u.role === "client").length}
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>All Users</CardTitle>
-          <CardDescription>시스템에 등록된 모든 사용자 목록</CardDescription>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-5 w-5" />
+            사용자 권한 관리
+          </CardTitle>
+          <CardDescription>
+            사용자 목록 조회, 역할 변경(Client ↔ Staff), Staff 가입 요청 승인/거부
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <p className="text-center text-muted-foreground py-8">Loading users...</p>
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
           ) : users.length > 0 || pendingStaffRequests.length > 0 ? (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Name</TableHead>
+                    <TableHead>이름</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Organization</TableHead>
-                    <TableHead>Role</TableHead>
+                    <TableHead>현재 역할</TableHead>
                     <TableHead>Created At</TableHead>
+                    <TableHead className="w-[180px]">변경할 역할</TableHead>
                     <TableHead className="w-[140px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {users.map((user) => (
                     <TableRow key={user.id}>
-                      <TableCell className="font-medium">{user.full_name || "N/A"}</TableCell>
+                      <TableCell className="font-medium">{user.full_name || "—"}</TableCell>
                       <TableCell>{user.email}</TableCell>
-                      <TableCell>{user.organization || "N/A"}</TableCell>
+                      <TableCell>{user.organization || "—"}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           {getRoleIcon(user.role)}
@@ -254,16 +305,37 @@ export default function UserManagementPage() {
                       <TableCell>
                         {user.created_at
                           ? new Date(user.created_at).toLocaleDateString()
-                          : "N/A"}
+                          : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={user.role}
+                          onValueChange={(v) => changeRole(user.id, v as Role)}
+                          disabled={updatingRoleId === user.id}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="역할 선택" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {allowedRoles.map((role) => (
+                              <SelectItem key={role} value={role}>
+                                {ROLE_LABELS[role]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {updatingRoleId === user.id && (
+                          <Loader2 className="mt-1 h-4 w-4 animate-spin text-muted-foreground" />
+                        )}
                       </TableCell>
                       <TableCell />
                     </TableRow>
                   ))}
                   {pendingStaffRequests.map((req) => (
                     <TableRow key={`pending-${req.id}`} className="bg-amber-50/50 dark:bg-amber-950/20">
-                      <TableCell className="font-medium">{req.full_name || "N/A"}</TableCell>
+                      <TableCell className="font-medium">{req.full_name || "—"}</TableCell>
                       <TableCell>{req.email}</TableCell>
-                      <TableCell>{req.organization || "N/A"}</TableCell>
+                      <TableCell>{req.organization || "—"}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <UserCog className="h-4 w-4" />
@@ -273,8 +345,9 @@ export default function UserManagementPage() {
                       <TableCell>
                         {req.created_at
                           ? new Date(req.created_at).toLocaleDateString()
-                          : "N/A"}
+                          : "—"}
                       </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">승인 후 역할 설정</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
                           <Button
@@ -305,7 +378,7 @@ export default function UserManagementPage() {
               </Table>
             </div>
           ) : (
-            <p className="text-center text-muted-foreground py-8">No users found</p>
+            <p className="text-center text-muted-foreground py-8">등록된 사용자가 없습니다.</p>
           )}
         </CardContent>
       </Card>

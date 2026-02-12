@@ -45,6 +45,7 @@ export default function ClientAnalyticsPage() {
   const [selectedFile, setSelectedFile] = useState<S3File | null>(null)
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set()) // 체크된 파일들의 key Set
   const [users, setUsers] = useState<Array<{ id: string; full_name: string; email: string; organization?: string }>>([])
+  const [isUsersLoading, setIsUsersLoading] = useState(false) // 담당자 추가 다이얼로그용 사용자 목록 로딩
   const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set()) // 체크된 사용자들의 ID Set
   const [isAssigning, setIsAssigning] = useState(false)
   const [isDownloadLinksDialogOpen, setIsDownloadLinksDialogOpen] = useState(false)
@@ -354,20 +355,26 @@ export default function ClientAnalyticsPage() {
     return fileKeys
   }
 
-  // 사용자 목록 로드
-  useEffect(() => {
-    const loadUsers = async () => {
-      try {
-        const response = await fetch("/api/profiles")
-        if (response.ok) {
-          const profiles = await response.json()
-          const allProfiles = Array.isArray(profiles) ? profiles : []
-          setUsers(allProfiles)
-        }
-      } catch (error) {
-        console.error("[Analytics] 사용자 목록 로드 오류:", error)
+  // 사용자 목록 로드 — 가입된 전체 인원 (API가 admin/staff일 때 { profiles, pendingStaffRequests } 객체 반환)
+  const loadUsers = async () => {
+    setIsUsersLoading(true)
+    try {
+      const response = await fetch("/api/profiles")
+      if (response.ok) {
+        const data = await response.json()
+        const allProfiles = Array.isArray(data)
+          ? data
+          : (Array.isArray(data?.profiles) ? data.profiles : [])
+        setUsers(allProfiles)
       }
+    } catch (error) {
+      console.error("[Analytics] 사용자 목록 로드 오류:", error)
+    } finally {
+      setIsUsersLoading(false)
     }
+  }
+
+  useEffect(() => {
     if (user) {
       loadUsers()
     }
@@ -769,106 +776,44 @@ export default function ClientAnalyticsPage() {
             </div>
             )}
 
-            {/* [공동업무] 모드: 부제목 + 공동업무 추가 — 한 덩어리(테두리) = 서브태스크 1개 입력 */}
+            {/* 공동업무 요청 영역: 파란 그리드 + 공동업무 추가 버튼(테두리 위 오른쪽) */}
+            <div className={contentMode === 'multi' ? 'relative w-full min-w-0' : ''}>
+            <div className={contentMode === 'multi' ? 'border-2 border-primary/50 rounded-xl p-4 gap-4 bg-muted/10 min-w-0 ring-1 ring-primary/20 flex flex-col min-h-0' : ''}>
             {contentMode === 'multi' && (
-              <div className="grid gap-4 lg:grid-cols-[5.6fr_2.4fr] min-w-0 max-w-full">
-                {/* 왼쪽: 한 서브태스크 입력 덩어리 (테두리로 묶음) */}
-                <div className="border-2 border-primary/30 rounded-lg p-4 space-y-4 bg-muted/10 min-w-0 max-w-full">
-                  {/* 상단: 제목 + 공동업무 추가 버튼 */}
-                  <div className="flex items-center justify-between gap-4">
-                    <h3 className="text-lg font-semibold">공동 업무</h3>
-                    <Button
-                      type="button"
-                      variant="default"
-                      size="sm"
-                      onClick={(e) => {
-                        e.preventDefault()
-                        if (!currentSubtitle.trim()) {
-                          toast({
-                            title: "부제목 필요",
-                            description: "부제목을 입력해주세요.",
-                            variant: "destructive",
-                          })
-                          return
-                        }
-                        if (!subContent.trim()) {
-                          toast({
-                            title: "내용 필요",
-                            description: "추가 내용을 입력해주세요.",
-                            variant: "destructive",
-                          })
-                          return
-                        }
-                        const newSubtask = {
-                          id: crypto.randomUUID(),
-                          subtitle: currentSubtitle,
-                          assignedToList: Array.from(selectedAssignees),
-                          content: subContent,
-                          fileKeys: Array.from(selectedFiles)
-                        }
-                        setSubtasks([...subtasks, newSubtask])
-                        setCurrentSubtitle('')
-                        setSubContent('')
-                        const editor = document.getElementById('assign-content-multi')
-                        if (editor) editor.innerHTML = ''
-                        setSelectedFiles(new Set())
-                        setSelectedAssignees(new Set())
-                        const assigneeCount = newSubtask.assignedToList.length
-                        const currentUserName = user?.full_name || user?.email || '본인'
-                        toast({
-                          title: "공동 업무가 추가되었습니다",
-                          description: assigneeCount > 0 ? `${assigneeCount}명에게 할당됩니다` : `${currentUserName}에게 할당됩니다`
-                        })
-                      }}
-                      disabled={!currentSubtitle.trim()}
-                    >
-                      <Plus className="h-4 w-4 mr-1" />
-                      공동업무 추가
-                    </Button>
-                  </div>
-
-                  {/* 부제 입력 */}
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Label htmlFor="subtitle" className="text-base font-semibold">부제</Label>
-                      {/* 개별/공동 슬라이딩 세그먼트 */}
-                      <div className="relative inline-flex items-center bg-muted rounded-full p-0.5 h-8 w-fit">
-                        <div 
-                          className="absolute h-7 rounded-full bg-background shadow-sm transition-all duration-200 ease-in-out"
-                          style={{
-                            width: '45px', 
-                            left: '47px',
-                          }}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setContentMode('single' as const)}
-                          className="relative z-10 w-[45px] h-7 text-sm font-medium transition-colors duration-200 text-muted-foreground"
-                        >
-                          개별
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setContentMode('multi' as const)}
-                          className="relative z-10 w-[45px] h-7 text-sm font-medium transition-colors duration-200 text-foreground"
-                        >
-                          공동
-                        </button>
-                      </div>
+              <div className="grid gap-4 lg:grid-cols-[5.6fr_2.4fr] lg:grid-rows-[auto_1fr] min-w-0 max-w-full w-full flex-1 min-h-0 overflow-hidden">
+                {/* 왼쪽: 공동업무 내용 (개별과 동일 레이아웃 — 내용 | 사용자리스트) */}
+                <div className="space-y-2 min-w-0 max-w-full">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-base font-semibold">공동업무 내용</Label>
+                    <div className="relative inline-flex items-center bg-muted rounded-full p-0.5 h-8 w-fit">
+                      <div
+                        className="absolute h-7 rounded-full bg-background shadow-sm transition-all duration-200 ease-in-out"
+                        style={{ width: '45px', left: '47px' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setContentMode('single' as const)}
+                        className="relative z-10 w-[45px] h-7 text-sm font-medium transition-colors duration-200 text-muted-foreground"
+                      >
+                        개별
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setContentMode('multi' as const)}
+                        className="relative z-10 w-[45px] h-7 text-sm font-medium transition-colors duration-200 text-foreground"
+                      >
+                        공동
+                      </button>
                     </div>
-                    
-                    <Input
-                      id="subtitle"
-                      value={currentSubtitle}
-                      onChange={(e) => setCurrentSubtitle(e.target.value)}
-                      placeholder="공동업무의 부제를 입력하세요"
-                    />
                   </div>
-
-                  {/* 공동업무 내용 에디터 */}
-                  <div className="space-y-2 min-w-0 max-w-full">
-                    <Label htmlFor="assign-content-multi" className="text-base font-semibold">공동업무 내용</Label>
-                    <div className="border rounded-md overflow-hidden bg-background" style={{
+                  <Input
+                    id="subtitle"
+                    value={currentSubtitle}
+                    onChange={(e) => setCurrentSubtitle(e.target.value)}
+                    placeholder="공동업무의 부제를 입력하세요"
+                  />
+                    <Label htmlFor="assign-content-multi" className="text-base font-semibold sr-only">공동업무 내용 입력</Label>
+                    <div className="border rounded-xl overflow-hidden bg-background" style={{
                       height: '492px',
                       minHeight: '492px',
                       maxHeight: '492px',
@@ -1056,7 +1001,7 @@ export default function ClientAnalyticsPage() {
                           </Button>
                         </div>
 
-                        {/* 오른쪽: 담당자 추가 */}
+                        {/* 오른쪽: 담당자 추가 (공동업무 추가는 그리드 밖 오른쪽 끝에 배치) */}
                         <div className="flex items-center gap-2 ml-auto">
                           <Button
                             type="button"
@@ -1145,14 +1090,14 @@ export default function ClientAnalyticsPage() {
                       `}</style>
                     </div>
                   </div>
-                </div>
 
-                {/* 오른쪽: 업무 블록 리스트 (추가된 서브태스크들) */}
-                <div className="min-w-0 max-w-full">
-                  <div className="mb-2" style={{ height: '28px', display: 'flex', alignItems: 'center' }}>
+                {/* 오른쪽: 업무 목록 — 셀 높이 채워서 하단 모서리 왼쪽과 일치 */}
+                <div className="min-w-0 max-w-full flex flex-col min-h-0">
+                  <div className="flex items-center gap-2 mb-2 shrink-0" style={{ height: '32px' }}>
                     <Label className="text-base font-semibold">업무 목록 ({subtasks.length})</Label>
                   </div>
-                    <div className="border rounded-md p-3 space-y-2 bg-muted/30" style={{ minHeight: '492px', maxHeight: '492px', overflowY: 'auto' }}>
+                  <div className="border rounded-xl bg-background flex-1 min-h-[492px] flex flex-col overflow-hidden">
+                    <div className="flex-1 overflow-y-auto p-3 space-y-2">
                       {subtasks.length === 0 ? (
                         <p className="text-sm text-muted-foreground text-center py-8">
                           공동 할당을 위해 부제목과 내용을 작성하고 &quot;추가&quot; 버튼을 눌러주세요<br/>
@@ -1207,14 +1152,16 @@ export default function ClientAnalyticsPage() {
                         })
                       )}
                     </div>
-                  </div></div>
+                  </div>
+                </div>
+              </div>
             )}
 
-            {/* 파일 목록 및 미리보기 섹션 */}
-            <div className="space-y-4 min-w-0 max-w-full" style={{ height: '70%' }}>
-              <div className="grid gap-4 lg:grid-cols-[5.6fr_2.4fr] w-full min-w-0 max-w-full overflow-hidden h-full">
-                {/* 파일 목록 */}
-                <Card className="flex flex-col min-h-0 h-full w-full min-w-0 overflow-hidden">
+            {/* 파일 목록 및 미리보기 섹션 (공동업무 모드일 때는 위 테두리 영역 안에 포함, 그리드 열 정렬로 모서리 맞춤) */}
+            <div className={contentMode === 'multi' ? 'min-w-0 max-w-full w-full flex-1 flex flex-col min-h-0' : 'space-y-4 min-w-0 max-w-full'} style={contentMode === 'multi' ? undefined : { height: '70%' }}>
+              <div className={`grid gap-4 lg:grid-cols-[5.6fr_2.4fr] w-full min-w-0 max-w-full overflow-hidden items-stretch ${contentMode === 'multi' ? 'flex-1 min-h-0 h-full' : 'h-full'}`}>
+                {/* 파일 목록 — 하단 모서리 일정하도록 셀 높이 채움 */}
+                <Card className="flex flex-col min-h-0 h-full w-full min-w-0 overflow-hidden rounded-xl flex-1">
                   <CardHeader className="shrink-0 pb-3">
                     <div className="flex items-center justify-between gap-2">
                       <div>
@@ -1478,13 +1425,10 @@ export default function ClientAnalyticsPage() {
                   </CardContent>
                 </Card>
 
-                {/* 파일 미리보기 */}
-                <Card className="relative flex flex-col shrink-0" style={{
+                {/* 파일 미리보기 — 하단 모서리 일정하도록 셀 높이 채움 */}
+                <Card className="relative flex flex-col min-h-0 h-full w-full rounded-xl overflow-hidden" style={{
                   width: '100%',
-                  height: '500px',
-                  minHeight: '500px',
-                  maxHeight: '500px',
-                  overflow: 'hidden',
+                  minHeight: '400px',
                   display: 'flex',
                   flexDirection: 'column',
                 }}>
@@ -1714,25 +1658,25 @@ export default function ClientAnalyticsPage() {
                 </Card>
               </div>
               {selectedFiles.size > 0 && (
-                <div className="space-y-2 min-w-0 max-w-full">
+                <div className="mt-5 space-y-2 min-w-0 w-full">
                   <Label>선택된 파일/폴더 ({selectedFiles.size}개)</Label>
-                  <div className="text-sm text-muted-foreground max-h-32 overflow-y-auto border rounded-md p-3 min-w-0 max-w-full">
+                  <div className="text-sm text-muted-foreground min-w-0 w-full overflow-y-auto overflow-x-hidden border rounded-md p-3 max-h-[20vh]">
                     {(() => {
                       const selectedItems = getSelectedFilesForAssignment()
                       return selectedItems.length > 0 ? (
-                        <div className="space-y-1">
+                        <div className="space-y-1 min-w-0">
                           {selectedItems.slice(0, 5).map((item, index) => (
-                            <div key={index} className="flex items-center gap-2">
+                            <div key={index} className="flex items-center gap-2 min-w-0 w-full">
                               {item.fileType === 'folder' ? (
                                 <>
-                                  <span className="text-lg">📁</span>
-                                  <span className="truncate">{item.fileName || (typeof item.key === 'string' ? item.key.split("/").pop() : 'unknown')}</span>
-                                  <span className="text-xs text-muted-foreground">(폴더)</span>
+                                  <span className="shrink-0 text-lg">📁</span>
+                                  <span className="truncate min-w-0 flex-1">{item.fileName || (typeof item.key === 'string' ? item.key.split("/").pop() : 'unknown')}</span>
+                                  <span className="shrink-0 text-xs text-muted-foreground">(폴더)</span>
                                 </>
                               ) : (
                                 <>
-                                  <span className="text-sm">📄</span>
-                                  <span className="truncate">{item.fileName || (typeof item.key === 'string' ? item.key.split("/").pop() : 'unknown')}</span>
+                                  <span className="shrink-0 text-sm">📄</span>
+                                  <span className="truncate min-w-0 flex-1">{item.fileName || (typeof item.key === 'string' ? item.key.split("/").pop() : 'unknown')}</span>
                                 </>
                               )}
                             </div>
@@ -1751,6 +1695,60 @@ export default function ClientAnalyticsPage() {
                 </div>
               )}
 
+            </div>
+            </div>
+            {contentMode === 'multi' && (
+              <div className="absolute -top-10 right-4 z-10 shadow-md">
+                <Button
+                  type="button"
+                  variant="default"
+                  size="default"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    if (!currentSubtitle.trim()) {
+                      toast({
+                        title: "부제목 필요",
+                        description: "부제목을 입력해주세요.",
+                        variant: "destructive",
+                      })
+                      return
+                    }
+                    if (!subContent.trim()) {
+                      toast({
+                        title: "내용 필요",
+                        description: "추가 내용을 입력해주세요.",
+                        variant: "destructive",
+                      })
+                      return
+                    }
+                    const newSubtask = {
+                      id: crypto.randomUUID(),
+                      subtitle: currentSubtitle,
+                      assignedToList: Array.from(selectedAssignees),
+                      content: subContent,
+                      fileKeys: Array.from(selectedFiles)
+                    }
+                    setSubtasks([...subtasks, newSubtask])
+                    setCurrentSubtitle('')
+                    setSubContent('')
+                    const editor = document.getElementById('assign-content-multi')
+                    if (editor) editor.innerHTML = ''
+                    setSelectedFiles(new Set())
+                    setSelectedAssignees(new Set())
+                    const assigneeCount = newSubtask.assignedToList.length
+                    const currentUserName = user?.full_name || user?.email || '본인'
+                    toast({
+                      title: "공동 업무가 추가되었습니다",
+                      description: assigneeCount > 0 ? `${assigneeCount}명에게 할당됩니다` : `${currentUserName}에게 할당됩니다`
+                    })
+                  }}
+                  disabled={!currentSubtitle.trim()}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  공동업무 추가
+                </Button>
+              </div>
+            )}
             </div>
 
             <div className="flex gap-2 pt-8 mt-8 min-w-0 max-w-full justify-center">
@@ -2170,12 +2168,15 @@ export default function ClientAnalyticsPage() {
         open={isUserSelectDialogOpen}
         onOpenChange={(open) => {
           setIsUserSelectDialogOpen(open)
-          if (open && user?.id) {
-            setSelectedAssignees((prev) => {
-              const next = new Set(prev)
-              next.delete(user.id)
-              return next
-            })
+          if (open) {
+            loadUsers()
+            if (user?.id) {
+              setSelectedAssignees((prev) => {
+                const next = new Set(prev)
+                next.delete(user.id)
+                return next
+              })
+            }
           }
         }}
       >
@@ -2188,7 +2189,12 @@ export default function ClientAnalyticsPage() {
           </DialogHeader>
           <div className="py-4">
             <div className="space-y-2">
-              {users
+              {isUsersLoading ? (
+                <p className="text-sm text-muted-foreground text-center py-8">사용자 목록 로딩 중...</p>
+              ) : users.filter((u) => u.id !== user?.id).length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">현재 세션 사용자 외 등록된 인원이 없습니다.</p>
+              ) : (
+              users
                 .filter((u) => u.id !== user?.id)
                 .sort((a, b) => {
                   // 할당된 사용자를 먼저 표시
@@ -2236,7 +2242,8 @@ export default function ClientAnalyticsPage() {
                     )}
                   </div>
                 </div>
-              ))}
+              ))
+              )}
             </div>
           </div>
           <DialogFooter>
