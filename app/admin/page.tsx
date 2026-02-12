@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Activity, FileText, Users, Clock, TrendingUp, AlertCircle, CheckCircle2, Shield, Loader2, RefreshCw } from "lucide-react"
+import { Activity, FileText, Clock, TrendingUp, AlertCircle, CheckCircle2, Loader2, RefreshCw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -112,68 +112,11 @@ export default function AdminOverviewPage() {
         <div className="flex items-center gap-2">
           {(user?.role === "admin" || user?.role === "staff") && (
             <Badge className="bg-purple-500/10 text-purple-500 border-purple-500/20 px-3 py-1">
-              <Shield className="mr-2 h-3 w-3" />
               {user?.role === "admin" ? "관리자" : "Staff"}
             </Badge>
           )}
         </div>
       </div>
-
-      {(user?.role === "admin" || user?.role === "staff") && stats && (
-        <Card className="mb-8 border-purple-500/20 bg-purple-500/5">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Shield className="h-5 w-5 text-purple-500" />
-              <CardTitle>빠른 메뉴</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-3">
-              <Link href="/admin/settings">
-                <Card className="hover:bg-accent transition-colors cursor-pointer">
-                  <CardHeader>
-                    <CardTitle className="text-sm">설정</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-2xl font-bold">{stats.totalClients + stats.totalStaff + stats.totalAdmins}</p>
-                      </div>
-                      <Users className="h-8 w-8 text-purple-500" />
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm">시스템 관리자</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-2xl font-bold text-purple-500">{stats.totalAdmins || 0}</p>
-                    </div>
-                    <Shield className="h-8 w-8 text-purple-500" />
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm">직원</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-2xl font-bold text-blue-500">{stats.totalStaff || 0}</p>
-                    </div>
-                    <Users className="h-8 w-8 text-blue-500" />
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {stats && (
         <>

@@ -12,15 +12,19 @@ export function isValidFileKey(key: unknown): key is string {
 /**
  * API 응답의 file_keys/comment_file_keys를 string[]로 통일
  * - string[] 그대로 사용, { key: string; uploaded_at?: unknown }[] 인 경우 key만 추출
+ * - s3_key, s3Key, path 등 다른 필드도 추출 시도
  */
 export function normalizeFileKeyArray(keys: unknown): string[] {
   if (!Array.isArray(keys)) return []
   return keys
     .map((item) => {
       if (typeof item === "string" && item.length > 0) return item
-      if (typeof item === "object" && item !== null && "key" in item && typeof (item as { key: unknown }).key === "string") {
-        return (item as { key: string }).key
-      }
+      if (typeof item !== "object" || item === null) return null
+      const o = item as Record<string, unknown>
+      if (typeof o.key === "string" && o.key.length > 0) return o.key
+      if (typeof o.s3_key === "string" && o.s3_key.length > 0) return o.s3_key
+      if (typeof o.s3Key === "string" && o.s3Key.length > 0) return o.s3Key
+      if (typeof o.path === "string" && o.path.length > 0) return o.path
       return null
     })
     .filter((k): k is string => k !== null && k.length > 0)

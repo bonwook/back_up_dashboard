@@ -199,6 +199,23 @@ export default function ClientProgressPage() {
     return () => document.removeEventListener("visibilitychange", onVisibilityChange)
   }, [loadTasks])
 
+  // 댓글은 항상 메인 태스크 기준으로 로드/저장 → 공동 업무에서도 모두 같은 댓글을 봄
+  const workCommentMainTaskId = useMemo(() => {
+    if (!workTaskId) return null
+    const currentTask = tasks.find((t) => t.id === workTaskId)
+    if (!currentTask) return workTaskId
+    return currentTask.is_subtask && currentTask.task_id ? currentTask.task_id : workTaskId
+  }, [workTaskId, tasks])
+
+  const workTaskIdToRole = useMemo(() => {
+    if (!workCommentMainTaskId) return {}
+    const mainTask = tasks.find((t) => t.id === workCommentMainTaskId)
+    if (!mainTask) return {}
+    return {
+      [workCommentMainTaskId]: { assigned_by: mainTask.assigned_by, assigned_to: mainTask.assigned_to },
+    }
+  }, [workCommentMainTaskId, tasks])
+
   const handleStatusChange = useCallback(async (taskId: string, newStatus: TaskStatus) => {
     setUpdatingTaskId(taskId)
     try {
@@ -2103,7 +2120,9 @@ export default function ClientProgressPage() {
                 </div>
               )}
                   <TaskCommentSection
-                    taskId={workTaskId}
+                    taskId={workCommentMainTaskId ?? workTaskId}
+                    taskIds={workCommentMainTaskId ? [workCommentMainTaskId] : null}
+                    taskIdToRole={Object.keys(workTaskIdToRole).length > 0 ? workTaskIdToRole : null}
                     me={user ? { id: user.id, role: userRole ?? user.role } : null}
                     allowWrite={true}
                     allowDelete={true}

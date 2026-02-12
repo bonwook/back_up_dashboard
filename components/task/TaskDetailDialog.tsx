@@ -297,20 +297,26 @@ export function TaskDetailDialog({
     [subtasks]
   )
 
+  // 댓글: 메인 기준 한 번만 요청하면 API가 메인+서브 전부 반환. 서브 선택 시에도 메인 id로 요청해야 메인 댓글 포함됨
+  const commentMainTaskId = displayTask?.is_subtask ? (displayTask as any).task_id : displayTask?.id
   const commentTaskIds = useMemo(
-    () => (displayTask ? [displayTask.id, ...subtasks.map((s: any) => s.id)] : []),
-    [displayTask?.id, subtasks]
+    () => (commentMainTaskId ? [commentMainTaskId] : []),
+    [commentMainTaskId]
   )
   const taskIdToRole = useMemo(() => {
     if (!displayTask) return {}
     const map: Record<string, { assigned_by?: string | null; assigned_to?: string | null }> = {
       [displayTask.id]: { assigned_by: displayTask.assigned_by, assigned_to: displayTask.assigned_to },
     }
+    if (commentMainTaskId && (fullTask?.id === commentMainTaskId || displayTask.id === commentMainTaskId)) {
+      const main = fullTask?.id === commentMainTaskId ? fullTask : displayTask
+      if (main) map[commentMainTaskId] = { assigned_by: main.assigned_by, assigned_to: main.assigned_to }
+    }
     subtasks.forEach((s: any) => {
       map[s.id] = { assigned_by: displayTask.assigned_by, assigned_to: s.assigned_to }
     })
     return map
-  }, [displayTask?.id, displayTask?.assigned_by, displayTask?.assigned_to, subtasks])
+  }, [displayTask?.id, displayTask?.assigned_by, displayTask?.assigned_to, subtasks, commentMainTaskId, fullTask?.id, fullTask?.assigned_by, fullTask?.assigned_to])
 
   const handleDownloadWithProgress = async (s3Key: string, name?: string) => {
     const fileName = name ?? s3Key.split("/").pop() ?? "download"
@@ -851,7 +857,7 @@ export function TaskDetailDialog({
 
           <div className="pt-4 border-t">
             <TaskCommentSection
-              taskId={displayTask.id}
+              taskId={commentMainTaskId ?? displayTask.id}
               taskIds={commentTaskIds}
               taskIdToRole={taskIdToRole}
               pollInterval={15000}

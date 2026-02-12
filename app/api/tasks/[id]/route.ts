@@ -67,15 +67,21 @@ export async function GET(
         return NextResponse.json({ error: "권한이 없습니다" }, { status: 403 })
       }
 
-      // Parse JSON file_keys, comment_file_keys
+      // Parse JSON file_keys, comment_file_keys — 항상 string[]로 정규화 (DB에 객체 배열이 저장된 경우 대비)
       try {
-        const fileKeys = typeof task.file_keys === 'string' 
-          ? JSON.parse(task.file_keys) 
+        const rawFileKeys = typeof task.file_keys === 'string'
+          ? JSON.parse(task.file_keys)
           : task.file_keys || []
-        const commentFileKeys = typeof task.comment_file_keys === 'string'
+        const rawCommentFileKeys = typeof task.comment_file_keys === 'string'
           ? JSON.parse(task.comment_file_keys)
           : task.comment_file_keys || []
-        
+        const fileKeys = (Array.isArray(rawFileKeys) ? rawFileKeys : []).map((item: unknown) =>
+          typeof item === 'string' ? item : (item != null && typeof item === 'object' && 'key' in item && typeof (item as { key: unknown }).key === 'string' ? (item as { key: string }).key : null)
+        ).filter((k): k is string => typeof k === 'string' && k.length > 0)
+        const commentFileKeys = (Array.isArray(rawCommentFileKeys) ? rawCommentFileKeys : []).map((item: unknown) =>
+          typeof item === 'string' ? item : (item != null && typeof item === 'object' && 'key' in item && typeof (item as { key: unknown }).key === 'string' ? (item as { key: string }).key : null)
+        ).filter((k): k is string => typeof k === 'string' && k.length > 0)
+
         // 파일 업로드 날짜 정보 가져오기
         const fileKeysWithDates = await Promise.all(
           fileKeys.map(async (key: string) => {
@@ -162,15 +168,21 @@ export async function GET(
         return NextResponse.json({ error: "권한이 없습니다" }, { status: 403 })
       }
 
-      // Parse JSON file_keys, comment_file_keys
+      // Parse JSON file_keys, comment_file_keys — 항상 string[]로 정규화
       try {
-        const fileKeys = typeof subtask.file_keys === 'string' 
-          ? JSON.parse(subtask.file_keys) 
+        const rawFileKeys = typeof subtask.file_keys === 'string'
+          ? JSON.parse(subtask.file_keys)
           : subtask.file_keys || []
-        const commentFileKeys = typeof subtask.comment_file_keys === 'string'
+        const rawCommentFileKeys = typeof subtask.comment_file_keys === 'string'
           ? JSON.parse(subtask.comment_file_keys)
           : subtask.comment_file_keys || []
-        
+        const fileKeys = (Array.isArray(rawFileKeys) ? rawFileKeys : []).map((item: unknown) =>
+          typeof item === 'string' ? item : (item != null && typeof item === 'object' && 'key' in item && typeof (item as { key: unknown }).key === 'string' ? (item as { key: string }).key : null)
+        ).filter((k): k is string => typeof k === 'string' && k.length > 0)
+        const commentFileKeys = (Array.isArray(rawCommentFileKeys) ? rawCommentFileKeys : []).map((item: unknown) =>
+          typeof item === 'string' ? item : (item != null && typeof item === 'object' && 'key' in item && typeof (item as { key: unknown }).key === 'string' ? (item as { key: string }).key : null)
+        ).filter((k): k is string => typeof k === 'string' && k.length > 0)
+
         // 파일 업로드 날짜 정보 가져오기
         const fileKeysWithDates = await Promise.all(
           fileKeys.map(async (key: string) => {

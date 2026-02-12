@@ -31,6 +31,11 @@ export async function POST(request: NextRequest) {
     console.log("Request body:", { email: body.email, hasPassword: !!body.password })
 
     const { email, password, fullName, organization, role: bodyRole } = body
+    // organization은 항상 대문자로 저장
+    const organizationNormalized =
+      organization != null && String(organization).trim() !== ""
+        ? String(organization).trim().toUpperCase()
+        : undefined
 
     if (!email || !password) {
       return NextResponse.json({ error: "Email and password are required" }, { status: 400 })
@@ -62,7 +67,7 @@ export async function POST(request: NextRequest) {
       }
       await ensureStaffSignupRequestsTable()
       const passwordHash = await hashPassword(password)
-      await createStaffSignupRequest(email, passwordHash, fullName, organization)
+      await createStaffSignupRequest(email, passwordHash, fullName, organizationNormalized)
       console.log("Staff signup request saved (pending)")
       return NextResponse.json(
         { success: true, pendingStaff: true },
@@ -78,7 +83,7 @@ export async function POST(request: NextRequest) {
 
     // Create user (client만 즉시 가입)
     console.log("Creating user...")
-    const user = await createUser(email, password, fullName, organization, validRole)
+    const user = await createUser(email, password, fullName, organizationNormalized, validRole)
     console.log("User created:", user.id)
 
     // Generate JWT token

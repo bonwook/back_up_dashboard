@@ -92,24 +92,57 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     await ensureCommentsTable()
 
-    const comments = await query(
-      `
-      SELECT
-        c.id,
-        c.task_id,
-        c.user_id,
-        c.content,
-        c.created_at,
-        p.full_name
-      FROM task_comments c
-      LEFT JOIN profiles p ON c.user_id = p.id
-      WHERE c.task_id = ?
-      ORDER BY c.created_at ASC
-      `,
-      [taskId],
-    )
+    // 메인 태스크면 메인+해당 메인 소속 서브 전부의 댓글을 한 번에 반환 (요청자/담당자 모두 동일 목록)
+    const mainTaskRows = await query(`SELECT id FROM task_assignments WHERE id = ?`, [taskId])
+    const isMainTask = Array.isArray(mainTaskRows) && mainTaskRows.length > 0
 
-    return NextResponse.json({ comments })
+    let comments: unknown[]
+    if (isMainTask) {
+      const subtaskRows = await query(
+        `SELECT id FROM task_subtasks WHERE task_id = ?`,
+        [taskId],
+      )
+      const subtaskIds = Array.isArray(subtaskRows)
+        ? (subtaskRows as { id?: string }[]).map((r) => r?.id).filter((id): id is string => typeof id === "string" && id.length > 0)
+        : []
+      const allTaskIds = [taskId, ...subtaskIds]
+      const placeholders = allTaskIds.map(() => "?").join(", ")
+      comments = await query(
+        `
+        SELECT
+          c.id,
+          c.task_id,
+          c.user_id,
+          c.content,
+          c.created_at,
+          p.full_name
+        FROM task_comments c
+        LEFT JOIN profiles p ON c.user_id = p.id
+        WHERE c.task_id IN (${placeholders})
+        ORDER BY c.created_at ASC
+        `,
+        allTaskIds,
+      )
+    } else {
+      comments = await query(
+        `
+        SELECT
+          c.id,
+          c.task_id,
+          c.user_id,
+          c.content,
+          c.created_at,
+          p.full_name
+        FROM task_comments c
+        LEFT JOIN profiles p ON c.user_id = p.id
+        WHERE c.task_id = ?
+        ORDER BY c.created_at ASC
+        `,
+        [taskId],
+      )
+    }
+
+    return NextResponse.json({ comments: Array.isArray(comments) ? comments : [] })
   } catch (error) {
     console.error("[Task Comments API] GET error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
