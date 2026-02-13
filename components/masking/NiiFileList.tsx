@@ -17,7 +17,7 @@ export function NiiFileList({ files, selectedId, onSelect, onDelete }: NiiFileLi
     return (
       <div className="flex flex-col items-center justify-center gap-2 py-8 text-muted-foreground">
         <FileImage className="h-10 w-10 opacity-50" />
-        <p className="text-sm">.nii 파일이 없습니다</p>
+        <p className="text-sm">.nii / .nii.gz 파일이 없습니다</p>
       </div>
     )
   }

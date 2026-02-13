@@ -1,0 +1,316 @@
+"use client"
+
+import { useRef, useEffect, useCallback, useState } from "react"
+import { cn } from "@/lib/utils"
+import { extractSlice, getSliceLayout, getSliceFrom3DMask } from "./niftiLoader"
+import type { NiftiHeaderLike, SliceAxis } from "./types"
+
+type Tool = "brush" | "eraser"
+
+export interface SlicePanelProps {
+  header: NiftiHeaderLike
+  imageBuffer: ArrayBuffer
+  mask3D: Uint8Array | null
+  axis: SliceAxis
+  sliceIndex: number
+  sliceRange: { min: number; max: number }
+  minMax: { min: number; max: number }
+  brightness: number
+  contrast: number
+  tool: Tool
+  brushSize: number
+  /** 이 패널에서 그리기/슬라이스 변경 가능 여부 */
+  interactive: boolean
+  /** 포커스 시 테두리 */
+  focused: boolean
+  onFocus: () => void
+  onSliceIndexChange: (delta: number) => void
+  onMaskChange: (axis: SliceAxis, sliceIndex: number, mask: Uint8Array) => void
+  /** 툴바 확대/축소 배율 (1 = 100%) */
+  scaleMultiplier?: number
+  className?: string
+}
+
+export function SlicePanel({
+  header,
+  imageBuffer,
+  mask3D,
+  axis,
+  sliceIndex,
+  sliceRange,
+  minMax,
+  brightness,
+  contrast,
+  tool,
+  brushSize,
+  interactive,
+  focused,
+  onFocus,
+  onSliceIndexChange,
+  onMaskChange,
+  scaleMultiplier = 1,
+  className,
+}: SlicePanelProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const overlayRef = useRef<HTMLCanvasElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  const layout = getSliceLayout(header)
+  const dims =
+    axis === "axial"
+      ? { width: layout.nx, height: layout.ny }
+      : axis === "coronal"
+        ? { width: layout.nx, height: layout.nz }
+        : { width: layout.ny, height: layout.nz }
+
+  const [isDrawing, setIsDrawing] = useState(false)
+  const [lastPoint, setLastPoint] = useState<{ x: number; y: number } | null>(null)
+  const [isPanning, setIsPanning] = useState(false)
+  const panStartRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [scale, setScale] = useState(1)
+  const localMaskRef = useRef<Uint8Array | null>(null)
+
+  const drawSlice = useCallback(() => {
+    const canvas = canvasRef.current
+    const overlay = overlayRef.current
+    if (!canvas || !overlay) return
+    const { data } = extractSlice(header, imageBuffer, axis, sliceIndex, {
+      min: minMax.min,
+      max: minMax.max,
+    })
+    canvas.width = dims.width
+    canvas.height = dims.height
+    overlay.width = dims.width
+    overlay.height = dims.height
+    const ctx = canvas.getContext("2d")!
+    const imgData = ctx.createImageData(dims.width, dims.height)
+    const br = 1 + brightness / 100
+    const co = 1 + contrast / 100
+    const mid = 128
+    for (let i = 0; i < data.length; i += 4) {
+      let r = data[i]
+      let g = data[i + 1]
+      let b = data[i + 2]
+      r = Math.round(mid + (r - mid) * co * br + brightness)
+      g = Math.round(mid + (g - mid) * co * br + brightness)
+      b = Math.round(mid + (b - mid) * co * br + brightness)
+      imgData.data[i] = Math.max(0, Math.min(255, r))
+      imgData.data[i + 1] = Math.max(0, Math.min(255, g))
+      imgData.data[i + 2] = Math.max(0, Math.min(255, b))
+      imgData.data[i + 3] = 255
+    }
+    ctx.putImageData(imgData, 0, 0)
+    const sliceMask = mask3D
+      ? getSliceFrom3DMask(mask3D, header, axis, sliceIndex)
+      : localMaskRef.current
+    if (sliceMask && sliceMask.length === dims.width * dims.height) {
+      const oCtx = overlay.getContext("2d")!
+      const oImg = oCtx.createImageData(dims.width, dims.height)
+      for (let i = 0; i < sliceMask.length; i++) {
+        const v = sliceMask[i]
+        oImg.data[i * 4] = 255
+        oImg.data[i * 4 + 1] = 0
+        oImg.data[i * 4 + 2] = 0
+        oImg.data[i * 4 + 3] = v * 0.5
+      }
+      oCtx.putImageData(oImg, 0, 0)
+    }
+  }, [
+    header,
+    imageBuffer,
+    mask3D,
+    axis,
+    sliceIndex,
+    dims.width,
+    dims.height,
+    minMax,
+    brightness,
+    contrast,
+  ])
+
+  useEffect(() => {
+    drawSlice()
+  }, [drawSlice])
+
+  const canvasToSlice = useCallback(
+    (clientX: number, clientY: number) => {
+      const overlay = overlayRef.current
+      const cont = containerRef.current
+      if (!overlay || !cont) return null
+      const rect = cont.getBoundingClientRect()
+      const sx = (clientX - rect.left - pan.x) / scale
+      const sy = (clientY - rect.top - pan.y) / scale
+      const x = Math.floor(sx)
+      const y = Math.floor(sy)
+      if (x < 0 || x >= dims.width || y < 0 || y >= dims.height) return null
+      return { x, y }
+    },
+    [pan, scale, dims.width, dims.height]
+  )
+
+  const applyBrush = useCallback(
+    (px: number, py: number) => {
+      const w = dims.width
+      const h = dims.height
+      let sliceMask = mask3D ? getSliceFrom3DMask(mask3D, header, axis, sliceIndex) : localMaskRef.current
+      if (!sliceMask || sliceMask.length !== w * h) {
+        sliceMask = new Uint8Array(w * h)
+        localMaskRef.current = sliceMask
+      } else {
+        sliceMask = new Uint8Array(sliceMask)
+      }
+      const r = Math.max(1, Math.floor(brushSize / 2))
+      const value = tool === "brush" ? 255 : 0
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (dx * dx + dy * dy > r * r) continue
+          const nx = px + dx
+          const ny = py + dy
+          if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
+            sliceMask[ny * w + nx] = value
+          }
+        }
+      }
+      onMaskChange(axis, sliceIndex, sliceMask)
+      if (!mask3D) drawSlice()
+    },
+    [
+      dims.width,
+      dims.height,
+      mask3D,
+      header,
+      axis,
+      sliceIndex,
+      tool,
+      brushSize,
+      onMaskChange,
+      drawSlice,
+    ]
+  )
+
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (!interactive) return
+      const isRightOrAux = e.button === 2 || e.button === 1
+      if (isRightOrAux) {
+        setIsPanning(true)
+        panStartRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y }
+        e.currentTarget.setPointerCapture(e.pointerId)
+        e.preventDefault()
+        return
+      }
+      if (e.button !== 0) return
+      onFocus()
+      const p = canvasToSlice(e.clientX, e.clientY)
+      if (p) {
+        setIsDrawing(true)
+        setLastPoint(p)
+        applyBrush(p.x, p.y)
+      }
+    },
+    [interactive, onFocus, pan.x, pan.y, canvasToSlice, applyBrush]
+  )
+
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (isPanning && panStartRef.current) {
+        setPan({
+          x: panStartRef.current.panX + e.clientX - panStartRef.current.x,
+          y: panStartRef.current.panY + e.clientY - panStartRef.current.y,
+        })
+        return
+      }
+      if (!isDrawing) return
+      const p = canvasToSlice(e.clientX, e.clientY)
+      if (p && lastPoint) {
+        const dx = Math.abs(p.x - lastPoint.x)
+        const dy = Math.abs(p.y - lastPoint.y)
+        const steps = Math.max(dx, dy, 1)
+        for (let t = 0; t <= steps; t++) {
+          const x = Math.round(lastPoint.x + (p.x - lastPoint.x) * (t / steps))
+          const y = Math.round(lastPoint.y + (p.y - lastPoint.y) * (t / steps))
+          applyBrush(x, y)
+        }
+        setLastPoint(p)
+      }
+    },
+    [isPanning, isDrawing, lastPoint, canvasToSlice, applyBrush]
+  )
+
+  const handlePointerUp = useCallback((e?: React.PointerEvent) => {
+    if (e?.currentTarget && e.pointerId != null) {
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId)
+      } catch {
+        // ignore
+      }
+    }
+    setIsDrawing(false)
+    setLastPoint(null)
+    setIsPanning(false)
+    panStartRef.current = null
+  }, [])
+
+  const handleWheel = useCallback(
+    (e: React.WheelEvent) => {
+      if (!interactive) return
+      e.preventDefault()
+      if (e.ctrlKey || e.metaKey) {
+        setScale((s) => Math.max(0.25, Math.min(4, s + (e.deltaY > 0 ? -0.1 : 0.1))))
+      } else {
+        const delta = e.deltaY > 0 ? 1 : -1
+        onSliceIndexChange(delta)
+      }
+    },
+    [interactive, onSliceIndexChange]
+  )
+
+  return (
+    <div
+      ref={containerRef}
+      className={cn(
+        "relative flex flex-1 min-h-0 overflow-auto rounded border bg-black flex items-center justify-center",
+        focused && "ring-2 ring-primary",
+        className
+      )}
+      onWheel={handleWheel}
+      style={{ cursor: interactive ? (isPanning ? "grabbing" : "crosshair") : "default" }}
+      onClick={interactive ? onFocus : undefined}
+    >
+      <div
+        style={{
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale * scaleMultiplier})`,
+          transformOrigin: "0 0",
+          position: "relative",
+          width: dims.width,
+          height: dims.height,
+        }}
+      >
+        <canvas
+          ref={canvasRef}
+          width={dims.width}
+          height={dims.height}
+          className="block"
+          style={{ imageRendering: "pixelated" }}
+        />
+        <canvas
+          ref={overlayRef}
+          width={dims.width}
+          height={dims.height}
+          className="absolute left-0 top-0 block"
+          style={{
+            imageRendering: "pixelated",
+            cursor: interactive ? (isPanning ? "grabbing" : "crosshair") : "default",
+          }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={() => handlePointerUp()}
+          onContextMenu={(e) => e.preventDefault()}
+          aria-hidden
+        />
+      </div>
+    </div>
+  )
+}

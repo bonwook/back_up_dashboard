@@ -33,64 +33,69 @@ export default function ClientMaskingPage() {
   const [loading, setLoading] = useState(false)
   const { toast } = useToast()
 
-  const loadFile = useCallback(async (file: File | string) => {
-    setLoading(true)
-    try {
-      let data: ArrayBuffer
-      let name: string
-      if (file instanceof File) {
-        data = await file.arrayBuffer()
-        name = file.name
-      } else {
-        const res = await fetch(`/api/storage/download?path=${encodeURIComponent(file)}`, {
-          credentials: "include",
-        })
-        if (!res.ok) throw new Error("다운로드 실패")
-        data = await res.arrayBuffer()
-        name = file.split("/").pop() ?? "file.nii"
+  const loadFile = useCallback(
+    async (file: File | string, options?: { existingId?: string }) => {
+      setLoading(true)
+      try {
+        let data: ArrayBuffer
+        let name: string
+        if (file instanceof File) {
+          data = await file.arrayBuffer()
+          name = file.name
+        } else {
+          const res = await fetch(`/api/storage/download?path=${encodeURIComponent(file)}`, {
+            credentials: "include",
+          })
+          if (!res.ok) throw new Error("다운로드 실패")
+          data = await res.arrayBuffer()
+          name = file.split("/").pop() ?? "file.nii"
+        }
+        const { header: h, imageBuffer: img, data: raw, wasGzipped: gz } = await parseNifti(data)
+        const layout = getSliceLayout(h)
+        const mask = new Uint8Array(layout.totalVoxels)
+        setHeader(h)
+        setImageBuffer(img)
+        setRawData(raw)
+        setMask3D(mask)
+        setWasGzipped(gz)
+        setDownloadAsGzip(gz)
+        const existingId = options?.existingId
+        if (existingId != null) {
+          setSelectedId(existingId)
+          toast({ title: "선택됨", description: `${name}을(를) 표시합니다.` })
+        } else {
+          const id = generateId()
+          setFiles((prev) => [
+            ...prev,
+            {
+              id,
+              name,
+              source: file,
+              completed: false,
+              header: h,
+            },
+          ])
+          setSelectedId(id)
+          toast({ title: "로드 완료", description: `${name}을(를) 불러왔습니다.` })
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "파일 로드 실패"
+        toast({ title: "로드 실패", description: msg, variant: "destructive" })
+      } finally {
+        setLoading(false)
       }
-      const { header: h, imageBuffer: img, data: raw, wasGzipped: gz } = await parseNifti(data)
-      const layout = getSliceLayout(h)
-      const mask = new Uint8Array(layout.totalVoxels)
-      setHeader(h)
-      setImageBuffer(img)
-      setRawData(raw)
-      setMask3D(mask)
-      setWasGzipped(gz)
-      setDownloadAsGzip(gz)
-      const id = generateId()
-      setFiles((prev) => [
-        ...prev,
-        {
-          id,
-          name,
-          source: file,
-          completed: false,
-          header: h,
-        },
-      ])
-      setSelectedId(id)
-      toast({ title: "로드 완료", description: `${name}을(를) 불러왔습니다.` })
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "파일 로드 실패"
-      toast({ title: "로드 실패", description: msg, variant: "destructive" })
-    } finally {
-      setLoading(false)
-    }
-  }, [toast])
+    },
+    [toast]
+  )
 
   const handleSelect = useCallback(
     (id: string) => {
       const item = files.find((f) => f.id === id)
       if (!item) return
-      setSelectedId(id)
-      if (item.source instanceof File) {
-        loadFile(item.source)
-      } else {
-        loadFile(item.source)
-      }
+      if (selectedId === id) return
+      loadFile(item.source, { existingId: id })
     },
-    [files, loadFile]
+    [files, selectedId, loadFile]
   )
 
   const handleDelete = useCallback(
@@ -118,12 +123,12 @@ export default function ClientMaskingPage() {
     [header, mask3D]
   )
 
-  const handleSaveRequest = useCallback(() => {
+  const handleCompleteRequest = useCallback(() => {
     if (!selectedId) return
     setFiles((prev) =>
       prev.map((f) => (f.id === selectedId ? { ...f, completed: true } : f))
     )
-    toast({ title: "저장됨", description: "진행 상태가 갱신되었습니다." })
+    toast({ title: "완료", description: "파일 블록이 완료 처리되었습니다." })
   }, [selectedId, toast])
 
   const handleDownloadRequest = useCallback(() => {
@@ -149,14 +154,14 @@ export default function ClientMaskingPage() {
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
       <div className="flex flex-1 overflow-hidden">
-        {/* 좌측: .nii 파일 리스트 (File Explorer 형태) */}
+        {/* 좌측: .nii / .nii.gz 파일 리스트 (File Explorer 형태) */}
         <aside className="flex w-64 shrink-0 flex-col border-r bg-card">
           <div className="flex items-center justify-between border-b p-3">
-            <span className="text-sm font-medium">.nii 파일</span>
+            <span className="text-sm font-medium">.nii / .nii.gz</span>
             <input
               id="masking-nii-upload"
               type="file"
-              accept=".nii,.nii.gz,.nifti"
+              accept=".nii,.nii.gz,.nifti,application/gzip"
               className="hidden"
               disabled={loading}
               onChange={(e) => {
@@ -202,7 +207,7 @@ export default function ClientMaskingPage() {
             imageBuffer={imageBuffer}
             mask3D={mask3D}
             onMaskChange={handleMaskChange}
-            onSaveRequest={handleSaveRequest}
+            onCompleteRequest={handleCompleteRequest}
             onDownloadRequest={handleDownloadRequest}
           />
         </main>
