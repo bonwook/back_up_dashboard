@@ -393,17 +393,6 @@ export default function ClientAnalyticsPage() {
     })
   }
 
-  // 전체 사용자 선택/해제 핸들러 (1명 제한으로 인해 제거)
-  // const handleSelectAllUsers = (checked: boolean) => {
-  //   if (checked) {
-  //     const allUserIds = users.map(u => u.id)
-  //     setSelectedUserIds(new Set(allUserIds))
-  //   } else {
-  //     setSelectedUserIds(new Set())
-  //   }
-  // }
-
-
   return (
     <div className="relative mx-auto max-w-7xl p-6 w-full overflow-hidden">
       {isUploading && (
@@ -2120,7 +2109,6 @@ export default function ClientAnalyticsPage() {
             <AlertDialogCancel>취소</AlertDialogCancel>
             <AlertDialogAction
               onClick={async () => {
-                console.log("[확인 다이얼로그] 등록하기 버튼 클릭됨")
                 setIsAssignConfirmDialogOpen(false)
                 await handleAssignFiles()
                 window.location.reload()

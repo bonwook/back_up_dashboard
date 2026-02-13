@@ -227,8 +227,14 @@ export default function WorklistPage() {
       })
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({}))
-        throw new Error(error.error || "작업 삭제에 실패했습니다")
+        const body = await response.json().catch(() => ({}))
+        const message = body.error || "작업 삭제에 실패했습니다"
+        toast({
+          title: "삭제 실패",
+          description: message,
+          variant: "destructive",
+        })
+        return
       }
 
       toast({
@@ -238,11 +244,11 @@ export default function WorklistPage() {
 
       // 목록 새로고침
       await loadTasks()
-    } catch (error: any) {
-      console.error("Failed to delete task:", error)
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "작업 삭제 중 오류가 발생했습니다."
       toast({
         title: "삭제 실패",
-        description: error.message || "작업 삭제 중 오류가 발생했습니다.",
+        description: message,
         variant: "destructive",
       })
     }

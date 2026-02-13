@@ -36,7 +36,6 @@ export default function SignUpPage() {
     }
 
     try {
-      console.log("[v0] Submitting signup form")
       const response = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -49,10 +48,6 @@ export default function SignUpPage() {
         }),
       });
 
-
-      console.log("[v0] Response status:", response.status)
-      console.log("[v0] Response content-type:", response.headers.get("content-type"))
-
       const contentType = response.headers.get("content-type")
       if (!contentType || !contentType.includes("application/json")) {
         const text = await response.text()
@@ -61,7 +56,6 @@ export default function SignUpPage() {
       }
 
       const data = await response.json()
-      console.log("[v0] Response data:", data)
 
       if (!response.ok) {
         throw new Error(data.error || "Failed to sign up")

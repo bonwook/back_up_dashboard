@@ -25,10 +25,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log("Signup API called")
-
     const body = await request.json()
-    console.log("Request body:", { email: body.email, hasPassword: !!body.password })
 
     const { email, password, fullName, organization, role: bodyRole } = body
     // organization은 항상 대문자로 저장
@@ -49,7 +46,6 @@ export async function POST(request: NextRequest) {
     try {
       const pool = getPool()
       await pool.query("SELECT 1")
-      console.log("Database connection successful")
     } catch (dbError: unknown) {
       const errorMessage = dbError instanceof Error ? dbError.message : "Database connection failed"
       console.error("Database connection failed:", errorMessage)
@@ -68,7 +64,6 @@ export async function POST(request: NextRequest) {
       await ensureStaffSignupRequestsTable()
       const passwordHash = await hashPassword(password)
       await createStaffSignupRequest(email, passwordHash, fullName, organizationNormalized)
-      console.log("Staff signup request saved (pending)")
       return NextResponse.json(
         { success: true, pendingStaff: true },
         {
@@ -82,9 +77,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create user (client만 즉시 가입)
-    console.log("Creating user...")
     const user = await createUser(email, password, fullName, organizationNormalized, validRole)
-    console.log("User created:", user.id)
 
     // Generate JWT token
     const { generateToken } = await import("@/lib/db/auth")
@@ -100,7 +93,6 @@ export async function POST(request: NextRequest) {
       path: "/",
     })
 
-    console.log("Signup successful")
     return NextResponse.json({
       success: true,
       user: {

@@ -764,17 +764,6 @@ export default function ClientAnalyticsPage() {
     })
   }
 
-  // 전체 사용자 선택/해제 핸들러 (1명 제한으로 인해 제거)
-  // const handleSelectAllUsers = (checked: boolean) => {
-  //   if (checked) {
-  //     const allUserIds = users.map(u => u.id)
-  //     setSelectedUserIds(new Set(allUserIds))
-  //   } else {
-  //     setSelectedUserIds(new Set())
-  //   }
-  // }
-
-
   // 업무 등록 핸들러 (실제 등록 수행)
   const handleAssignFiles = async () => {
     if (selectedUserIds.size === 0) {
@@ -900,14 +889,7 @@ export default function ClientAnalyticsPage() {
       }
       
       const userIds = Array.from(selectedUserIds)
-      
-      console.log("[Worklist] 할당 요청 준비:", {
-        userIds,
-        fileKeysCount: fileKeys.length,
-        title: assignForm.title,
-        priority: assignForm.priority
-      })
-      
+
       // 1명만 할당 (기존 로직 유지하되 1명만 처리)
       const results = await Promise.all(
         userIds.slice(0, 1).map(async (userId) => {
