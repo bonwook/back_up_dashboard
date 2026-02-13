@@ -28,6 +28,14 @@ export interface SlicePanelProps {
   onMaskChange: (axis: SliceAxis, sliceIndex: number, mask: Uint8Array) => void
   /** 툴바 확대/축소 배율 (1 = 100%) */
   scaleMultiplier?: number
+  /** AP/FH/RL 해부 방향 레이블 (상/하/좌/우) */
+  axisLabels?: { top: string; bottom: string; left: string; right: string }
+  /** 십자선 위치 (픽셀, 없으면 미표시) */
+  crosshair?: { x: number; y: number }
+  /** 슬라이스 표시 문구 (예: "13 of 24") */
+  sliceLabel?: string
+  /** 4D 볼륨 시 phase 인덱스 */
+  phaseIndex?: number
   className?: string
 }
 
@@ -49,6 +57,10 @@ export function SlicePanel({
   onSliceIndexChange,
   onMaskChange,
   scaleMultiplier = 1,
+  axisLabels,
+  crosshair,
+  sliceLabel,
+  phaseIndex = 0,
   className,
 }: SlicePanelProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -78,6 +90,7 @@ export function SlicePanel({
     const { data } = extractSlice(header, imageBuffer, axis, sliceIndex, {
       min: minMax.min,
       max: minMax.max,
+      phaseIndex,
     })
     canvas.width = dims.width
     canvas.height = dims.height
@@ -101,11 +114,12 @@ export function SlicePanel({
       imgData.data[i + 3] = 255
     }
     ctx.putImageData(imgData, 0, 0)
+    const oCtx = overlay.getContext("2d")!
+    oCtx.clearRect(0, 0, dims.width, dims.height)
     const sliceMask = mask3D
       ? getSliceFrom3DMask(mask3D, header, axis, sliceIndex)
       : localMaskRef.current
     if (sliceMask && sliceMask.length === dims.width * dims.height) {
-      const oCtx = overlay.getContext("2d")!
       const oImg = oCtx.createImageData(dims.width, dims.height)
       for (let i = 0; i < sliceMask.length; i++) {
         const v = sliceMask[i]
@@ -115,6 +129,29 @@ export function SlicePanel({
         oImg.data[i * 4 + 3] = v * 0.5
       }
       oCtx.putImageData(oImg, 0, 0)
+    }
+    if (crosshair && crosshair.x >= 0 && crosshair.x <= dims.width && crosshair.y >= 0 && crosshair.y <= dims.height) {
+      oCtx.setLineDash([4, 4])
+      oCtx.strokeStyle = "rgba(59, 130, 246, 0.9)"
+      oCtx.lineWidth = 1
+      oCtx.beginPath()
+      oCtx.moveTo(crosshair.x, 0)
+      oCtx.lineTo(crosshair.x, dims.height)
+      oCtx.moveTo(0, crosshair.y)
+      oCtx.lineTo(dims.width, crosshair.y)
+      oCtx.stroke()
+      oCtx.setLineDash([])
+    }
+    if (axisLabels) {
+      oCtx.font = "12px sans-serif"
+      oCtx.fillStyle = "rgba(255,255,255,0.9)"
+      oCtx.textAlign = "center"
+      oCtx.fillText(axisLabels.top, dims.width / 2, 14)
+      oCtx.fillText(axisLabels.bottom, dims.width / 2, dims.height - 4)
+      oCtx.textAlign = "left"
+      oCtx.fillText(axisLabels.left, 6, dims.height / 2 + 4)
+      oCtx.textAlign = "right"
+      oCtx.fillText(axisLabels.right, dims.width - 6, dims.height / 2 + 4)
     }
   }, [
     header,
@@ -127,7 +164,7 @@ export function SlicePanel({
     minMax,
     brightness,
     contrast,
-  ])
+  ], crosshair, axisLabels, phaseIndex)
 
   useEffect(() => {
     drawSlice()
@@ -139,14 +176,15 @@ export function SlicePanel({
       const cont = containerRef.current
       if (!overlay || !cont) return null
       const rect = cont.getBoundingClientRect()
-      const sx = (clientX - rect.left - pan.x) / scale
-      const sy = (clientY - rect.top - pan.y) / scale
+      const effectiveScale = scale * scaleMultiplier
+      const sx = (clientX - rect.left - pan.x) / effectiveScale
+      const sy = (clientY - rect.top - pan.y) / effectiveScale
       const x = Math.floor(sx)
       const y = Math.floor(sy)
       if (x < 0 || x >= dims.width || y < 0 || y >= dims.height) return null
       return { x, y }
     },
-    [pan, scale, dims.width, dims.height]
+    [pan, scale, scaleMultiplier, dims.width, dims.height]
   )
 
   const applyBrush = useCallback(
@@ -267,50 +305,54 @@ export function SlicePanel({
   )
 
   return (
-    <div
-      ref={containerRef}
-      className={cn(
-        "relative flex flex-1 min-h-0 overflow-auto rounded border bg-black flex items-center justify-center",
-        focused && "ring-2 ring-primary",
-        className
-      )}
-      onWheel={handleWheel}
-      style={{ cursor: interactive ? (isPanning ? "grabbing" : "crosshair") : "default" }}
-      onClick={interactive ? onFocus : undefined}
-    >
+    <div className={cn("flex flex-1 flex-col min-h-0", className)}>
       <div
-        style={{
-          transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale * scaleMultiplier})`,
-          transformOrigin: "0 0",
-          position: "relative",
-          width: dims.width,
-          height: dims.height,
-        }}
+        ref={containerRef}
+        className={cn(
+          "relative flex flex-1 min-h-0 overflow-auto rounded border bg-black flex items-center justify-center",
+          focused && "ring-2 ring-primary"
+        )}
+        onWheel={handleWheel}
+        style={{ cursor: interactive ? (isPanning ? "grabbing" : "crosshair") : "default" }}
+        onClick={interactive ? onFocus : undefined}
       >
-        <canvas
-          ref={canvasRef}
-          width={dims.width}
-          height={dims.height}
-          className="block"
-          style={{ imageRendering: "pixelated" }}
-        />
-        <canvas
-          ref={overlayRef}
-          width={dims.width}
-          height={dims.height}
-          className="absolute left-0 top-0 block"
+        <div
           style={{
-            imageRendering: "pixelated",
-            cursor: interactive ? (isPanning ? "grabbing" : "crosshair") : "default",
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale * scaleMultiplier})`,
+            transformOrigin: "0 0",
+            position: "relative",
+            width: dims.width,
+            height: dims.height,
           }}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerLeave={() => handlePointerUp()}
-          onContextMenu={(e) => e.preventDefault()}
-          aria-hidden
-        />
+        >
+          <canvas
+            ref={canvasRef}
+            width={dims.width}
+            height={dims.height}
+            className="block"
+            style={{ imageRendering: "pixelated" }}
+          />
+          <canvas
+            ref={overlayRef}
+            width={dims.width}
+            height={dims.height}
+            className="absolute left-0 top-0 block"
+            style={{
+              imageRendering: "pixelated",
+              cursor: interactive ? (isPanning ? "grabbing" : "crosshair") : "default",
+            }}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={() => handlePointerUp()}
+            onContextMenu={(e) => e.preventDefault()}
+            aria-hidden
+          />
+        </div>
       </div>
+      {sliceLabel != null && (
+        <div className="text-xs text-muted-foreground px-1 py-0.5 text-center">{sliceLabel}</div>
+      )}
     </div>
   )
 }

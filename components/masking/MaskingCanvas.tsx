@@ -6,7 +6,7 @@ import { Slider } from "@/components/ui/slider"
 import { Label } from "@/components/ui/label"
 import { Paintbrush, Eraser, ZoomIn, ZoomOut } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { getSliceRange, getVolumeMinMax } from "./niftiLoader"
+import { getSliceLayout, getSliceRange, getVolumeMinMax } from "./niftiLoader"
 import type { NiftiHeaderLike, SliceAxis } from "./types"
 import { SlicePanel } from "./SlicePanel"
 
@@ -18,12 +18,18 @@ interface MaskingCanvasProps {
   mask3D: Uint8Array | null
   onMaskChange: (axis: SliceAxis, sliceIndex: number, mask: Uint8Array) => void
   onCompleteRequest: () => void
-  onDownloadRequest: () => void
+  onDownloadRequest: (phaseIndex?: number) => void
   className?: string
 }
 
 type PanelIndex = 0 | 1 | 2 | 3
 const AXES: SliceAxis[] = ["axial", "sagittal", "coronal"]
+
+const AXIS_LABELS: Record<SliceAxis, { top: string; bottom: string; left: string; right: string }> = {
+  axial: { top: "S", bottom: "I", left: "R", right: "L" },
+  sagittal: { top: "S", bottom: "I", left: "A", right: "P" },
+  coronal: { top: "A", bottom: "P", left: "R", right: "L" },
+}
 
 export function MaskingCanvas({
   header,
@@ -45,13 +51,17 @@ export function MaskingCanvas({
   const [brightness, setBrightness] = useState(0)
   const [contrast, setContrast] = useState(0)
   const [globalZoom, setGlobalZoom] = useState(1)
+  const [phaseIndex, setPhaseIndex] = useState(0)
   const [minMax, setMinMax] = useState<{ min: number; max: number }>({ min: 0, max: 255 })
+
+  const layout = header ? getSliceLayout(header) : null
+  const nPhase = layout?.nPhase ?? 1
 
   useEffect(() => {
     if (!header || !imageBuffer) return
-    const { min, max } = getVolumeMinMax(header, imageBuffer)
+    const { min, max } = getVolumeMinMax(header, imageBuffer, phaseIndex)
     setMinMax({ min, max })
-  }, [header, imageBuffer])
+  }, [header, imageBuffer, phaseIndex])
 
   const sliceRange = (axis: SliceAxis) => (header ? getSliceRange(header, axis) : { min: 0, max: 0 })
 
@@ -73,6 +83,10 @@ export function MaskingCanvas({
     setSagittalIndex((i) => Math.max(rSag.min, Math.min(rSag.max, i)))
     setCoronalIndex((i) => Math.max(rCor.min, Math.min(rCor.max, i)))
   }, [header])
+
+  useEffect(() => {
+    if (phaseIndex >= nPhase) setPhaseIndex(Math.max(0, nPhase - 1))
+  }, [nPhase, phaseIndex])
 
   const handleFocusPanel = useCallback(
     (panel: PanelIndex) => {
@@ -169,7 +183,7 @@ export function MaskingCanvas({
           <Button type="button" variant="outline" size="sm" onClick={onCompleteRequest}>
             완료
           </Button>
-          <Button type="button" variant="outline" size="sm" onClick={onDownloadRequest}>
+          <Button type="button" variant="outline" size="sm" onClick={() => onDownloadRequest(phaseIndex)}>
             다운로드
           </Button>
         </div>
@@ -191,9 +205,33 @@ export function MaskingCanvas({
           max={100}
           className="w-32"
         />
+        {nPhase > 1 && (
+          <>
+            <span className="text-xs text-muted-foreground">Phase</span>
+            <span className="text-xs w-16">
+              {phaseIndex + 1} / {nPhase}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setPhaseIndex((p) => Math.max(0, p - 1))}
+            >
+              −
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setPhaseIndex((p) => Math.min(nPhase - 1, p + 1))}
+            >
+              +
+            </Button>
+          </>
+        )}
       </div>
 
-      {/* ITK-SNAP 스타일 4분할 뷰 (2x2) */}
+      {/* ITK-SNAP 스타일 4분할 뷰 (2x2), AP/FH/RL 방향 레이블 + 십자선 */}
       <div className="grid grid-cols-2 grid-rows-2 gap-2 flex-1 min-h-0">
         <div className="flex flex-col min-h-0">
           <span className="text-xs text-muted-foreground px-1 py-0.5">Axial</span>
@@ -215,6 +253,10 @@ export function MaskingCanvas({
             onSliceIndexChange={(d) => handleSliceDelta(0, d)}
             onMaskChange={onMaskChange}
             scaleMultiplier={globalZoom}
+            axisLabels={AXIS_LABELS.axial}
+            crosshair={{ x: sagittalIndex, y: coronalIndex }}
+            sliceLabel={`${axialIndex + 1} of ${sliceRange("axial").max + 1}`}
+            phaseIndex={phaseIndex}
             className="flex-1"
           />
         </div>
@@ -238,6 +280,10 @@ export function MaskingCanvas({
             onSliceIndexChange={(d) => handleSliceDelta(1, d)}
             onMaskChange={onMaskChange}
             scaleMultiplier={globalZoom}
+            axisLabels={AXIS_LABELS.sagittal}
+            crosshair={{ x: coronalIndex, y: axialIndex }}
+            sliceLabel={`${sagittalIndex + 1} of ${sliceRange("sagittal").max + 1}`}
+            phaseIndex={phaseIndex}
             className="flex-1"
           />
         </div>
@@ -261,6 +307,10 @@ export function MaskingCanvas({
             onSliceIndexChange={(d) => handleSliceDelta(2, d)}
             onMaskChange={onMaskChange}
             scaleMultiplier={globalZoom}
+            axisLabels={AXIS_LABELS.coronal}
+            crosshair={{ x: sagittalIndex, y: axialIndex }}
+            sliceLabel={`${coronalIndex + 1} of ${sliceRange("coronal").max + 1}`}
+            phaseIndex={phaseIndex}
             className="flex-1"
           />
         </div>
@@ -286,6 +336,16 @@ export function MaskingCanvas({
             onSliceIndexChange={(d) => handleSliceDelta(3, d)}
             onMaskChange={onMaskChange}
             scaleMultiplier={globalZoom}
+            axisLabels={AXIS_LABELS[activeAxis]}
+            crosshair={
+              activeAxis === "axial"
+                ? { x: sagittalIndex, y: coronalIndex }
+                : activeAxis === "sagittal"
+                  ? { x: coronalIndex, y: axialIndex }
+                  : { x: sagittalIndex, y: axialIndex }
+            }
+            sliceLabel={`${getSliceIndex(activeAxis) + 1} of ${sliceRange(activeAxis).max + 1}`}
+            phaseIndex={phaseIndex}
             className="flex-1"
           />
         </div>

@@ -131,25 +131,29 @@ export default function ClientMaskingPage() {
     toast({ title: "완료", description: "파일 블록이 완료 처리되었습니다." })
   }, [selectedId, toast])
 
-  const handleDownloadRequest = useCallback(() => {
-    if (!rawData || !header || !imageBuffer || !mask3D) {
-      toast({ title: "다운로드 불가", description: "파일을 먼저 로드해 주세요.", variant: "destructive" })
-      return
-    }
-    const blob = buildNiftiBlobWithMask(rawData, header, imageBuffer, mask3D, {
-      compressOutput: downloadAsGzip,
-    })
-    const name = selectedFile?.name ?? "masked.nii"
-    const base = name.replace(/\.nii(\.gz)?$/i, "_masked")
-    const ext = downloadAsGzip ? ".nii.gz" : ".nii"
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = base + ext
-    a.click()
-    URL.revokeObjectURL(url)
-    toast({ title: "다운로드", description: "마스킹된 .nii 파일을 저장했습니다." })
-  }, [rawData, header, imageBuffer, mask3D, downloadAsGzip, selectedFile?.name, toast])
+  const handleDownloadRequest = useCallback(
+    (phaseIndex?: number) => {
+      if (!rawData || !header || !imageBuffer || !mask3D) {
+        toast({ title: "다운로드 불가", description: "파일을 먼저 로드해 주세요.", variant: "destructive" })
+        return
+      }
+      const blob = buildNiftiBlobWithMask(rawData, header, imageBuffer, mask3D, {
+        compressOutput: downloadAsGzip,
+        phaseIndex: phaseIndex ?? 0,
+      })
+      const name = selectedFile?.name ?? "masked.nii"
+      const base = name.replace(/\.nii(\.gz)?$/i, "_masked")
+      const ext = downloadAsGzip ? ".nii.gz" : ".nii"
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = base + ext
+      a.click()
+      URL.revokeObjectURL(url)
+      toast({ title: "다운로드", description: "마스킹된 .nii 파일을 저장했습니다." })
+    },
+    [rawData, header, imageBuffer, mask3D, downloadAsGzip, selectedFile?.name, toast]
+  )
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">

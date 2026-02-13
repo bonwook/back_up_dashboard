@@ -45,34 +45,38 @@ export async function parseNifti(
   return { header: headerRaw as NiftiHeaderLike, imageBuffer, data: buf, wasGzipped }
 }
 
-/** 헤더에서 슬라이스 크기·볼륨 크기 계산 */
+/** 헤더에서 슬라이스 크기·볼륨 크기 계산 (4D 시 phase 지원) */
 export function getSliceLayout(header: NiftiHeaderLike) {
   const dims = header.dims
   const nx = dims[1] ?? 1
   const ny = dims[2] ?? 1
   const nz = dims[3] ?? 1
+  const nPhase = Math.max(1, dims[4] ?? 1)
   const bytesPerVoxel = header.numBitsPerVoxel / 8
   const sliceSizeAxial = nx * ny * bytesPerVoxel
   const sliceSizeCoronal = nx * nz * bytesPerVoxel
   const sliceSizeSagittal = ny * nz * bytesPerVoxel
-  const totalVoxels = nx * ny * nz
+  const totalVoxels3D = nx * ny * nz
+  const totalVoxels = totalVoxels3D * nPhase
   const totalBytes = totalVoxels * bytesPerVoxel
   return {
     nx,
     ny,
     nz,
+    nPhase,
     bytesPerVoxel,
     sliceSizeAxial,
     sliceSizeCoronal,
     sliceSizeSagittal,
-    totalVoxels,
+    totalVoxels: totalVoxels3D,
+    totalVoxels4D: totalVoxels,
     totalBytes,
     datatypeCode: header.datatypeCode,
     littleEndian: header.littleEndian ?? true,
   }
 }
 
-/** 2D 슬라이스 픽셀 추출 (그레이스케일 → RGBA, min/max 정규화, scl_slope/inter 적용) */
+/** 2D 슬라이스 픽셀 추출 (그레이스케일 → RGBA, min/max 정규화, scl_slope/inter 적용, 4D 시 phase 반영) */
 function getSlicePixels(
   imageBuffer: ArrayBuffer,
   layout: ReturnType<typeof getSliceLayout>,
@@ -81,19 +85,27 @@ function getSlicePixels(
   minNorm: number,
   maxNorm: number,
   sclSlope?: number,
-  sclInter?: number
+  sclInter?: number,
+  phaseIndex?: number
 ): Uint8ClampedArray {
-  const { nx, ny, nz, bytesPerVoxel, datatypeCode, littleEndian } = layout
+  const { nx, ny, nz, nPhase, bytesPerVoxel, datatypeCode, littleEndian } = layout
   const dv = new DataView(imageBuffer)
-  /** NIfTI 표준: 첫 번째 차원이 가장 빠름 → 선형 인덱스 = i + j*nx + k*nx*ny (i,j,k = x,y,z) */
+  const phase = Math.max(0, Math.min((phaseIndex ?? 0), nPhase - 1))
+  const volumeOffset = phase * nx * ny * nz * bytesPerVoxel
+  /** NIfTI: 선형 인덱스 = i + j*nx + k*nx*ny + phase*nx*ny*nz */
   const getVoxel = (x: number, y: number, z: number): number => {
     const voxelIndex = x + y * nx + z * nx * ny
-    const idx = voxelIndex * bytesPerVoxel
+    const idx = volumeOffset + voxelIndex * bytesPerVoxel
     let raw = 0
     if (datatypeCode === 2) raw = dv.getUint8(idx)
     else if (datatypeCode === 4) raw = littleEndian ? dv.getInt16(idx, true) : dv.getInt16(idx, false)
     else if (datatypeCode === 8) raw = littleEndian ? dv.getInt32(idx, true) : dv.getInt32(idx, false)
     else if (datatypeCode === 16) raw = dv.getFloat32(idx, littleEndian)
+    else if (datatypeCode === 32) {
+      const re = dv.getFloat32(idx, littleEndian)
+      const im = dv.getFloat32(idx + 4, littleEndian)
+      raw = Math.sqrt(re * re + im * im)
+    } else if (datatypeCode === 64) raw = dv.getFloat64(idx, littleEndian)
     else if (datatypeCode === 512) raw = littleEndian ? dv.getUint16(idx, true) : dv.getUint16(idx, false)
     else if (datatypeCode === 768) raw = littleEndian ? dv.getUint32(idx, true) : dv.getUint32(idx, false)
     else raw = dv.getUint8(idx)
@@ -148,13 +160,16 @@ function scaleValue(
   return raw
 }
 
-/** 볼륨 전체의 표시 픽셀 범위(min/max). 윈도우 레벨용. cal_min/cal_max 우선, 없으면 데이터 스캔 */
+/** 볼륨 전체의 표시 픽셀 범위(min/max). 윈도우 레벨용. 4D 시 첫 번째 phase만 사용 */
 export function getVolumeMinMax(
   header: NiftiHeaderLike,
-  imageBuffer: ArrayBuffer
+  imageBuffer: ArrayBuffer,
+  phaseIndex?: number
 ): { min: number; max: number } {
   const layout = getSliceLayout(header)
   const { totalVoxels, bytesPerVoxel, datatypeCode, littleEndian } = layout
+  const phase = Math.max(0, Math.min(phaseIndex ?? 0, layout.nPhase - 1))
+  const byteOffset = phase * totalVoxels * bytesPerVoxel
   const sclSlope = header.scl_slope
   const sclInter = header.scl_inter
   const calMin = header.cal_min
@@ -178,12 +193,17 @@ export function getVolumeMinMax(
   let hi = -Infinity
   const step = Math.max(1, Math.floor(totalVoxels / 50000))
   for (let i = 0; i < totalVoxels; i += step) {
-    const idx = i * bytesPerVoxel
+    const idx = byteOffset + i * bytesPerVoxel
     let raw = 0
     if (datatypeCode === 2) raw = dv.getUint8(idx)
     else if (datatypeCode === 4) raw = dv.getInt16(idx, littleEndian)
     else if (datatypeCode === 8) raw = dv.getInt32(idx, littleEndian)
     else if (datatypeCode === 16) raw = dv.getFloat32(idx, littleEndian)
+    else if (datatypeCode === 32) {
+      const re = dv.getFloat32(idx, littleEndian)
+      const im = dv.getFloat32(idx + 4, littleEndian)
+      raw = Math.sqrt(re * re + im * im)
+    } else if (datatypeCode === 64) raw = dv.getFloat64(idx, littleEndian)
     else if (datatypeCode === 512) raw = dv.getUint16(idx, littleEndian)
     else if (datatypeCode === 768) raw = dv.getUint32(idx, littleEndian)
     else raw = dv.getUint8(idx)
@@ -200,38 +220,47 @@ export function getVolumeMinMax(
   return { min: lo, max: hi }
 }
 
-/** 2D 슬라이스 생성 (밝기/대비는 호출측에서 적용 권장) */
+/** 2D 슬라이스 생성 (밝기/대비는 호출측에서 적용 권장, 4D 시 phaseIndex 사용) */
 export function extractSlice(
   header: NiftiHeaderLike,
   imageBuffer: ArrayBuffer,
   axis: "axial" | "coronal" | "sagittal",
   sliceIndex: number,
-  options?: { min?: number; max?: number }
+  options?: { min?: number; max?: number; phaseIndex?: number }
 ): { width: number; height: number; data: Uint8ClampedArray } {
   const layout = getSliceLayout(header)
-  let { min, max } = options ?? {}
+  let { min, max, phaseIndex } = options ?? {}
   if (min == null || max == null) {
     const dims = header.dims
     const nx = dims[1] ?? 1,
       ny = dims[2] ?? 1,
       nz = dims[3] ?? 1
     const n = nx * ny * nz
+    const phase = Math.max(0, Math.min(phaseIndex ?? 0, layout.nPhase - 1))
+    const volumeOffset = phase * n * layout.bytesPerVoxel
     const dv = new DataView(imageBuffer)
     let lo = Infinity,
       hi = -Infinity
     const step = Math.max(1, Math.floor(n / 10000))
     for (let i = 0; i < n; i += step) {
-      const idx = i * layout.bytesPerVoxel
+      const idx = volumeOffset + i * layout.bytesPerVoxel
       let v = 0
       if (layout.datatypeCode === 2) v = dv.getUint8(idx)
       else if (layout.datatypeCode === 4) v = dv.getInt16(idx, layout.littleEndian)
       else if (layout.datatypeCode === 8) v = dv.getInt32(idx, layout.littleEndian)
       else if (layout.datatypeCode === 16) v = dv.getFloat32(idx, layout.littleEndian)
+      else if (layout.datatypeCode === 32) {
+        const re = dv.getFloat32(idx, layout.littleEndian)
+        const im = dv.getFloat32(idx + 4, layout.littleEndian)
+        v = Math.sqrt(re * re + im * im)
+      } else if (layout.datatypeCode === 64) v = dv.getFloat64(idx, layout.littleEndian)
       else if (layout.datatypeCode === 512) v = dv.getUint16(idx, layout.littleEndian)
       else if (layout.datatypeCode === 768) v = dv.getUint32(idx, layout.littleEndian)
       else v = dv.getUint8(idx)
-      if (v < lo) lo = v
-      if (v > hi) hi = v
+      if (Number.isFinite(v)) {
+        if (v < lo) lo = v
+        if (v > hi) hi = v
+      }
     }
     min = min ?? lo
     max = max ?? hi
@@ -244,7 +273,8 @@ export function extractSlice(
     min,
     max,
     header.scl_slope,
-    header.scl_inter
+    header.scl_inter,
+    phaseIndex
   )
   const width = axis === "axial" ? layout.nx : axis === "coronal" ? layout.nx : layout.ny
   const height = axis === "axial" ? layout.ny : axis === "coronal" ? layout.nz : layout.nz
@@ -301,6 +331,8 @@ export function setSliceIn3DMask(
 export interface BuildNiftiOptions {
   /** true면 .nii.gz로 압축하여 반환 (기본값: true, 원본이 .gz였을 때 권장) */
   compressOutput?: boolean
+  /** 4D 시 적용할 phase 인덱스 (기본 0) */
+  phaseIndex?: number
 }
 
 /** 원본 NIfTI 데이터 + 마스크 반영 이미지로 .nii/.nii.gz 다운로드용 Blob 생성 (헤더 유지) */
@@ -311,28 +343,36 @@ export function buildNiftiBlobWithMask(
   mask3D: Uint8Array,
   options?: BuildNiftiOptions
 ): Blob {
-  const { compressOutput = true } = options ?? {}
+  const { compressOutput = true, phaseIndex = 0 } = options ?? {}
   const layout = getSliceLayout(header)
+  const { bytesPerVoxel: bpv, datatypeCode, littleEndian } = layout
   const offset = header.vox_offset
   const out = new ArrayBuffer(offset + imageBuffer.byteLength)
   const outView = new Uint8Array(out)
   outView.set(new Uint8Array(rawData, 0, offset), 0)
   const imgView = new DataView(imageBuffer)
   const outViewData = new DataView(out, offset, imageBuffer.byteLength)
-  const bpv = layout.bytesPerVoxel
-  const littleEndian = layout.littleEndian
   const n = layout.totalVoxels
+  const volOff = Math.max(0, Math.min(phaseIndex, layout.nPhase - 1)) * n * bpv
   for (let i = 0; i < n; i++) {
-    const byteOff = i * bpv
+    const byteOff = volOff + i * bpv
     if (mask3D[i] > 0) {
       if (bpv === 1) outViewData.setUint8(byteOff, 255)
       else if (bpv === 2) outViewData.setInt16(byteOff, 255, littleEndian)
       else if (bpv === 4) outViewData.setInt32(byteOff, 255, littleEndian)
+      else if (datatypeCode === 32) {
+        outViewData.setFloat32(byteOff, 255, littleEndian)
+        outViewData.setFloat32(byteOff + 4, 0, littleEndian)
+      } else if (datatypeCode === 64) outViewData.setFloat64(byteOff, 255, littleEndian)
       else outViewData.setUint8(byteOff, 255)
     } else {
       if (bpv === 1) outViewData.setUint8(byteOff, imgView.getUint8(byteOff))
       else if (bpv === 2) outViewData.setInt16(byteOff, imgView.getInt16(byteOff, littleEndian), littleEndian)
       else if (bpv === 4) outViewData.setInt32(byteOff, imgView.getInt32(byteOff, littleEndian), littleEndian)
+      else if (datatypeCode === 32) {
+        outViewData.setFloat32(byteOff, imgView.getFloat32(byteOff, littleEndian), littleEndian)
+        outViewData.setFloat32(byteOff + 4, imgView.getFloat32(byteOff + 4, littleEndian), littleEndian)
+      } else if (datatypeCode === 64) outViewData.setFloat64(byteOff, imgView.getFloat64(byteOff, littleEndian), littleEndian)
       else for (let b = 0; b < bpv; b++) outViewData.setUint8(byteOff + b, imgView.getUint8(byteOff + b))
     }
   }
