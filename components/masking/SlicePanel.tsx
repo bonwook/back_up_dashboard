@@ -164,7 +164,10 @@ export function SlicePanel({
     minMax,
     brightness,
     contrast,
-  ], crosshair, axisLabels, phaseIndex)
+    crosshair,
+    axisLabels,
+    phaseIndex,
+  ])
 
   useEffect(() => {
     drawSlice()
