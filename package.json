@@ -8,7 +8,8 @@
     "lint": "eslint .",
     "tsc": "tsc --noEmit",
     "start": "next start",
-    "prepare": "husky"
+    "prepare": "husky",
+    "test:s3-updates": "node scripts/test-s3-updates-logic.mjs"
   },
   "dependencies": {
     "7zip-bin": "^5.2.0",

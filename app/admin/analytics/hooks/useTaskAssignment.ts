@@ -23,6 +23,7 @@ interface UseTaskAssignmentProps {
   setSubtasks: (subtasks: any[]) => void
   setSelectedAssignees: (assignees: Set<string>) => void
   setSelectedFiles: (files: Set<string>) => void
+  s3UpdateId?: string | null
 }
 
 export function useTaskAssignment(props: UseTaskAssignmentProps) {
@@ -35,6 +36,7 @@ export function useTaskAssignment(props: UseTaskAssignmentProps) {
     setSubtasks,
     setSelectedAssignees,
     setSelectedFiles,
+    s3UpdateId,
   } = props
 
   const [isAssigning, setIsAssigning] = useState(false)
@@ -91,6 +93,7 @@ export function useTaskAssignment(props: UseTaskAssignmentProps) {
         requestBody.content = mainContentHtml
         requestBody.fileKeys = Array.from(selectedFiles)
         requestBody.assignedTo = assignForm.assigned_to
+        if (s3UpdateId) requestBody.s3_update_id = s3UpdateId
       }
       
       const response = await fetch("/api/storage/assign", {
@@ -155,7 +158,7 @@ export function useTaskAssignment(props: UseTaskAssignmentProps) {
     } finally {
       setIsAssigning(false)
     }
-  }, [assignForm, subtasks, selectedFiles, toast, setAssignForm, setSubtasks, setSelectedAssignees, setSelectedFiles])
+  }, [assignForm, subtasks, selectedFiles, toast, setAssignForm, setSubtasks, setSelectedAssignees, setSelectedFiles, s3UpdateId])
 
   return {
     isAssigning,

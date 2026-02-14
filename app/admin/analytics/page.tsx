@@ -37,6 +37,7 @@ import { FilePreviewSection } from "./components/FilePreviewSection"
 export default function ClientAnalyticsPage() {
   const searchParams = useSearchParams()
   const fromWorklist = searchParams.get("from") === "worklist"
+  const s3UpdateId = searchParams.get("s3_update_id")
 
   const [allFiles, setAllFiles] = useState<S3File[]>([]) // 전체 파일 목록
   const [files, setFiles] = useState<S3File[]>([]) // 현재 표시할 파일 목록
@@ -174,6 +175,7 @@ export default function ClientAnalyticsPage() {
     selectedFiles,
     setSelectedFiles,
     setSelectedAssignees,
+    s3UpdateId: s3UpdateId || undefined,
   })
   
   // File upload hook
@@ -262,6 +264,25 @@ export default function ClientAnalyticsPage() {
     }
     loadUser()
   }, [])
+
+  // S3 업데이트에서 담당자 지정으로 들어온 경우: 제목·파일 키 미리 채우기
+  useEffect(() => {
+    if (!s3UpdateId) return
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/s3-updates/${s3UpdateId}`, { credentials: "include" })
+        if (!res.ok) return
+        const data = await res.json()
+        const row = data.s3Update as { file_name?: string | null; s3_key: string }
+        const title = row.file_name || row.s3_key?.split("/").pop() || row.s3_key || "S3 업로드 작업"
+        setAssignForm((prev: typeof assignForm) => ({ ...prev, title }))
+        setSelectedFiles(new Set([row.s3_key]))
+      } catch {
+        // ignore
+      }
+    }
+    load()
+  }, [s3UpdateId])
 
   useEffect(() => {
     if (user) {

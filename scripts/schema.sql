@@ -224,3 +224,19 @@ CREATE TABLE IF NOT EXISTS task_status_history (
   INDEX idx_changed_at (changed_at),
   INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================
+-- 10. S3 UPDATES TABLE (S3 업로드 알림 → 작업 연동)
+-- ============================================
+CREATE TABLE IF NOT EXISTS s3_updates (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  file_name VARCHAR(255) NOT NULL,
+  bucket_name VARCHAR(100),
+  file_size BIGINT,
+  upload_time DATETIME,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  task_id CHAR(36) DEFAULT NULL COMMENT '담당자 지정 후 연결된 task_assignments.id',
+  FOREIGN KEY (task_id) REFERENCES task_assignments(id) ON DELETE SET NULL,
+  INDEX idx_task_id (task_id),
+  INDEX idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

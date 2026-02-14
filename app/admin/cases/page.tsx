@@ -37,9 +37,22 @@ interface Task {
   has_any_attachment?: boolean
 }
 
+interface S3UpdateRow {
+  id: number
+  file_name: string
+  bucket_name?: string | null
+  file_size?: number | null
+  upload_time?: string | null
+  created_at: string
+  task_id: string | null
+  s3_key: string
+}
+
 export default function WorklistPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [filteredTasks, setFilteredTasks] = useState<Task[]>([])
+  const [s3Updates, setS3Updates] = useState<S3UpdateRow[]>([])
+  const [filteredS3Updates, setFilteredS3Updates] = useState<S3UpdateRow[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
@@ -71,12 +84,19 @@ export default function WorklistPage() {
   const loadTasks = async () => {
     setIsLoading(true)
     try {
-      const response = await fetch("/api/tasks/all", {
-        credentials: "include",
-      })
-      if (!response.ok) throw new Error("Failed to load tasks")
-      const data = await response.json()
-      setTasks(data.tasks || [])
+      const [tasksRes, s3Res] = await Promise.all([
+        fetch("/api/tasks/all", { credentials: "include" }),
+        fetch("/api/s3-updates", { credentials: "include" }),
+      ])
+      if (!tasksRes.ok) throw new Error("Failed to load tasks")
+      const tasksData = await tasksRes.json()
+      setTasks(tasksData.tasks || [])
+      if (s3Res.ok) {
+        const s3Data = await s3Res.json()
+        setS3Updates(s3Data.s3Updates || [])
+      } else {
+        setS3Updates([])
+      }
     } catch (error) {
       console.error("Failed to load tasks:", error)
     } finally {
@@ -137,7 +157,22 @@ export default function WorklistPage() {
     }
 
     setFilteredTasks(filtered)
-  }, [tasks, searchQuery, statusFilter, priorityFilter, activeTab, assignmentFilter, me?.id])
+
+    // s3_updates 미할당 목록 필터 (진행 탭, assignmentFilter 전체일 때만 검색 적용)
+    let s3Filtered = [...s3Updates]
+    if (activeTab === "worklist" && assignmentFilter === "all" && searchQuery) {
+      const q = searchQuery.toLowerCase()
+      s3Filtered = s3Updates.filter(
+        (row) =>
+          (row.file_name || "").toLowerCase().includes(q) ||
+          (row.s3_key || "").toLowerCase().includes(q) ||
+          (row.bucket_name || "").toLowerCase().includes(q)
+      )
+    } else if (activeTab !== "worklist" || assignmentFilter !== "all") {
+      s3Filtered = []
+    }
+    setFilteredS3Updates(s3Filtered)
+  }, [tasks, s3Updates, searchQuery, statusFilter, priorityFilter, activeTab, assignmentFilter, me?.id])
 
   useEffect(() => {
     loadTasks()
@@ -423,7 +458,12 @@ export default function WorklistPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle>진행 중인 작업</CardTitle>
-                  <CardDescription>총 {filteredTasks.length}개의 작업이 있습니다</CardDescription>
+                  <CardDescription>
+                    총 {filteredTasks.length + filteredS3Updates.length}개의 작업이 있습니다
+                    {filteredS3Updates.length > 0 && (
+                      <span className="text-muted-foreground"> (미할당 S3: {filteredS3Updates.length}건)</span>
+                    )}
+                  </CardDescription>
                 </div>
                 <Button onClick={loadTasks} variant="outline" size="icon" disabled={isLoading} aria-label="새로고침" title="새로고침">
                   <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
@@ -435,7 +475,7 @@ export default function WorklistPage() {
                 <div className="flex items-center justify-center py-12">
                   <div className="text-muted-foreground">로딩 중...</div>
                 </div>
-              ) : filteredTasks.length === 0 ? (
+              ) : filteredTasks.length === 0 && filteredS3Updates.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <Activity className="mb-4 h-12 w-12 text-muted-foreground/50" />
                   <p className="text-muted-foreground">진행 중인 작업이 없습니다</p>
@@ -458,6 +498,38 @@ export default function WorklistPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
+                      {filteredS3Updates.map((row) => (
+                        <TableRow
+                          key={`s3-${row.id}`}
+                          className="cursor-pointer hover:bg-accent/50 bg-amber-500/5 border-l-4 border-l-amber-500/50"
+                          onClick={() => router.push(`/admin/cases/s3-update/${row.id}`)}
+                        >
+                          <TableCell className="font-medium">
+                            {row.file_name}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="font-normal text-amber-600">
+                              S3 미할당
+                            </Badge>
+                          </TableCell>
+                          <TableCell>-</TableCell>
+                          <TableCell>미지정</TableCell>
+                          <TableCell>
+                            <div className="inline-flex items-center px-2 text-muted-foreground" aria-label="첨부 있음">
+                              <Paperclip className="h-4 w-4" />
+                            </div>
+                          </TableCell>
+                          <TableCell>-</TableCell>
+                          <TableCell>
+                            <Badge className="bg-amber-500/10 text-amber-600">미할당</Badge>
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {formatDate(row.upload_time || row.created_at)}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">-</TableCell>
+                          <TableCell />
+                        </TableRow>
+                      ))}
                       {filteredTasks.map((task) => {
                         const expired = isTaskExpired(task)
                         return (

@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { fileKeys, assignedTo, title, content, priority, due_date, assignments, subtasks, mainContent, noMainTask, assignmentType } = body
+    const { fileKeys, assignedTo, title, content, priority, due_date, assignments, subtasks, mainContent, noMainTask, assignmentType, s3_update_id } = body
 
     if (!title || !title.trim()) {
       return NextResponse.json({ error: "업무 제목이 필요합니다" }, { status: 400 })
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
       // 담당자가 없으면 작성자 본인에게 할당 (선택사항)
       const finalAssignedTo = assignedTo || decoded.id
 
-      return await handleSingleAssignment(decoded.id, finalAssignedTo, title, content, priority, due_date, fileKeys)
+      return await handleSingleAssignment(decoded.id, finalAssignedTo, title, content, priority, due_date, fileKeys, "single", s3_update_id)
     }
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Internal server error"
@@ -84,7 +84,8 @@ async function handleSingleAssignment(
   priority: string,
   due_date: any,
   fileKeys: string[],
-  assignmentType: string = 'single'
+  assignmentType: string = 'single',
+  s3UpdateId?: string | null
 ) {
   // 담당자 존재 확인
   const [assignedUser] = await query(
@@ -113,6 +114,17 @@ async function handleSingleAssignment(
     ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, NOW(), NOW())`,
     insertParams
   )
+
+  if (s3UpdateId && typeof s3UpdateId === "string") {
+    try {
+      await query(
+        `UPDATE s3_updates SET task_id = ? WHERE id = ?`,
+        [taskId, s3UpdateId]
+      )
+    } catch {
+      // task_id 컬럼이 없으면 무시 (기존 s3_updates 스키마 호환)
+    }
+  }
 
   const results = fileKeysArray.map((fileKey: string) => ({ fileKey, success: true }))
   const message = fileKeysArray.length > 0

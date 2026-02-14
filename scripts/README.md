@@ -66,6 +66,13 @@ SHOW COLUMNS FROM task_subtasks;
 7. **task_assignments** - 메인 작업
 8. **task_subtasks** - 서브 작업 (다중 할당)
 9. **task_status_history** - 상태 변경 이력
+10. **s3_updates** - S3 업로드 알림 (미할당 건을 작업으로 연동)
+
+### s3_updates 기존 테이블에 task_id 추가
+이미 `s3_updates` 테이블을 다른 스키마로 만든 경우, 담당자 지정 연동을 위해 task_id 컬럼을 추가하세요:
+```bash
+mysql -u root -p flonics_dashboard < scripts/migrations/add_s3_updates_task_id.sql
+```
 
 ## 주의사항
 
