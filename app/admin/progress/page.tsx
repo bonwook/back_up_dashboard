@@ -27,6 +27,7 @@ import TaskBlock from "./components/TaskBoard/TaskBlock"
 import { TaskCommentSection, TaskDetailDialog, normalizeFileKeys } from "@/components/task"
 import { useWorkEditor } from "./hooks/useWorkEditor"
 import { useCommentEditor } from "./hooks/useCommentEditor"
+import { safeStorage } from "@/lib/utils/safeStorage"
 
 export default function AdminProgressPage() {
   const searchParams = useSearchParams()
@@ -153,13 +154,9 @@ export default function AdminProgressPage() {
     const commentEditorEl = document.getElementById('work-comment-content')
     if (commentEditorEl) commentEditorEl.innerHTML = ""
 
-    // 임시저장 데이터가 있다면 제거(선택)
+    // 임시저장 데이터가 있다면 제거(선택, 저장소 접근 불가 시 무시)
     if (taskId) {
-      try {
-        localStorage.removeItem(`work-comment-temp-${taskId}`)
-      } catch {
-        // ignore
-      }
+      safeStorage.removeItem(`work-comment-temp-${taskId}`)
     }
   }, [])
 
@@ -2246,7 +2243,7 @@ export default function AdminProgressPage() {
                         }
 
                         // 임시저장 데이터 삭제
-                        localStorage.removeItem(`work-comment-temp-${workTaskId}`)
+                        safeStorage.removeItem(`work-comment-temp-${workTaskId}`)
                         
                         toast({
                           title: "성공",

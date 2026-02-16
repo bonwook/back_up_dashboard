@@ -4,6 +4,21 @@ import { query } from "@/lib/db/mysql"
 import { randomUUID } from "crypto"
 import { writeAuditLog } from "@/lib/db/audit"
 import { toS3Key } from "@/lib/utils/s3Updates"
+import { normalizeFileKeyArray } from "@/lib/utils/fileKeyHelpers"
+
+/** 파일 키 배열에 대해 user_files의 uploaded_at을 한 번의 IN 쿼리로 조회 */
+async function getFileKeysWithDates(
+  keys: string[]
+): Promise<Array<{ key: string; uploaded_at: string | null }>> {
+  if (keys.length === 0) return []
+  const placeholders = keys.map(() => "?").join(",")
+  const rows = await query<{ s3_key: string; uploaded_at: string | null }>(
+    `SELECT s3_key, uploaded_at FROM user_files WHERE s3_key IN (${placeholders})`,
+    keys
+  )
+  const map = new Map(rows.map((r) => [r.s3_key, r.uploaded_at]))
+  return keys.map((key) => ({ key, uploaded_at: map.get(key) ?? null }))
+}
 
 // GET /api/tasks/[id] - Task 또는 Subtask 상세 정보 조회
 export async function GET(
@@ -68,70 +83,33 @@ export async function GET(
         return NextResponse.json({ error: "권한이 없습니다" }, { status: 403 })
       }
 
-      // Parse JSON file_keys, comment_file_keys — 항상 string[]로 정규화 (DB에 객체 배열이 저장된 경우 대비)
+      // s3Update는 한 번만 조회 (정상/에러 응답 공통)
+      let s3Update: Record<string, unknown> | null = null
       try {
-        const rawFileKeys = typeof task.file_keys === 'string'
-          ? JSON.parse(task.file_keys)
-          : task.file_keys || []
-        const rawCommentFileKeys = typeof task.comment_file_keys === 'string'
-          ? JSON.parse(task.comment_file_keys)
-          : task.comment_file_keys || []
-        const fileKeys = (Array.isArray(rawFileKeys) ? rawFileKeys : []).map((item: unknown) =>
-          typeof item === 'string' ? item : (item != null && typeof item === 'object' && 'key' in item && typeof (item as { key: unknown }).key === 'string' ? (item as { key: string }).key : null)
-        ).filter((k): k is string => typeof k === 'string' && k.length > 0)
-        const commentFileKeys = (Array.isArray(rawCommentFileKeys) ? rawCommentFileKeys : []).map((item: unknown) =>
-          typeof item === 'string' ? item : (item != null && typeof item === 'object' && 'key' in item && typeof (item as { key: unknown }).key === 'string' ? (item as { key: string }).key : null)
-        ).filter((k): k is string => typeof k === 'string' && k.length > 0)
-
-        // 파일 업로드 날짜 정보 가져오기
-        const fileKeysWithDates = await Promise.all(
-          fileKeys.map(async (key: string) => {
-            try {
-              const fileInfo = await query(
-                `SELECT uploaded_at FROM user_files WHERE s3_key = ? LIMIT 1`,
-                [key]
-              )
-              return {
-                key,
-                uploaded_at: fileInfo && fileInfo.length > 0 ? fileInfo[0].uploaded_at : null
-              }
-            } catch {
-              return { key, uploaded_at: null }
-            }
-          })
+        const s3Rows = await query(
+          `SELECT id, file_name, bucket_name, file_size, upload_time, created_at, task_id FROM s3_updates WHERE task_id = ? LIMIT 1`,
+          [taskId]
         )
-        
-        const commentFileKeysWithDates = await Promise.all(
-          commentFileKeys.map(async (key: string) => {
-            try {
-              const fileInfo = await query(
-                `SELECT uploaded_at FROM user_files WHERE s3_key = ? LIMIT 1`,
-                [key]
-              )
-              return {
-                key,
-                uploaded_at: fileInfo && fileInfo.length > 0 ? fileInfo[0].uploaded_at : null
-              }
-            } catch {
-              return { key, uploaded_at: null }
-            }
-          })
-        )
-        
-        let s3Update: Record<string, unknown> | null = null
-        try {
-          const s3Rows = await query(
-            `SELECT id, file_name, bucket_name, file_size, upload_time, created_at, task_id FROM s3_updates WHERE task_id = ? LIMIT 1`,
-            [taskId]
-          )
-          if (s3Rows && s3Rows.length > 0) {
-            const r = s3Rows[0] as { file_name: string; bucket_name?: string | null }
-            s3Update = { ...s3Rows[0], s3_key: toS3Key(r) }
-          }
-        } catch {
-          // s3_updates 없거나 컬럼 없으면 무시
+        if (s3Rows && s3Rows.length > 0) {
+          const r = s3Rows[0] as { file_name: string; bucket_name?: string | null }
+          s3Update = { ...s3Rows[0], s3_key: toS3Key(r) }
         }
-        
+      } catch {
+        // s3_updates 없거나 컬럼 없으면 무시
+      }
+
+      // file_keys, comment_file_keys 정규화 및 업로드 날짜 한 번에 조회
+      try {
+        const rawFileKeys = typeof task.file_keys === "string" ? JSON.parse(task.file_keys) : task.file_keys ?? []
+        const rawCommentFileKeys = typeof task.comment_file_keys === "string" ? JSON.parse(task.comment_file_keys) : task.comment_file_keys ?? []
+        const fileKeys = normalizeFileKeyArray(rawFileKeys)
+        const commentFileKeys = normalizeFileKeyArray(rawCommentFileKeys)
+
+        const [fileKeysWithDates, commentFileKeysWithDates] = await Promise.all([
+          getFileKeysWithDates(fileKeys),
+          getFileKeysWithDates(commentFileKeys),
+        ])
+
         return NextResponse.json({
           task: {
             ...task,
@@ -142,19 +120,6 @@ export async function GET(
           ...(s3Update ? { s3Update } : {}),
         })
       } catch {
-        let s3Update: Record<string, unknown> | null = null
-        try {
-          const s3Rows = await query(
-            `SELECT id, file_name, bucket_name, file_size, upload_time, created_at, task_id FROM s3_updates WHERE task_id = ? LIMIT 1`,
-            [taskId]
-          )
-          if (s3Rows && s3Rows.length > 0) {
-            const r = s3Rows[0] as { file_name: string; bucket_name?: string | null }
-            s3Update = { ...s3Rows[0], s3_key: toS3Key(r) }
-          }
-        } catch {
-          // ignore
-        }
         return NextResponse.json({
           task: {
             ...task,
@@ -198,56 +163,18 @@ export async function GET(
         return NextResponse.json({ error: "권한이 없습니다" }, { status: 403 })
       }
 
-      // Parse JSON file_keys, comment_file_keys — 항상 string[]로 정규화
+      // file_keys, comment_file_keys 정규화 및 업로드 날짜 한 번에 조회
       try {
-        const rawFileKeys = typeof subtask.file_keys === 'string'
-          ? JSON.parse(subtask.file_keys)
-          : subtask.file_keys || []
-        const rawCommentFileKeys = typeof subtask.comment_file_keys === 'string'
-          ? JSON.parse(subtask.comment_file_keys)
-          : subtask.comment_file_keys || []
-        const fileKeys = (Array.isArray(rawFileKeys) ? rawFileKeys : []).map((item: unknown) =>
-          typeof item === 'string' ? item : (item != null && typeof item === 'object' && 'key' in item && typeof (item as { key: unknown }).key === 'string' ? (item as { key: string }).key : null)
-        ).filter((k): k is string => typeof k === 'string' && k.length > 0)
-        const commentFileKeys = (Array.isArray(rawCommentFileKeys) ? rawCommentFileKeys : []).map((item: unknown) =>
-          typeof item === 'string' ? item : (item != null && typeof item === 'object' && 'key' in item && typeof (item as { key: unknown }).key === 'string' ? (item as { key: string }).key : null)
-        ).filter((k): k is string => typeof k === 'string' && k.length > 0)
+        const rawFileKeys = typeof subtask.file_keys === "string" ? JSON.parse(subtask.file_keys) : subtask.file_keys ?? []
+        const rawCommentFileKeys = typeof subtask.comment_file_keys === "string" ? JSON.parse(subtask.comment_file_keys) : subtask.comment_file_keys ?? []
+        const fileKeys = normalizeFileKeyArray(rawFileKeys)
+        const commentFileKeys = normalizeFileKeyArray(rawCommentFileKeys)
 
-        // 파일 업로드 날짜 정보 가져오기
-        const fileKeysWithDates = await Promise.all(
-          fileKeys.map(async (key: string) => {
-            try {
-              const fileInfo = await query(
-                `SELECT uploaded_at FROM user_files WHERE s3_key = ? LIMIT 1`,
-                [key]
-              )
-              return {
-                key,
-                uploaded_at: fileInfo && fileInfo.length > 0 ? fileInfo[0].uploaded_at : null
-              }
-            } catch {
-              return { key, uploaded_at: null }
-            }
-          })
-        )
-        
-        const commentFileKeysWithDates = await Promise.all(
-          commentFileKeys.map(async (key: string) => {
-            try {
-              const fileInfo = await query(
-                `SELECT uploaded_at FROM user_files WHERE s3_key = ? LIMIT 1`,
-                [key]
-              )
-              return {
-                key,
-                uploaded_at: fileInfo && fileInfo.length > 0 ? fileInfo[0].uploaded_at : null
-              }
-            } catch {
-              return { key, uploaded_at: null }
-            }
-          })
-        )
-        
+        const [fileKeysWithDates, commentFileKeysWithDates] = await Promise.all([
+          getFileKeysWithDates(fileKeys),
+          getFileKeysWithDates(commentFileKeys),
+        ])
+
         return NextResponse.json({
           task: {
             id: subtask.id,

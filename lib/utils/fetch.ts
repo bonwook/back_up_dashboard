@@ -1,35 +1,22 @@
 // Fetch wrapper with automatic logout on connection errors or authentication failures
 
+import { safeStorage } from "./safeStorage"
+
 /**
  * Automatically logs out user on network errors or authentication failures
  */
 async function handleAuthError() {
   try {
-    // Clear localStorage (Excel viewer data, etc.)
+    // Clear localStorage (Excel viewer data, etc.) - safeStorage 사용으로 접근 불가 환경에서 예외 방지
     if (typeof window !== "undefined") {
-      try {
-        // Excel viewer 관련 데이터 정리
-        localStorage.removeItem('excelViewer_data')
-        localStorage.removeItem('excelViewer_headers')
-        localStorage.removeItem('excelViewer_fileName')
-        localStorage.removeItem('excelViewer_filters')
-        localStorage.removeItem('excelViewer_sorts')
-        localStorage.removeItem('excelViewer_highlightedCells')
-        localStorage.removeItem('excelViewer_currentPage')
-        
-        // loginTime 정리 (모든 사용자)
-        const keysToRemove: string[] = []
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i)
-          if (key && key.startsWith('loginTime_')) {
-            keysToRemove.push(key)
-          }
-        }
-        keysToRemove.forEach(key => localStorage.removeItem(key))
-      } catch (error) {
-        // localStorage 정리 실패는 무시
-        console.error('Failed to clear localStorage:', error)
-      }
+      safeStorage.removeItem('excelViewer_data')
+      safeStorage.removeItem('excelViewer_headers')
+      safeStorage.removeItem('excelViewer_fileName')
+      safeStorage.removeItem('excelViewer_filters')
+      safeStorage.removeItem('excelViewer_sorts')
+      safeStorage.removeItem('excelViewer_highlightedCells')
+      safeStorage.removeItem('excelViewer_currentPage')
+      safeStorage.keysWithPrefix('loginTime_').forEach(key => safeStorage.removeItem(key))
     }
     
     // Call signout API to clear server-side session

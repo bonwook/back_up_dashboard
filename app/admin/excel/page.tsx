@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/pagination"
 import type { ExcelData, ExcelDataWithIndex, ParseResponse } from "@/lib/types"
 import { authenticatedFetch } from "@/lib/utils/fetch"
+import { safeStorage } from "@/lib/utils/safeStorage"
 
 type SortDirection = "asc" | "desc"
 
@@ -65,19 +66,15 @@ export default function ExcelPage() {
   // 현재 사용자 ID
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
-  // localStorage 정리 함수
+  // localStorage 정리 함수 (저장소 접근 불가 환경에서도 예외 없음)
   const clearLocalStorage = () => {
-    try {
-      localStorage.removeItem('excelViewer_data')
-      localStorage.removeItem('excelViewer_headers')
-      localStorage.removeItem('excelViewer_fileName')
-      localStorage.removeItem('excelViewer_filters')
-      localStorage.removeItem('excelViewer_sorts')
-      localStorage.removeItem('excelViewer_highlightedCells')
-      localStorage.removeItem('excelViewer_currentPage')
-    } catch (error) {
-      console.error('Failed to clear localStorage:', error)
-    }
+    safeStorage.removeItem('excelViewer_data')
+    safeStorage.removeItem('excelViewer_headers')
+    safeStorage.removeItem('excelViewer_fileName')
+    safeStorage.removeItem('excelViewer_filters')
+    safeStorage.removeItem('excelViewer_sorts')
+    safeStorage.removeItem('excelViewer_highlightedCells')
+    safeStorage.removeItem('excelViewer_currentPage')
   }
 
   // 모든 데이터 초기화 함수 (먼저 정의)
@@ -127,16 +124,16 @@ export default function ExcelPage() {
     loadUser()
   }, [resetAllData])
 
-  // localStorage에서 데이터 복원
+  // localStorage에서 데이터 복원 (저장소 접근 불가 시 무시)
   useEffect(() => {
     try {
-      const savedData = localStorage.getItem('excelViewer_data')
-      const savedHeaders = localStorage.getItem('excelViewer_headers')
-      const savedFileName = localStorage.getItem('excelViewer_fileName')
-      const savedFilters = localStorage.getItem('excelViewer_filters')
-      const savedSorts = localStorage.getItem('excelViewer_sorts')
-      const savedHighlightedCells = localStorage.getItem('excelViewer_highlightedCells')
-      const savedCurrentPage = localStorage.getItem('excelViewer_currentPage')
+      const savedData = safeStorage.getItem('excelViewer_data')
+      const savedHeaders = safeStorage.getItem('excelViewer_headers')
+      const savedFileName = safeStorage.getItem('excelViewer_fileName')
+      const savedFilters = safeStorage.getItem('excelViewer_filters')
+      const savedSorts = safeStorage.getItem('excelViewer_sorts')
+      const savedHighlightedCells = safeStorage.getItem('excelViewer_highlightedCells')
+      const savedCurrentPage = safeStorage.getItem('excelViewer_currentPage')
       
       if (savedData && savedHeaders) {
         setExcelData(JSON.parse(savedData))
@@ -234,11 +231,11 @@ export default function ExcelPage() {
     document.addEventListener('visibilitychange', handleVisibilityChange)
     window.addEventListener('storage', handleStorageChange)
 
-    // 주기적으로 loginTime 확인 (같은 탭에서 로그아웃 감지)
+    // 주기적으로 loginTime 확인 (같은 탭에서 로그아웃 감지, 저장소 접근 불가 환경에서는 예외 없음)
     const checkLoginStatus = setInterval(() => {
       if (currentUserId) {
         const loginTimeKey = `loginTime_${currentUserId}`
-        if (!localStorage.getItem(loginTimeKey)) {
+        if (!safeStorage.getItem(loginTimeKey)) {
           // 로그아웃 감지 시 모든 데이터 정리
           resetAllData()
           clearInterval(checkLoginStatus)
@@ -257,20 +254,16 @@ export default function ExcelPage() {
     }
   }, [resetAllData, currentUserId])
 
-  // 데이터 변경 시 localStorage에 저장
+  // 데이터 변경 시 localStorage에 저장 (저장소 접근 불가 시 무시)
   useEffect(() => {
     if (excelData.length > 0 && headers.length > 0) {
-      try {
-        localStorage.setItem('excelViewer_data', JSON.stringify(excelData))
-        localStorage.setItem('excelViewer_headers', JSON.stringify(headers))
-        if (fileName) localStorage.setItem('excelViewer_fileName', fileName)
-        localStorage.setItem('excelViewer_filters', JSON.stringify(filters))
-        localStorage.setItem('excelViewer_sorts', JSON.stringify(sorts))
-        localStorage.setItem('excelViewer_highlightedCells', JSON.stringify(Array.from(highlightedCells)))
-        localStorage.setItem('excelViewer_currentPage', currentPage.toString())
-      } catch (error) {
-        console.error('Failed to save data to localStorage:', error)
-      }
+      safeStorage.setItem('excelViewer_data', JSON.stringify(excelData))
+      safeStorage.setItem('excelViewer_headers', JSON.stringify(headers))
+      if (fileName) safeStorage.setItem('excelViewer_fileName', fileName)
+      safeStorage.setItem('excelViewer_filters', JSON.stringify(filters))
+      safeStorage.setItem('excelViewer_sorts', JSON.stringify(sorts))
+      safeStorage.setItem('excelViewer_highlightedCells', JSON.stringify(Array.from(highlightedCells)))
+      safeStorage.setItem('excelViewer_currentPage', currentPage.toString())
     }
   }, [excelData, headers, fileName, filters, sorts, highlightedCells, currentPage])
 

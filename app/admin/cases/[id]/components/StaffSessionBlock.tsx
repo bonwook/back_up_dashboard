@@ -4,23 +4,7 @@ import { Loader2, CheckCircle2, FileText } from "lucide-react"
 import { format } from "date-fns"
 import { ko } from "date-fns/locale"
 import { getStatusBadge, getStatusBorderColor } from "@/lib/utils/taskStatusHelpers"
-
-interface Subtask {
-  id: string
-  task_id: string
-  subtitle: string
-  assigned_to: string
-  assigned_to_name?: string
-  assigned_to_email?: string
-  content: string | null
-  comment?: string | null
-  status: 'pending' | 'in_progress' | 'on_hold' | 'awaiting_completion' | 'completed'
-  file_keys: string[]
-  comment_file_keys?: string[]
-  created_at: string
-  updated_at: string
-  completed_at: string | null
-}
+import type { Subtask } from "@/lib/types"
 
 interface StaffSessionBlockProps {
   subtask: Subtask

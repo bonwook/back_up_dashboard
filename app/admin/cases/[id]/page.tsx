@@ -39,57 +39,7 @@ import { FileListItem } from "./components/FileListItem"
 import { StaffSessionBlock } from "./components/StaffSessionBlock"
 import { useSubtaskCompletion } from "@/lib/hooks/useSubtaskCompletion"
 import { useContentEditor } from "@/lib/hooks/useContentEditor"
-
-interface Task {
-  id: string
-  assigned_to: string
-  assigned_by: string
-  assigned_by_name?: string
-  assigned_by_email?: string
-  assigned_to_name?: string
-  assigned_to_email?: string
-  title: string
-  content: string | null
-  description: string | null
-  comment?: string | null
-  priority: 'low' | 'medium' | 'high' | 'urgent'
-  status: 'pending' | 'in_progress' | 'on_hold' | 'awaiting_completion' | 'completed'
-  file_keys: string[]
-  comment_file_keys?: string[]
-  due_date?: string | null
-  created_at: string
-  updated_at: string
-  completed_at: string | null
-  is_multi_assign?: boolean
-}
-
-interface Subtask {
-  id: string
-  task_id: string
-  subtitle: string
-  assigned_to: string
-  assigned_to_name?: string
-  assigned_to_email?: string
-  content: string | null
-  comment?: string | null
-  status: 'pending' | 'in_progress' | 'on_hold' | 'awaiting_completion' | 'completed'
-  file_keys: string[]
-  comment_file_keys?: string[]
-  created_at: string
-  updated_at: string
-  completed_at: string | null
-}
-
-/** S3 건 연결 시 표시용 버킷 정보 타입 */
-interface S3UpdateForTask {
-  id: number
-  file_name: string
-  bucket_name?: string | null
-  file_size?: number | null
-  upload_time?: string | null
-  created_at: string
-  s3_key: string
-}
+import type { Task, Subtask, S3UpdateForTask } from "@/lib/types"
 
 function formatBytes(bytes: number | null | undefined): string {
   if (bytes == null || bytes === 0) return "-"

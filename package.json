@@ -9,7 +9,9 @@
     "tsc": "tsc --noEmit",
     "start": "next start",
     "prepare": "husky",
-    "test:s3-updates": "node scripts/test-s3-updates-logic.mjs"
+    "test:s3-updates": "node scripts/test-s3-updates-logic.mjs",
+    "test:file-keys": "node scripts/test-normalize-file-keys.mjs",
+    "test": "node scripts/test-s3-updates-logic.mjs && node scripts/test-normalize-file-keys.mjs"
   },
   "dependencies": {
     "7zip-bin": "^5.2.0",

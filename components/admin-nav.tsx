@@ -1,11 +1,10 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { LayoutDashboard, Upload, Activity, FileText, LogOut, Stethoscope, Shield, Box, LayoutGrid, Settings } from "lucide-react"
+import { LayoutDashboard, Upload, Activity, FileText, LogOut, Box, Settings } from "lucide-react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import Image from "next/image"
-import { useEffect, useState } from "react"
 import type { AuthUser } from "@/lib/db/auth"
 
 interface AdminNavProps {
@@ -15,25 +14,6 @@ interface AdminNavProps {
 export function AdminNav({ user }: AdminNavProps) {
   const pathname = usePathname()
   const router = useRouter()
-  const [userRole, setUserRole] = useState<string | null>(null)
-  const [userFullName, setUserFullName] = useState<string | null>(null)
-
-  useEffect(() => {
-    const loadUser = async () => {
-      try {
-        // Get user role and full_name from API
-        const response = await fetch("/api/auth/me", { credentials: "include" })
-        if (response.ok) {
-          const userData = await response.json()
-          setUserRole(userData.role || null)
-          setUserFullName(userData.full_name || null)
-        }
-      } catch (error) {
-        console.error("Failed to load user:", error)
-      }
-    }
-    loadUser()
-  }, [])
 
   const handleLogout = async () => {
     await fetch("/api/auth/signout", { method: "POST", credentials: "include" })
@@ -150,7 +130,7 @@ export function AdminNav({ user }: AdminNavProps) {
           </Button>
           <div className="h-6 w-px bg-border" />
           <p className="text-sm font-medium whitespace-nowrap max-w-[200px] truncate">
-            환영합니다 {userFullName || user.full_name || "Staff"}님
+            환영합니다 {user.full_name || "Staff"}님
           </p>
           <Button
             variant="ghost"

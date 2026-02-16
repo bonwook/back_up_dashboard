@@ -13,40 +13,7 @@ import Link from "next/link"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/hooks/use-toast"
 import { isTaskExpired } from "@/lib/utils/taskHelpers"
-
-interface Task {
-  id: string
-  assigned_to: string
-  assigned_by: string
-  assigned_by_name?: string
-  assigned_by_email?: string
-  assigned_to_name?: string
-  assigned_to_email?: string
-  title: string
-  content: string | null
-  description: string | null
-  priority: 'low' | 'medium' | 'high' | 'urgent'
-  status: 'pending' | 'in_progress' | 'on_hold' | 'awaiting_completion' | 'completed'
-  file_keys: string[]
-  comment_file_keys?: string[]
-  due_date?: string | null
-  created_at: string
-  updated_at: string
-  completed_at: string | null
-  is_multi_assign?: boolean
-  has_any_attachment?: boolean
-}
-
-interface S3UpdateRow {
-  id: number
-  file_name: string
-  bucket_name?: string | null
-  file_size?: number | null
-  upload_time?: string | null
-  created_at: string
-  task_id: string | null
-  s3_key: string
-}
+import type { Task, S3UpdateRow } from "@/lib/types"
 
 export default function WorklistPage() {
   const [tasks, setTasks] = useState<Task[]>([])
