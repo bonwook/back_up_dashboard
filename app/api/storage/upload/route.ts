@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { verifyToken } from "@/lib/auth"
-import { uploadToS3 } from "@/lib/aws/s3"
+import { uploadToS3, isAwsCredentialsError, AWS_CREDENTIALS_USER_MESSAGE } from "@/lib/aws/s3"
 import { query } from "@/lib/db/mysql"
 import { randomUUID } from "crypto"
 import { sanitizeFilename, isValidFilename } from "@/lib/utils/filename"
@@ -436,6 +436,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ path: s3Key, fileId })
   } catch (error) {
     console.error("[API Upload] Error uploading file:", error)
+    if (isAwsCredentialsError(error)) {
+      console.error("[API Upload] AWS credentials expired or not set. Set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY in .env or run: aws sso login")
+      return NextResponse.json({ error: AWS_CREDENTIALS_USER_MESSAGE }, { status: 503 })
+    }
     if (error instanceof Error) {
       console.error("[API Upload] Error message:", error.message)
       console.error("[API Upload] Error stack:", error.stack)

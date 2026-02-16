@@ -30,7 +30,8 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { fileKeys, assignedTo, title, content, priority, due_date, assignments, subtasks, mainContent, noMainTask, assignmentType, s3_update_id } = body
+    const { fileKeys, assignedTo, title, content, priority, due_date, assignments, subtasks, mainContent, noMainTask, assignmentType } = body
+    const s3_update_id = body.s3_update_id != null ? String(body.s3_update_id) : null
 
     if (!title || !title.trim()) {
       return NextResponse.json({ error: "업무 제목이 필요합니다" }, { status: 400 })
@@ -57,14 +58,14 @@ export async function POST(request: NextRequest) {
       // 다중 할당 모드
       return await handleMultiAssignment(decoded.id, title, priority, due_date, assignments)
     } else {
-      // 개별 할당: 작업 생성 출처 = s3_update(DB) OR staff 직접 선택(fileKeys)
+      // 개별 할당: S3 출처면 기존 task 있으면 수정, 없으면 생성
       if (fileKeys !== undefined && !Array.isArray(fileKeys)) {
         return NextResponse.json({ error: "파일 키 목록이 올바른 형식이 아닙니다" }, { status: 400 })
       }
 
       let fileKeysForTask: string[] = Array.isArray(fileKeys) ? fileKeys : []
 
-      if (s3_update_id && typeof s3_update_id === "string") {
+      if (s3_update_id) {
         const row = await queryOne(
           `SELECT file_name, bucket_name FROM s3_updates WHERE id = ?`,
           [s3_update_id]
@@ -72,6 +73,31 @@ export async function POST(request: NextRequest) {
         if (row) {
           const r = row as { file_name: string; bucket_name?: string | null }
           fileKeysForTask = [toS3Key(r)]
+        }
+
+        // 해당 S3 건에 이미 연결된 task가 있으면 새로 만들지 않고 그 task 수정
+        let existingTaskId: string | null = null
+        try {
+          const s3Row = await queryOne(
+            `SELECT task_id FROM s3_updates WHERE id = ?`,
+            [s3_update_id]
+          ) as { task_id?: string | null } | null
+          if (s3Row?.task_id) existingTaskId = String(s3Row.task_id)
+        } catch {
+          // task_id 컬럼 없으면 무시
+        }
+
+        if (existingTaskId) {
+          const finalAssignedTo = assignedTo || decoded.id
+          return await handleUpdateExistingTaskForS3(
+            decoded.id,
+            finalAssignedTo,
+            title,
+            content,
+            priority,
+            due_date,
+            existingTaskId
+          )
         }
       }
 
@@ -85,6 +111,46 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     )
   }
+}
+
+// S3 건에 이미 연결된 task가 있을 때: 새 task 생성 없이 해당 task만 수정 (업무 추가 = 수정)
+async function handleUpdateExistingTaskForS3(
+  assignedById: string,
+  assignedTo: string,
+  title: string,
+  content: string,
+  priority: string,
+  due_date: any,
+  taskId: string
+) {
+  const [assignedUser] = await query(
+    "SELECT id, full_name, email FROM profiles WHERE id = ?",
+    [assignedTo]
+  )
+  if (!assignedUser) {
+    return NextResponse.json({ error: "담당자를 찾을 수 없습니다" }, { status: 404 })
+  }
+
+  const dueDateValue = due_date != null ? (due_date instanceof Date ? due_date.toISOString().split("T")[0] : due_date) : null
+
+  await query(
+    `UPDATE task_assignments SET
+      assigned_to = ?, title = ?, content = ?, priority = ?, due_date = ?, updated_at = NOW()
+      WHERE id = ?`,
+    [assignedTo, title, content || "", priority || "medium", dueDateValue, taskId]
+  )
+
+  return NextResponse.json({
+    success: true,
+    message: "업무가 수정되었습니다",
+    taskId,
+    results: [],
+    assignedTo: {
+      id: assignedUser.id,
+      name: assignedUser.full_name,
+      email: assignedUser.email,
+    },
+  })
 }
 
 // 개별 할당 처리 (기존 로직)
@@ -109,12 +175,24 @@ async function handleSingleAssignment(
     return NextResponse.json({ error: "담당자를 찾을 수 없습니다" }, { status: 404 })
   }
 
+  // due_date 없을 때 s3_update 출처면 업로드일을 기본 마감일로 사용 (캘린더 표시용)
+  let dueDateValue = due_date ? (due_date instanceof Date ? due_date.toISOString().split('T')[0] : due_date) : null
+  if (!dueDateValue && s3UpdateId && typeof s3UpdateId === "string") {
+    const s3Row = await queryOne(
+      `SELECT upload_time, created_at FROM s3_updates WHERE id = ?`,
+      [s3UpdateId]
+    ) as { upload_time?: string | null; created_at?: string } | null
+    if (s3Row) {
+      const dateStr = s3Row.upload_time || s3Row.created_at
+      if (dateStr) dueDateValue = new Date(dateStr).toISOString().split("T")[0]
+    }
+  }
+
   // Task assignment 생성
   const taskId = crypto.randomUUID()
   const fileKeysArray = fileKeys && Array.isArray(fileKeys) ? fileKeys : []
   const fileKeysJson = JSON.stringify(fileKeysArray)
   const finalContent = content || ""
-  const dueDateValue = due_date ? (due_date instanceof Date ? due_date.toISOString().split('T')[0] : due_date) : null
   
   const insertParams = dueDateValue
     ? [taskId, assignedTo, assignedById, title, finalContent, priority || 'medium', fileKeysJson, false, assignmentType, dueDateValue]
@@ -135,6 +213,14 @@ async function handleSingleAssignment(
       )
     } catch {
       // task_id 컬럼이 없으면 무시 (기존 s3_updates 스키마 호환)
+    }
+    try {
+      await query(
+        `UPDATE s3_updates SET status = 'pending' WHERE id = ?`,
+        [s3UpdateId]
+      )
+    } catch {
+      // status 컬럼이 없으면 무시
     }
   }
 

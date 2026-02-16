@@ -29,7 +29,7 @@ export async function GET(
 
     const { id } = await params
     const row = await queryOne(
-      `SELECT id, file_name, bucket_name, file_size, upload_time, created_at
+      `SELECT id, file_name, bucket_name, file_size, upload_time, created_at, task_id
        FROM s3_updates WHERE id = ?`,
       [id]
     )
@@ -38,10 +38,11 @@ export async function GET(
       return NextResponse.json({ error: "Not found" }, { status: 404 })
     }
 
-    const r = row as Record<string, unknown>
+    const r = row as Record<string, unknown> & { task_id?: string | null; status?: string | null }
     const s3Update = {
       ...r,
-      task_id: (r as { task_id?: string | null }).task_id ?? null,
+      task_id: r.task_id ?? null,
+      status: r.status ?? "pending",
       s3_key: toS3Key(r as { file_name: string; bucket_name?: string | null }),
     }
 

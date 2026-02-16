@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { verifyToken } from "@/lib/auth"
 import { queryOne } from "@/lib/db/mysql"
-import { getSignedDownloadUrl } from "@/lib/aws/s3"
+import { getSignedDownloadUrlForTaskDownload } from "@/lib/aws/s3"
 import { toS3Key } from "@/lib/utils/s3Updates"
 
 const PRESIGN_EXPIRES_SECONDS = 20 * 60 // 20분
@@ -42,7 +42,7 @@ export async function GET(
 
     const r = row as { file_name: string; bucket_name?: string | null }
     const s3Key = toS3Key(r)
-    const signedUrl = await getSignedDownloadUrl(s3Key, PRESIGN_EXPIRES_SECONDS)
+    const signedUrl = await getSignedDownloadUrlForTaskDownload(s3Key, PRESIGN_EXPIRES_SECONDS)
 
     return NextResponse.json({
       url: signedUrl,

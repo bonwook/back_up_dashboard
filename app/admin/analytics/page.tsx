@@ -752,7 +752,6 @@ export default function ClientAnalyticsPage() {
                         className="space-y-0"
                       >
                         {users
-                          .filter((u) => u.id !== user?.id)
                           .filter((u) => {
                             const query = userSearchQuery.toLowerCase()
                             return (
@@ -2201,11 +2200,10 @@ export default function ClientAnalyticsPage() {
             <div className="space-y-2">
               {isUsersLoading ? (
                 <p className="text-sm text-muted-foreground text-center py-8">사용자 목록 로딩 중...</p>
-              ) : users.filter((u) => u.id !== user?.id).length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">현재 세션 사용자 외 등록된 인원이 없습니다.</p>
+              ) : users.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">등록된 인원이 없습니다.</p>
               ) : (
               users
-                .filter((u) => u.id !== user?.id)
                 .sort((a, b) => {
                   // 할당된 사용자를 먼저 표시
                   const aSelected = selectedAssignees.has(a.id)

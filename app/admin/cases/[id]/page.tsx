@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Loader2, Calendar as CalendarIcon, FileText, X, Send, Bold, Italic, Underline, Minus, Grid3x3 as TableIcon } from "lucide-react"
+import { ArrowLeft, Loader2, Download, Calendar as CalendarIcon, FileText, X, Send, Bold, Italic, Underline, Minus, Grid3x3 as TableIcon, Paperclip, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { SafeHtml } from "@/components/safe-html"
 import { cn } from "@/lib/utils"
@@ -16,6 +16,7 @@ import { format, addDays } from "date-fns"
 import { ko } from "date-fns/locale"
 import { useToast } from "@/hooks/use-toast"
 import { Textarea } from "@/components/ui/textarea"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import { downloadWithProgress } from "@/lib/utils/download-with-progress"
@@ -79,9 +80,30 @@ interface Subtask {
   completed_at: string | null
 }
 
+/** S3 건 연결 시 표시용 버킷 정보 타입 */
+interface S3UpdateForTask {
+  id: number
+  file_name: string
+  bucket_name?: string | null
+  file_size?: number | null
+  upload_time?: string | null
+  created_at: string
+  s3_key: string
+}
+
+function formatBytes(bytes: number | null | undefined): string {
+  if (bytes == null || bytes === 0) return "-"
+  const k = 1024
+  const sizes = ["B", "KB", "MB", "GB"]
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${Number((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`
+}
+
 export default function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const [task, setTask] = useState<Task | null>(null)
+  const [s3Update, setS3Update] = useState<S3UpdateForTask | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isGettingS3Url, setIsGettingS3Url] = useState(false)
   const router = useRouter()
   const [taskId, setTaskId] = useState<string | null>(null)
   const { toast } = useToast()
@@ -112,6 +134,11 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [isLoadingSubtasks, setIsLoadingSubtasks] = useState(false)
   const [isEditingRequesterContent, setIsEditingRequesterContent] = useState(false)
   const [isSavingRequesterContent, setIsSavingRequesterContent] = useState(false)
+  /** 개별 할당 시 요청자 수정 모드에서 편집 중인 제목·첨부키 (저장 시 한 번에 전송) */
+  const [editingRequesterTitle, setEditingRequesterTitle] = useState("")
+  const [editingRequesterFileKeys, setEditingRequesterFileKeys] = useState<string[]>([])
+  const [isUploadingRequesterFile, setIsUploadingRequesterFile] = useState(false)
+  const requesterFileInputRef = useRef<HTMLInputElement>(null)
   const didSetInitialRequesterContent = useRef(false)
   /** 공동 수정 시 에디터에 마지막으로 로드한 소스(부제) 추적 — 부제 전환 시 에디터 내용 갱신용 */
   const lastRequesterContentSourceRef = useRef<{ taskId: string; subtitle: string | null } | null>(null)
@@ -176,6 +203,11 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
 
         if (!response.ok) {
           if (response.status === 404) {
+            toast({
+              title: "업무를 찾을 수 없습니다",
+              description: "삭제되었거나 잘못된 링크일 수 있습니다.",
+              variant: "destructive",
+            })
             router.push("/admin/cases")
             return
           }
@@ -184,6 +216,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
 
         const data = await response.json()
         setTask(data.task)
+        setS3Update(data.s3Update ?? null)
         if (data.task.due_date) {
           setSelectedDueDate(new Date(data.task.due_date))
         } else {
@@ -198,7 +231,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     }
 
     loadTask()
-  }, [taskId, router])
+  }, [taskId, router, toast])
 
   // 첨부파일 resolve + 업로더 기준으로 분리(기존 데이터에서 file_keys에 섞여 있는 사용자 파일도 분리)
   useEffect(() => {
@@ -357,10 +390,11 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     }
   }, [taskId])
 
+  // 공동 업무일 때만 subtasks 요청 (개별 = main task만, 공동 = main task + subtasks)
   useEffect(() => {
-    if (!taskId) return
+    if (!taskId || !task || !task.is_multi_assign) return
     loadSubtasks()
-  }, [taskId, loadSubtasks])
+  }, [taskId, task, loadSubtasks])
 
   type TaskStatusType = "pending" | "in_progress" | "on_hold" | "awaiting_completion" | "completed"
   const handleStatusChange = useCallback(
@@ -378,7 +412,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           throw new Error(err.error || "상태 업데이트 실패")
         }
         await reloadTask()
-        await loadSubtasks()
+        if (task?.is_multi_assign) await loadSubtasks()
         if (taskId) {
           window.dispatchEvent(new CustomEvent("task-content-updated", { detail: { taskId } }))
         }
@@ -394,7 +428,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         setIsUpdatingStatus(false)
       }
     },
-    [taskId, reloadTask, loadSubtasks, toast, router]
+    [taskId, task?.is_multi_assign, reloadTask, loadSubtasks, toast, router]
   )
 
   // subtask 첨부파일 resolve
@@ -531,7 +565,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         throw new Error(err.error || "분담내용 저장 실패")
       }
       toast({ title: "저장됨", description: "내 담당업무 내용이 저장되었습니다." })
-      await loadSubtasks()
+      if (task?.is_multi_assign) await loadSubtasks()
       setIsEditingMyComment(false)
       if (taskId) {
         window.dispatchEvent(new CustomEvent("task-content-updated", { detail: { taskId } }))
@@ -546,7 +580,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     } finally {
       setIsSavingMyComment(false)
     }
-  }, [mySubtaskForComment, taskId, loadSubtasks, toast, router])
+  }, [mySubtaskForComment, taskId, task?.is_multi_assign, loadSubtasks, toast, router])
 
   // 요청자 내용 편집 시 에디터에 초기값 설정 (개별: task.content, 공동: 선택/기본 부제의 첫 서브태스크 content) + 테이블 리사이즈
   // 공동 업무 시 수정 버튼 클릭 직후에도 올바른 부제 매핑을 위해 editingSubtitleRef 사용
@@ -604,11 +638,15 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           }
         }
       } else {
+        const payload: Record<string, unknown> = { content }
+        payload.title = editingRequesterTitle
+        payload.due_date = selectedDueDate ? format(selectedDueDate, "yyyy-MM-dd") : null
+        payload.file_keys = editingRequesterFileKeys
         const res = await fetch(`/api/tasks/${taskId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ content }),
+          body: JSON.stringify(payload),
         })
         if (!res.ok) {
           const err = await res.json().catch(() => ({}))
@@ -617,7 +655,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       }
       toast({ title: "저장됨", description: "요청자 내용이 저장되었습니다." })
       await reloadTask()
-      await loadSubtasks()
+      if (task?.is_multi_assign) await loadSubtasks()
+      setEditingRequesterTitle("")
+      setEditingRequesterFileKeys([])
       editingSubtitleRef.current = null
       setIsEditingRequesterContent(false)
       window.dispatchEvent(new CustomEvent("task-content-updated", { detail: { taskId } }))
@@ -631,7 +671,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     } finally {
       setIsSavingRequesterContent(false)
     }
-  }, [taskId, task, subtasks.length, selectedSubtitle, groupedSubtasks, reloadTask, loadSubtasks, toast])
+  }, [taskId, task, subtasks.length, selectedSubtitle, groupedSubtasks, editingRequesterTitle, editingRequesterFileKeys, selectedDueDate, reloadTask, loadSubtasks, toast])
 
   // 실제 resolve된 담당자 첨부파일이 있는 subtaskId 집합 (아이콘은 이 기준으로만 표시)
   const subtaskIdsWithResolvedFiles = useMemo(() => {
@@ -786,6 +826,29 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const canChangeStatus =
     (userRole === "staff" || userRole === "admin") && me?.id !== task.assigned_by
 
+  const handleS3Download = async () => {
+    if (!s3Update?.id) return
+    setIsGettingS3Url(true)
+    try {
+      const res = await fetch(`/api/s3-updates/${s3Update.id}/presigned-url`, { credentials: "include" })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { error?: string }).error || "다운로드 URL 생성 실패")
+      }
+      const data = await res.json()
+      const url = (data as { url: string }).url
+      window.open(url, "_blank", "noopener,noreferrer")
+      toast({ title: "다운로드 링크 생성됨", description: "20분간 유효한 링크가 새 탭에서 열립니다." })
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "다운로드 URL을 가져오지 못했습니다."
+      toast({ title: "다운로드 실패", description: message, variant: "destructive" })
+    } finally {
+      setIsGettingS3Url(false)
+    }
+  }
+
+  const s3DisplayDate = s3Update?.upload_time || s3Update?.created_at || ""
+
   return (
     <div className="mx-auto max-w-7xl p-6">
       <div className="mb-6">
@@ -794,6 +857,57 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           뒤로가기
         </Button>
       </div>
+
+      {s3Update && (
+        <Card className="mb-6 border-l-4 border-l-amber-500/50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-xl">버킷 정보</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 px-6 pb-4 pt-0">
+            <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground">파일명</p>
+                <p className="text-sm font-medium break-all">{s3Update.file_name}</p>
+              </div>
+              {s3Update.bucket_name && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">버킷/경로</p>
+                  <p className="text-xs break-all text-muted-foreground">{s3Update.bucket_name}</p>
+                </div>
+              )}
+              <div className={s3Update.bucket_name ? "" : "sm:col-span-2"}>
+                <p className="text-xs font-medium text-muted-foreground">S3 객체 키</p>
+                <p className="text-xs break-all text-muted-foreground">{s3Update.s3_key}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground">파일 크기</p>
+                <p className="text-sm">{formatBytes(s3Update.file_size)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground">업로드일</p>
+                <p className="text-sm">
+                  {s3DisplayDate
+                    ? new Date(s3DisplayDate).toLocaleString("ko-KR", {
+                        year: "numeric",
+                        month: "2-digit",
+                        day: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : "-"}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 pt-3">
+              <Button variant="outline" size="sm" onClick={handleS3Download} disabled={isGettingS3Url}>
+                {isGettingS3Url ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                다운로드 (20분 유효 링크)
+              </Button>
+              <span className="text-xs text-muted-foreground">※ 한 번만 다운로드 가능합니다.</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="mb-6">
         <CardHeader className="pb-0.5 pt-3">
@@ -1008,7 +1122,15 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-lg">{task.assigned_by_name || task.assigned_by_email} 내용</CardTitle>
               {canEditTask && !isEditingRequesterContent && (
-                <Button variant="outline" size="sm" onClick={() => setIsEditingRequesterContent(true)}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setEditingRequesterTitle(task?.title ?? "")
+                    setEditingRequesterFileKeys(resolvedFileKeys.map((f) => f.s3Key))
+                    setIsEditingRequesterContent(true)
+                  }}
+                >
                   수정
                 </Button>
               )}
@@ -1016,6 +1138,119 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             <CardContent>
               {canEditTask && isEditingRequesterContent ? (
                 <>
+                  {/* 제목 · 마감일 · 첨부파일 (개별 할당 시 요청자 수정) */}
+                  <div className="space-y-3 mb-4">
+                    <div className="grid gap-2">
+                      <Label className="text-xs">업무 제목</Label>
+                      <Input
+                        value={editingRequesterTitle}
+                        onChange={(e) => setEditingRequesterTitle(e.target.value)}
+                        placeholder="업무 제목"
+                        className="max-w-md"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label className="text-xs">마감일</Label>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="w-fit font-normal"
+                            disabled={task.status === "completed"}
+                          >
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {selectedDueDate ? format(selectedDueDate, "yyyy-MM-dd", { locale: ko }) : "선택"}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar
+                            mode="single"
+                            selected={selectedDueDate || undefined}
+                            onSelect={(d) => setSelectedDueDate(d ?? null)}
+                            locale={ko}
+                          />
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label className="text-xs">첨부파일 (요청자)</Label>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {editingRequesterFileKeys.map((key, idx) => (
+                          <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
+                            <button
+                              type="button"
+                              className="text-blue-600 hover:underline truncate max-w-[180px]"
+                              onClick={() => handleDownload(key, extractFileName(key, "파일"))}
+                            >
+                              {extractFileName(key, "파일")}
+                            </button>
+                            <button
+                              type="button"
+                              aria-label="첨부 제거"
+                              className="p-0.5 text-muted-foreground hover:text-destructive"
+                              onClick={() => setEditingRequesterFileKeys((prev) => prev.filter((_, i) => i !== idx))}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                        <input
+                          ref={requesterFileInputRef}
+                          type="file"
+                          className="hidden"
+                          multiple
+                          onChange={async (e) => {
+                            const files = e.target.files
+                            if (!files?.length) return
+                            setIsUploadingRequesterFile(true)
+                            const addedPaths: string[] = []
+                            try {
+                              for (let i = 0; i < files.length; i++) {
+                                const formData = new FormData()
+                                formData.append("file", files[i])
+                                formData.append("fileType", "other")
+                                formData.append("path", `temp/attachment/${files[i].name}`)
+                                const res = await fetch("/api/storage/upload", {
+                                  method: "POST",
+                                  credentials: "include",
+                                  body: formData,
+                                })
+                                const data = await res.json().catch(() => ({}))
+                                if (!res.ok) {
+                                  throw new Error(data.error || "업로드 실패")
+                                }
+                                const path = data.path ?? data.s3_key
+                                if (path) addedPaths.push(path)
+                              }
+                              if (addedPaths.length > 0) {
+                                setEditingRequesterFileKeys((prev) => [...prev, ...addedPaths])
+                              }
+                            } catch (err: any) {
+                              toast({
+                                title: "첨부 업로드 실패",
+                                description: err?.message ?? "파일 업로드 중 오류가 발생했습니다.",
+                                variant: "destructive",
+                              })
+                            } finally {
+                              setIsUploadingRequesterFile(false)
+                              e.target.value = ""
+                            }
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={isUploadingRequesterFile}
+                          onClick={() => requesterFileInputRef.current?.click()}
+                        >
+                          {isUploadingRequesterFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                          파일 추가
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
                   <div
                     className="border rounded-md overflow-hidden bg-background flex flex-col"
                     style={{
@@ -1196,6 +1431,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       size="sm"
                       variant="outline"
                       onClick={() => {
+                        setEditingRequesterTitle("")
+                        setEditingRequesterFileKeys([])
+                        setSelectedDueDate(task?.due_date ? new Date(task.due_date) : null)
                         editingSubtitleRef.current = null
                         setIsEditingRequesterContent(false)
                       }}

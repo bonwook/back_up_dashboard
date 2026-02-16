@@ -25,16 +25,18 @@ export async function GET(request: NextRequest) {
     }
 
     const rows = await query(
-      `SELECT id, file_name, bucket_name, file_size, upload_time, created_at
+      `SELECT id, file_name, bucket_name, file_size, upload_time, created_at, task_id
        FROM s3_updates
        ORDER BY COALESCE(upload_time, created_at) DESC`
     )
 
-    const list = (rows || []).map((row: Record<string, unknown>) => ({
-      ...row,
-      task_id: (row as { task_id?: string | null }).task_id ?? null,
-      s3_key: toS3Key(row as { file_name: string; bucket_name?: string | null }),
-    }))
+    const list = (rows || []).map((row: Record<string, unknown>) => {
+      const r = row as { file_name: string; bucket_name?: string | null }
+      return {
+        ...row,
+        s3_key: toS3Key(r),
+      }
+    })
 
     return NextResponse.json({ s3Updates: list })
   } catch (error: unknown) {

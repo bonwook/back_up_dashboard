@@ -1,12 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { verifyToken } from "@/lib/auth"
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3"
+import { GetObjectCommand } from "@aws-sdk/client-s3"
 import archiver from "archiver"
 import { Readable } from "stream"
-
-const s3Client = new S3Client({
-  region: process.env.AWS_REGION!,
-})
+import { s3Client } from "@/lib/aws/s3"
 
 const BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME!
 

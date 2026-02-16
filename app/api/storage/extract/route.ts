@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { verifyToken } from "@/lib/auth"
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3"
-import { uploadToS3 } from "@/lib/aws/s3"
+import { GetObjectCommand } from "@aws-sdk/client-s3"
+import { uploadToS3, s3Client } from "@/lib/aws/s3"
 import { query } from "@/lib/db/mysql"
 import { randomUUID } from "crypto"
 import { isValidS3Key } from "@/lib/utils/filename"
@@ -17,10 +17,6 @@ import {
   inBatches,
   type ExtractEntry,
 } from "@/lib/archive"
-
-const s3Client = new S3Client({
-  region: process.env.AWS_REGION,
-})
 
 const BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME!
 const BATCH_SIZE = 15

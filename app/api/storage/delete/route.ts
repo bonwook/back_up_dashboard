@@ -1,13 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { verifyToken } from "@/lib/auth"
-import { S3Client, ListObjectsV2Command, DeleteObjectsCommand, type ListObjectsV2CommandOutput, type _Object } from "@aws-sdk/client-s3"
-import { deleteFile } from "@/lib/services/aws/s3"
+import { ListObjectsV2Command, DeleteObjectsCommand, type ListObjectsV2CommandOutput, type _Object } from "@aws-sdk/client-s3"
+import { deleteFile, s3Client } from "@/lib/aws/s3"
 import { query } from "@/lib/db/mysql"
 import { isValidS3Key } from "@/lib/utils/filename"
-
-const s3Client = new S3Client({
-  region: process.env.AWS_REGION,
-})
 
 const BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME!
 

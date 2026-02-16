@@ -3,6 +3,7 @@ import { verifyToken } from "@/lib/auth"
 import { query } from "@/lib/db/mysql"
 import { randomUUID } from "crypto"
 import { writeAuditLog } from "@/lib/db/audit"
+import { toS3Key } from "@/lib/utils/s3Updates"
 
 // GET /api/tasks/[id] - Task 또는 Subtask 상세 정보 조회
 export async function GET(
@@ -117,22 +118,51 @@ export async function GET(
           })
         )
         
+        let s3Update: Record<string, unknown> | null = null
+        try {
+          const s3Rows = await query(
+            `SELECT id, file_name, bucket_name, file_size, upload_time, created_at, task_id FROM s3_updates WHERE task_id = ? LIMIT 1`,
+            [taskId]
+          )
+          if (s3Rows && s3Rows.length > 0) {
+            const r = s3Rows[0] as { file_name: string; bucket_name?: string | null }
+            s3Update = { ...s3Rows[0], s3_key: toS3Key(r) }
+          }
+        } catch {
+          // s3_updates 없거나 컬럼 없으면 무시
+        }
+        
         return NextResponse.json({
           task: {
             ...task,
             file_keys: fileKeysWithDates,
             comment_file_keys: commentFileKeysWithDates,
             shared_with: [],
-          }
+          },
+          ...(s3Update ? { s3Update } : {}),
         })
       } catch {
+        let s3Update: Record<string, unknown> | null = null
+        try {
+          const s3Rows = await query(
+            `SELECT id, file_name, bucket_name, file_size, upload_time, created_at, task_id FROM s3_updates WHERE task_id = ? LIMIT 1`,
+            [taskId]
+          )
+          if (s3Rows && s3Rows.length > 0) {
+            const r = s3Rows[0] as { file_name: string; bucket_name?: string | null }
+            s3Update = { ...s3Rows[0], s3_key: toS3Key(r) }
+          }
+        } catch {
+          // ignore
+        }
         return NextResponse.json({
           task: {
             ...task,
             file_keys: [],
             comment_file_keys: [],
             shared_with: [],
-          }
+          },
+          ...(s3Update ? { s3Update } : {}),
         })
       }
     }
@@ -289,7 +319,7 @@ export async function PATCH(
     const { id } = await params
     const taskId = id
     const body = await request.json()
-    const { status, description, content, file_keys, comment, comment_file_keys, due_date, is_subtask } = body
+    const { status, description, content, file_keys, comment, comment_file_keys, due_date, is_subtask, title } = body
 
     // Subtask인 경우 (명시적으로 is_subtask가 true인 경우)
     if (is_subtask) {
@@ -341,8 +371,11 @@ export async function PATCH(
       }
     }
 
-    // 담당자(assigned_to) 또는 staff/admin만 메인 task 수정 가능 — 상태 변경 시 task_assignments에 즉시 반영
-    if (task.assigned_to !== decoded.id && !isAdminOrStaff) {
+    // 담당자(assigned_to), staff/admin, 또는 요청자(assigned_by)만 메인 task 수정 가능
+    // 요청자는 content, file_keys, due_date, title 만 수정 가능
+    const isRequesterOnly = decoded.id === task.assigned_by && decoded.id !== task.assigned_to && !isAdminOrStaff
+    const canEditAsAssigneeOrAdmin = task.assigned_to === decoded.id || isAdminOrStaff
+    if (!canEditAsAssigneeOrAdmin && !isRequesterOnly) {
       return NextResponse.json({ error: "권한이 없습니다" }, { status: 403 })
     }
 
@@ -361,7 +394,7 @@ export async function PATCH(
       return NextResponse.json({ error: "완료된 작업은 마감일을 변경할 수 없습니다" }, { status: 400 })
     }
 
-    if (status !== undefined) {
+    if (!isRequesterOnly && status !== undefined) {
       const validStatuses = ['pending', 'in_progress', 'on_hold', 'awaiting_completion', 'completed']
       if (!validStatuses.includes(status)) {
         return NextResponse.json({ error: "유효하지 않은 상태입니다" }, { status: 400 })
@@ -395,7 +428,7 @@ export async function PATCH(
       }
     }
 
-    if (description !== undefined) {
+    if (!isRequesterOnly && description !== undefined) {
       updateFields.push("description = ?")
       updateParams.push(description)
     }
@@ -427,14 +460,14 @@ export async function PATCH(
       updateParams.push(fileKeysJson)
     }
 
-    if (comment !== undefined) {
+    if (!isRequesterOnly && comment !== undefined) {
       // comment는 첫 줄에 개행을 포함하여 저장
       const commentWithNewline = comment ? `\n${comment}` : null
       updateFields.push("comment = ?")
       updateParams.push(commentWithNewline)
     }
 
-    if (comment_file_keys !== undefined) {
+    if (!isRequesterOnly && comment_file_keys !== undefined) {
       // Comment 첨부파일 여러 개 허용. 중복 제거만 수행.
       const raw = Array.isArray(comment_file_keys) ? comment_file_keys : []
       const deduped: string[] = []
@@ -452,13 +485,17 @@ export async function PATCH(
     }
 
     if (due_date !== undefined) {
-      // due_date는 staff/admin만 수정 가능 (이미 위에서 확인)
       const dueDateValue = due_date ? (due_date instanceof Date ? due_date.toISOString().split('T')[0] : due_date) : null
       updateFields.push("due_date = ?")
       updateParams.push(dueDateValue)
       if ((oldDueDate ?? null) !== (dueDateValue ?? null)) {
         dueDateChanged = true
       }
+    }
+
+    if (title !== undefined) {
+      updateFields.push("title = ?")
+      updateParams.push(typeof title === "string" ? title : "")
     }
 
     if (updateFields.length === 1) {
@@ -470,6 +507,18 @@ export async function PATCH(
       `UPDATE task_assignments SET ${updateFields.join(", ")} WHERE id = ?`,
       [...updateParams, taskId]
     )
+
+    // task 상태 변경 시 연결된 s3_updates.status 동기화
+    if (statusChanged && status !== undefined) {
+      try {
+        await query(
+          `UPDATE s3_updates SET status = ? WHERE task_id = ?`,
+          [status, taskId]
+        )
+      } catch {
+        // s3_updates.status 컬럼 없으면 무시
+      }
+    }
 
     // 상태가 변경된 경우 task_status_history에 기록
     if (statusChanged && status !== undefined) {

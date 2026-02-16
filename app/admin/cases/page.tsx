@@ -58,6 +58,7 @@ export default function WorklistPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [priorityFilter, setPriorityFilter] = useState<string>("all")
   const [assignmentFilter, setAssignmentFilter] = useState<"all" | "requested" | "assigned">("all")
+  const [bucketFilter, setBucketFilter] = useState<string>("all")
   const [activeTab, setActiveTab] = useState<"worklist" | "completed">("worklist")
   const [completedReports, setCompletedReports] = useState<any[]>([])
   const [isLoadingCompleted, setIsLoadingCompleted] = useState(false)
@@ -104,21 +105,54 @@ export default function WorklistPage() {
     }
   }
 
-  // Worklist 목록에서는 첨부는 표시만 하고(클릭/다운로드는 상세 페이지에서), 상호작용은 제거
+  // s3_updates 버킷: bucket_name만 사용
+  const getBucketName = useCallback((row: S3UpdateRow) => (row.bucket_name ?? "").trim(), [])
+
+  // task_assignments의 file_keys 경로에서 버킷 추출 (첫 경로 세그먼트 = 버킷)
+  const getBucketFromTask = useCallback((task: Task) => {
+    const keys = task.file_keys
+    if (!keys?.length) return ""
+    const first = (keys[0] ?? "").trim()
+    const segment = first.split("/")[0]
+    return segment || ""
+  }, [])
+
+  const uniqueBuckets = useMemo(() => {
+    const fromS3 = s3Updates.map(getBucketName).filter(Boolean)
+    const fromTasks = tasks.map(getBucketFromTask).filter(Boolean)
+    const names = [...new Set([...fromS3, ...fromTasks])] as string[]
+    return names.sort((a, b) => a.localeCompare(b))
+  }, [s3Updates, tasks, getBucketName, getBucketFromTask])
+
+  // task.id -> bucket (file_keys 경로로 판별, S3에서 할당된 업무)
+  const taskIdToBucket = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const task of tasks) {
+      const bucket = getBucketFromTask(task)
+      if (bucket) map.set(task.id, bucket)
+    }
+    return map
+  }, [tasks, getBucketFromTask])
+
+  // S3에서 온 업무인지 (s3_updates.task_id로 연결된 task id 집합)
+  const taskIdsFromS3 = useMemo(() => {
+    const set = new Set<string>()
+    for (const row of s3Updates) {
+      if (row.task_id) set.add(String(row.task_id))
+    }
+    return set
+  }, [s3Updates])
 
   const filterTasks = useCallback(() => {
     let filtered = [...tasks]
 
     // 탭에 따른 기본 필터링
     if (activeTab === "worklist") {
-      // 진행 탭: 완료되지 않은 작업만
       filtered = filtered.filter((task) => task.status !== "completed")
     } else if (activeTab === "completed") {
-      // 완료 탭: 완료된 작업만
       filtered = filtered.filter((task) => task.status === "completed")
     }
 
-    // Search filter
     if (searchQuery) {
       const query = searchQuery.toLowerCase()
       filtered = filtered.filter(
@@ -131,23 +165,18 @@ export default function WorklistPage() {
       )
     }
 
-    // Status filter (진행 탭에서만 적용)
     if (activeTab === "worklist" && statusFilter !== "all") {
       if (statusFilter === "expired") {
-        // 마감됨: 완료 상태가 아니면서 마감일이 지난 작업
         filtered = filtered.filter((task) => isTaskExpired(task))
       } else {
-        // 일반 상태 필터
         filtered = filtered.filter((task) => task.status === statusFilter)
       }
     }
 
-    // Priority filter
     if (priorityFilter !== "all") {
       filtered = filtered.filter((task) => task.priority === priorityFilter)
     }
 
-    // 요청/담당 필터
     if (me?.id && assignmentFilter !== "all") {
       if (assignmentFilter === "requested") {
         filtered = filtered.filter((task) => task.assigned_by === me.id)
@@ -156,23 +185,39 @@ export default function WorklistPage() {
       }
     }
 
+    // S3 필터: "s3_only" = S3에서 온 태스크만, 특정 버킷 = 해당 버킷 S3만
+    if (bucketFilter === "s3_only") {
+      filtered = filtered.filter((task) => taskIdsFromS3.has(task.id))
+    } else if (bucketFilter !== "all") {
+      const key = bucketFilter.trim()
+      filtered = filtered.filter((task) => taskIdsFromS3.has(task.id) && taskIdToBucket.get(task.id) === key)
+    }
+
     setFilteredTasks(filtered)
 
-    // s3_updates 미할당 목록 필터 (진행 탭, assignmentFilter 전체일 때만 검색 적용)
+    // s3_updates 목록: 진행 탭 + 전체일 때만, bucket_name·검색어로 필터
     let s3Filtered = [...s3Updates]
-    if (activeTab === "worklist" && assignmentFilter === "all" && searchQuery) {
-      const q = searchQuery.toLowerCase()
-      s3Filtered = s3Updates.filter(
-        (row) =>
-          (row.file_name || "").toLowerCase().includes(q) ||
-          (row.s3_key || "").toLowerCase().includes(q) ||
-          (row.bucket_name || "").toLowerCase().includes(q)
-      )
-    } else if (activeTab !== "worklist" || assignmentFilter !== "all") {
+    if (activeTab !== "worklist" || assignmentFilter !== "all") {
       s3Filtered = []
+    } else {
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase()
+        s3Filtered = s3Filtered.filter(
+          (row) =>
+            (row.file_name || "").toLowerCase().includes(q) ||
+            (row.s3_key || "").toLowerCase().includes(q) ||
+            (row.bucket_name || "").toLowerCase().includes(q)
+        )
+      }
+      if (bucketFilter === "s3_only") {
+        // S3만 보기: s3 미할당 건은 그대로 전부 (버킷 필터 없음)
+      } else if (bucketFilter !== "all") {
+        const key = bucketFilter.trim()
+        s3Filtered = s3Filtered.filter((row) => getBucketName(row) === key)
+      }
     }
     setFilteredS3Updates(s3Filtered)
-  }, [tasks, s3Updates, searchQuery, statusFilter, priorityFilter, activeTab, assignmentFilter, me?.id])
+  }, [tasks, s3Updates, searchQuery, statusFilter, priorityFilter, bucketFilter, activeTab, assignmentFilter, me?.id, getBucketName, taskIdToBucket, taskIdsFromS3])
 
   useEffect(() => {
     loadTasks()
@@ -368,17 +413,33 @@ export default function WorklistPage() {
           <TabsTrigger value="completed">완료</TabsTrigger>
         </TabsList>
 
-        {/* 진행 탭 */}
+        {/* 진행 탭: 필터 한 줄 + 전체 그리드 하나 */}
         <TabsContent value="worklist">
-          <Card className="mb-6">
+          <Card>
             <CardHeader>
-              <div className="flex items-center gap-2 flex-wrap">
-                <CardTitle>필터 및 검색</CardTitle>
+              <CardTitle>진행 중인 작업</CardTitle>
+              <CardDescription>
+                총 {filteredTasks.length + filteredS3Updates.length}개
+                {filteredS3Updates.length > 0 && ` (S3 미할당 ${filteredS3Updates.length}건)`}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative min-w-[180px]">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="제목, 담당자, 요청자, 파일명..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9 h-9"
+                  />
+                </div>
                 <div className="flex items-center gap-1">
                   <Button
                     type="button"
                     variant={assignmentFilter === "all" ? "default" : "outline"}
                     size="sm"
+                    className="h-9"
                     onClick={() => setAssignmentFilter("all")}
                   >
                     전체
@@ -387,6 +448,7 @@ export default function WorklistPage() {
                     type="button"
                     variant={assignmentFilter === "requested" ? "default" : "outline"}
                     size="sm"
+                    className="h-9"
                     onClick={() => setAssignmentFilter("requested")}
                   >
                     요청
@@ -395,82 +457,54 @@ export default function WorklistPage() {
                     type="button"
                     variant={assignmentFilter === "assigned" ? "default" : "outline"}
                     size="sm"
+                    className="h-9"
                     onClick={() => setAssignmentFilter("assigned")}
                   >
                     담당
                   </Button>
                 </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:gap-6">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">검색</label>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      placeholder="제목, 담당자, 요청자로 검색..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-9"
-                    />
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-end gap-4">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">상태</label>
-                    <Select value={statusFilter} onValueChange={setStatusFilter}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">전체</SelectItem>
-                        <SelectItem value="pending">대기</SelectItem>
-                        <SelectItem value="in_progress">작업중</SelectItem>
-                        <SelectItem value="on_hold">보류</SelectItem>
-                        <SelectItem value="awaiting_completion">완료대기</SelectItem>
-                        <SelectItem value="expired">마감됨</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">우선순위</label>
-                    <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">전체</SelectItem>
-                        <SelectItem value="urgent">긴급</SelectItem>
-                        <SelectItem value="high">높음</SelectItem>
-                        <SelectItem value="medium">보통</SelectItem>
-                        <SelectItem value="low">낮음</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>진행 중인 작업</CardTitle>
-                  <CardDescription>
-                    총 {filteredTasks.length + filteredS3Updates.length}개의 작업이 있습니다
-                    {filteredS3Updates.length > 0 && (
-                      <span className="text-muted-foreground"> (미할당 S3: {filteredS3Updates.length}건)</span>
-                    )}
-                  </CardDescription>
-                </div>
-                <Button onClick={loadTasks} variant="outline" size="icon" disabled={isLoading} aria-label="새로고침" title="새로고침">
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-[120px] h-9">
+                    <SelectValue placeholder="상태" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">상태 전체</SelectItem>
+                    <SelectItem value="pending">대기</SelectItem>
+                    <SelectItem value="in_progress">작업중</SelectItem>
+                    <SelectItem value="on_hold">보류</SelectItem>
+                    <SelectItem value="awaiting_completion">완료대기</SelectItem>
+                    <SelectItem value="expired">마감됨</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                  <SelectTrigger className="w-[110px] h-9">
+                    <SelectValue placeholder="우선순위" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">우선순위</SelectItem>
+                    <SelectItem value="urgent">긴급</SelectItem>
+                    <SelectItem value="high">높음</SelectItem>
+                    <SelectItem value="medium">보통</SelectItem>
+                    <SelectItem value="low">낮음</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={bucketFilter} onValueChange={setBucketFilter}>
+                  <SelectTrigger className="w-[140px] h-9">
+                    <SelectValue placeholder="S3" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">전체</SelectItem>
+                    <SelectItem value="s3_only">S3만 보기</SelectItem>
+                    {uniqueBuckets.map((b) => (
+                      <SelectItem key={b} value={b}>{b}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button onClick={loadTasks} variant="outline" size="icon" className="h-9 w-9 shrink-0" disabled={isLoading} aria-label="새로고침" title="새로고침">
                   <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
                 </Button>
               </div>
-            </CardHeader>
-            <CardContent>
+
               {isLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <div className="text-muted-foreground">로딩 중...</div>
@@ -486,6 +520,7 @@ export default function WorklistPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>제목</TableHead>
+                        <TableHead className="w-[80px] text-center">S3</TableHead>
                         <TableHead>개별/공동</TableHead>
                         <TableHead>요청자</TableHead>
                         <TableHead>담당자</TableHead>
@@ -507,10 +542,11 @@ export default function WorklistPage() {
                           <TableCell className="font-medium">
                             {row.file_name}
                           </TableCell>
+                          <TableCell className="text-center">
+                            <span className="inline-block w-2 h-2 rounded-full bg-amber-500/80 shrink-0" aria-label="S3" />
+                          </TableCell>
                           <TableCell>
-                            <Badge variant="outline" className="font-normal text-amber-600">
-                              S3 미할당
-                            </Badge>
+                            <Badge className="bg-amber-500/10 text-amber-600 font-normal">미할당</Badge>
                           </TableCell>
                           <TableCell>-</TableCell>
                           <TableCell>미지정</TableCell>
@@ -539,6 +575,13 @@ export default function WorklistPage() {
                             onClick={() => router.push(`/admin/cases/${task.id}`)}
                           >
                             <TableCell className="font-medium">{task.title}</TableCell>
+                            <TableCell className="text-center">
+                              {taskIdsFromS3.has(task.id) ? (
+                                <span className="inline-block w-2 h-2 rounded-full bg-amber-500/80 shrink-0" aria-label="S3" />
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
                             <TableCell>
                               <Badge variant={task.is_multi_assign ? "secondary" : "outline"} className="font-normal">
                                 {task.is_multi_assign ? "공동" : "개별"}

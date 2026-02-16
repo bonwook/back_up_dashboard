@@ -4,9 +4,9 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Loader2, UserPlus, Download } from "lucide-react"
-import Link from "next/link"
+import { ArrowLeft, Loader2, Download } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { TaskRegistrationForm } from "@/app/admin/analytics/components/TaskRegistrationForm"
 
 interface S3Update {
   id: number
@@ -16,6 +16,7 @@ interface S3Update {
   upload_time?: string | null
   created_at: string
   task_id: string | null
+  status?: string
   s3_key: string
 }
 
@@ -118,64 +119,46 @@ export default function S3UpdateDetailPage({
         </Button>
       </div>
 
-      <Card className="mb-6 border-l-4 border-l-amber-500/50">
-        <CardHeader>
-          <CardTitle className="text-xl">S3 업로드 작업 (미할당)</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <p className="text-sm font-medium text-muted-foreground">파일명</p>
-            <p className="font-medium break-all">{s3Update.file_name}</p>
-          </div>
-          {s3Update.bucket_name && (
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">버킷/경로</p>
-              <p className="text-sm break-all text-muted-foreground">{s3Update.bucket_name}</p>
-            </div>
-          )}
-          <div>
-            <p className="text-sm font-medium text-muted-foreground">S3 객체 키</p>
-            <p className="text-sm break-all text-muted-foreground">{s3Update.s3_key}</p>
-          </div>
-          <div>
-            <p className="text-sm font-medium text-muted-foreground">파일 크기</p>
-            <p className="text-sm">{formatBytes(s3Update.file_size)}</p>
-          </div>
-          <div>
-            <p className="text-sm font-medium text-muted-foreground">업로드일</p>
-            <p className="text-sm">
-              {displayDate
-                ? new Date(displayDate).toLocaleString("ko-KR", {
-                    year: "numeric",
-                    month: "2-digit",
-                    day: "2-digit",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })
-                : "-"}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-3 pt-4">
-            <Button asChild>
-              <Link href={`/admin/analytics?from=worklist&s3_update_id=${s3Update.id}`}>
-                <UserPlus className="mr-2 h-4 w-4" />
-                업무 추가 (담당자 지정)
-              </Link>
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleDownload}
-              disabled={isGettingUrl}
-            >
-              {isGettingUrl ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="mr-2 h-4 w-4" />
-              )}
+      {/* 1. 버킷(S3) 관련 — 제목 옆 다운로드 버튼·설명 한 줄 */}
+      <Card className="mb-4 border-l-4 border-l-amber-500/50">
+        <CardHeader className="py-2 px-4 space-y-0">
+          <div className="flex flex-row items-center gap-3 flex-wrap">
+            <CardTitle className="text-xl">버킷 정보</CardTitle>
+            <Button variant="outline" size="sm" onClick={handleDownload} disabled={isGettingUrl}>
+              {isGettingUrl ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
               다운로드 (20분 유효 링크)
             </Button>
+            <span className="text-xs text-muted-foreground">※ 한 번만 다운로드 가능합니다.</span>
           </div>
+          <div className="flex flex-row flex-wrap items-baseline gap-x-6 gap-y-1 text-sm mt-1.5">
+            <span><span className="text-xs font-medium text-muted-foreground">파일명</span> <span className="font-medium break-all">{s3Update.file_name}</span></span>
+            {s3Update.bucket_name && (
+              <span><span className="text-xs font-medium text-muted-foreground">버킷/경로</span> <span className="break-all text-muted-foreground">{s3Update.bucket_name}</span></span>
+            )}
+            <span className="min-w-0"><span className="text-xs font-medium text-muted-foreground">S3 객체 키</span> <span className="break-all text-muted-foreground truncate max-w-[200px] sm:max-w-none inline-block align-bottom" title={s3Update.s3_key}>{s3Update.s3_key}</span></span>
+            <span><span className="text-xs font-medium text-muted-foreground">파일 크기</span> <span>{formatBytes(s3Update.file_size)}</span></span>
+            <span><span className="text-xs font-medium text-muted-foreground">업로드일</span> <span>{displayDate ? new Date(displayDate).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-"}</span></span>
+          </div>
+        </CardHeader>
+      </Card>
+
+      {/* 2. 업무 할당 */}
+      <Card className="border-l-4 border-l-blue-500/50">
+        <CardHeader>
+          <CardTitle className="text-lg">업무 할당</CardTitle>
+
+        </CardHeader>
+        <CardContent>
+          <TaskRegistrationForm
+            s3UpdateId={id ?? undefined}
+            initialTitle={s3Update.file_name}
+            onSuccess={(taskId) => {
+              toast({ title: "업무가 등록되었습니다." })
+              router.replace(`/admin/cases/${taskId}`)
+            }}
+            selectedFiles={new Set()}
+            setSelectedFiles={() => {}}
+          />
         </CardContent>
       </Card>
     </div>

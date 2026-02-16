@@ -101,6 +101,7 @@ export function useTaskAssignment(props: UseTaskAssignmentProps) {
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include",
         body: JSON.stringify(requestBody),
       })
 
@@ -118,7 +119,7 @@ export function useTaskAssignment(props: UseTaskAssignmentProps) {
 
       const responseData = await response.json()
       const uniqueAssignees = new Set(subtasks.flatMap(s => s.assignedToList)).size
-      
+
       if (subtasks.length > 0) {
         toast({
           title: "✅ 공동 업무 등록 완료",
@@ -144,11 +145,12 @@ export function useTaskAssignment(props: UseTaskAssignmentProps) {
         due_date: null,
         assigned_to: "",
       })
-      
+
       const editor = document.getElementById('assign-content')
       if (editor) editor.innerHTML = ''
       const multiEditor = document.getElementById('assign-content-multi')
       if (multiEditor) multiEditor.innerHTML = ''
+      return responseData
     } catch (error: any) {
       toast({
         title: "업무 등록 실패",
@@ -158,6 +160,7 @@ export function useTaskAssignment(props: UseTaskAssignmentProps) {
     } finally {
       setIsAssigning(false)
     }
+    return undefined
   }, [assignForm, subtasks, selectedFiles, toast, setAssignForm, setSubtasks, setSelectedAssignees, setSelectedFiles, s3UpdateId])
 
   return {
