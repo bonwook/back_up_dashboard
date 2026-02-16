@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import Script from 'next/script'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { ThemeProvider } from '@/components/theme-provider'
@@ -26,10 +27,13 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const suppressStorageRejection = `window.addEventListener('unhandledrejection',function(e){var m=(e&&e.reason&&(e.reason.message||e.reason))||'';if(String(m).toLowerCase().indexOf('storage')!==-1){e.preventDefault();e.stopPropagation();}},true);`
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="font-sans antialiased">
-        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+        <Script id="suppress-storage-rejection" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: suppressStorageRejection }} />
+        <ThemeProvider defaultTheme="dark" attribute="class">
           <div className="fixed right-4 top-4 z-50">
             <ThemeToggle />
           </div>

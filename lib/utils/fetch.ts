@@ -7,24 +7,26 @@ import { safeStorage } from "./safeStorage"
  */
 async function handleAuthError() {
   try {
-    // Clear localStorage (Excel viewer data, etc.) - safeStorage 사용으로 접근 불가 환경에서 예외 방지
+    // Clear localStorage (Excel viewer data, etc.) - 접근 불가 환경에서 예외가 나지 않도록 전체 try/catch
     if (typeof window !== "undefined") {
-      safeStorage.removeItem('excelViewer_data')
-      safeStorage.removeItem('excelViewer_headers')
-      safeStorage.removeItem('excelViewer_fileName')
-      safeStorage.removeItem('excelViewer_filters')
-      safeStorage.removeItem('excelViewer_sorts')
-      safeStorage.removeItem('excelViewer_highlightedCells')
-      safeStorage.removeItem('excelViewer_currentPage')
-      safeStorage.keysWithPrefix('loginTime_').forEach(key => safeStorage.removeItem(key))
+      try {
+        safeStorage.removeItem('excelViewer_data')
+        safeStorage.removeItem('excelViewer_headers')
+        safeStorage.removeItem('excelViewer_fileName')
+        safeStorage.removeItem('excelViewer_filters')
+        safeStorage.removeItem('excelViewer_sorts')
+        safeStorage.removeItem('excelViewer_highlightedCells')
+        safeStorage.removeItem('excelViewer_currentPage')
+        safeStorage.keysWithPrefix('loginTime_').forEach(key => safeStorage.removeItem(key))
+      } catch {
+        // Access to storage is not allowed from this context 등 무시
+      }
     }
-    
-    // Call signout API to clear server-side session
-    await fetch("/api/auth/signout", { method: "POST" }).catch(() => {
-      // Ignore errors during signout
-    })
+
+    await fetch("/api/auth/signout", { method: "POST" }).catch(() => {})
+  } catch {
+    // handleAuthError 자체에서 발생한 오류는 무시 (리다이렉트는 진행)
   } finally {
-    // Always redirect to login page
     if (typeof window !== "undefined" && !window.location.pathname.startsWith("/auth/")) {
       window.location.href = "/auth/login"
     }

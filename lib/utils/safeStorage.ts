@@ -5,11 +5,13 @@
  */
 
 function hasWindowAndStorage(): boolean {
-  if (typeof window === "undefined") return false
   try {
+    if (typeof window === "undefined") return false
+    const storage = window.localStorage
+    if (!storage) return false
     const k = "__safe_storage_check__"
-    window.localStorage.setItem(k, "1")
-    window.localStorage.removeItem(k)
+    storage.setItem(k, "1")
+    storage.removeItem(k)
     return true
   } catch {
     return false
@@ -19,52 +21,62 @@ function hasWindowAndStorage(): boolean {
 let storageAvailable: boolean | null = null
 
 function isStorageAvailable(): boolean {
-  if (storageAvailable === null) {
-    storageAvailable = hasWindowAndStorage()
+  try {
+    if (storageAvailable === null) {
+      storageAvailable = hasWindowAndStorage()
+    }
+    return storageAvailable === true
+  } catch {
+    storageAvailable = false
+    return false
   }
-  return storageAvailable
+}
+
+function safeGetItem(key: string): string | null {
+  try {
+    if (!isStorageAvailable()) return null
+    return window.localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function safeSetItem(key: string, value: string): void {
+  try {
+    if (!isStorageAvailable()) return
+    window.localStorage.setItem(key, value)
+  } catch {
+    // 접근 불가 시 무시
+  }
+}
+
+function safeRemoveItem(key: string): void {
+  try {
+    if (!isStorageAvailable()) return
+    window.localStorage.removeItem(key)
+  } catch {
+    // 접근 불가 시 무시
+  }
+}
+
+function safeKeysWithPrefix(prefix: string): string[] {
+  try {
+    if (!isStorageAvailable()) return []
+    const keys: string[] = []
+    const storage = window.localStorage
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i)
+      if (key && key.startsWith(prefix)) keys.push(key)
+    }
+    return keys
+  } catch {
+    return []
+  }
 }
 
 export const safeStorage = {
-  getItem(key: string): string | null {
-    if (!isStorageAvailable()) return null
-    try {
-      return window.localStorage.getItem(key)
-    } catch {
-      return null
-    }
-  },
-
-  setItem(key: string, value: string): void {
-    if (!isStorageAvailable()) return
-    try {
-      window.localStorage.setItem(key, value)
-    } catch {
-      // 접근 불가 시 무시
-    }
-  },
-
-  removeItem(key: string): void {
-    if (!isStorageAvailable()) return
-    try {
-      window.localStorage.removeItem(key)
-    } catch {
-      // 접근 불가 시 무시
-    }
-  },
-
-  /** localStorage.key(i) 등 순회가 필요할 때만 사용. 사용 가능 시 key 배열을 반환 */
-  keysWithPrefix(prefix: string): string[] {
-    if (!isStorageAvailable()) return []
-    try {
-      const keys: string[] = []
-      for (let i = 0; i < window.localStorage.length; i++) {
-        const key = window.localStorage.key(i)
-        if (key && key.startsWith(prefix)) keys.push(key)
-      }
-      return keys
-    } catch {
-      return []
-    }
-  },
+  getItem: safeGetItem,
+  setItem: safeSetItem,
+  removeItem: safeRemoveItem,
+  keysWithPrefix: safeKeysWithPrefix,
 }
