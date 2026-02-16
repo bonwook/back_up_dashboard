@@ -65,7 +65,9 @@ export function useFileManagement(props: UseFileManagementProps) {
       })
       
       if (!response.ok) {
-        throw new Error(`Failed to load files: ${response.status} ${response.statusText}`)
+        const errBody = await response.json().catch(() => ({}))
+        const errMsg = (errBody as { error?: string })?.error || `${response.status} ${response.statusText}`
+        throw new Error(errMsg)
       }
 
       const data = await response.json()
@@ -77,9 +79,10 @@ export function useFileManagement(props: UseFileManagementProps) {
       updateDisplayedFiles(filesToSet, pathToUse, setFiles)
     } catch (error: any) {
       console.error("[Analytics] 파일 로드 오류:", error)
+      const message = error?.message || "파일 목록을 불러오는데 실패했습니다"
       toast({
-        title: "Error",
-        description: "파일 목록을 불러오는데 실패했습니다",
+        title: "파일 목록 로드 실패",
+        description: message,
         variant: "destructive",
       })
     } finally {

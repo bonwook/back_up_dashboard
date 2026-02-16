@@ -284,12 +284,13 @@ export default function ClientAnalyticsPage() {
     load()
   }, [s3UpdateId])
 
+  // 업무 추가(worklist/s3_update) 진입 시에는 S3 파일 목록 로드 생략 → AWS 자격증명은 다운로드(presigned URL)에서만 사용
   useEffect(() => {
-    if (user) {
+    if (user && !s3UpdateId && !fromWorklist) {
       loadFiles()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user])
+  }, [user, s3UpdateId, fromWorklist])
 
   // currentPath 변경 시 파일 목록 업데이트
   useEffect(() => {

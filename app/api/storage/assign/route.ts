@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { verifyToken } from "@/lib/auth"
-import { query } from "@/lib/db/mysql"
+import { query, queryOne } from "@/lib/db/mysql"
+import { toS3Key } from "@/lib/utils/s3Updates"
 
 interface AssignmentItem {
   assignedTo: string
@@ -56,15 +57,26 @@ export async function POST(request: NextRequest) {
       // 다중 할당 모드
       return await handleMultiAssignment(decoded.id, title, priority, due_date, assignments)
     } else {
-      // 기존 개별 할당 모드 (하위 호환성 유지)
+      // 개별 할당: 작업 생성 출처 = s3_update(DB) OR staff 직접 선택(fileKeys)
       if (fileKeys !== undefined && !Array.isArray(fileKeys)) {
         return NextResponse.json({ error: "파일 키 목록이 올바른 형식이 아닙니다" }, { status: 400 })
       }
 
-      // 담당자가 없으면 작성자 본인에게 할당 (선택사항)
-      const finalAssignedTo = assignedTo || decoded.id
+      let fileKeysForTask: string[] = Array.isArray(fileKeys) ? fileKeys : []
 
-      return await handleSingleAssignment(decoded.id, finalAssignedTo, title, content, priority, due_date, fileKeys, "single", s3_update_id)
+      if (s3_update_id && typeof s3_update_id === "string") {
+        const row = await queryOne(
+          `SELECT file_name, bucket_name FROM s3_updates WHERE id = ?`,
+          [s3_update_id]
+        )
+        if (row) {
+          const r = row as { file_name: string; bucket_name?: string | null }
+          fileKeysForTask = [toS3Key(r)]
+        }
+      }
+
+      const finalAssignedTo = assignedTo || decoded.id
+      return await handleSingleAssignment(decoded.id, finalAssignedTo, title, content, priority, due_date, fileKeysForTask, "single", s3_update_id)
     }
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Internal server error"

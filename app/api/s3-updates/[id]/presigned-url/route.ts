@@ -51,7 +51,14 @@ export async function GET(
     })
   } catch (error: unknown) {
     console.error("[s3-updates presigned-url] Error:", error)
-    const message = error instanceof Error ? error.message : "Internal server error"
+    const err = error as { name?: string; message?: string }
+    const isCredentialsError =
+      err?.name === "CredentialsProviderError" ||
+      String(err?.message || "").includes("session has expired") ||
+      String(err?.message || "").includes("reauthenticate")
+    const message = isCredentialsError
+      ? "AWS 자격 증명이 만료되었거나 설정되지 않았습니다. 관리자에게 문의하세요."
+      : (error instanceof Error ? error.message : "Internal server error")
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }
