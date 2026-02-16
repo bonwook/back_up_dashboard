@@ -262,7 +262,6 @@ export async function POST(request: NextRequest) {
         
         // 중복 s3_key 체크: 이미 업로드된 파일이면 스킵
         if (uploadedS3Keys.has(s3Key)) {
-          console.log(`[API Upload] 중복 파일 스킵: ${s3Key}`)
           continue
         }
         uploadedS3Keys.add(s3Key)

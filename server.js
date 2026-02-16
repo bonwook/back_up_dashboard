@@ -8,15 +8,11 @@ process.chdir(rootDir)
 
 const envPath = path.join(rootDir, ".env")
 
-console.log("[Server] cwd:", rootDir)
-console.log("[Server] env path:", envPath)
-
 if (fs.existsSync(envPath)) {
   require("dotenv").config({
     path: envPath,
     override: false,
   })
-  console.log("[Server] .env loaded")
 } else {
   console.warn("[Server] .env not found")
 }
@@ -39,15 +35,10 @@ if (missingVars.length > 0) {
   process.exit(1)
 }
 
-console.log("[Server] Environment OK")
-console.log("[Server] Working directory:", process.cwd())
-console.log("[Server] __dirname:", __dirname)
-
 // Next.js가 올바른 디렉토리에서 실행되도록 확인
 if (process.cwd() !== rootDir) {
   console.warn("[Server] Warning: Working directory mismatch, changing to:", rootDir)
   process.chdir(rootDir)
-  console.log("[Server] Changed working directory to:", process.cwd())
 }
 
 // Next.js 실행

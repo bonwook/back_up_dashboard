@@ -19,7 +19,6 @@ export async function GET(request: NextRequest) {
     const apiKey = process.env.HOLIDAY_API_KEY
     if (!apiKey) {
       // API 키가 없으면 빈 배열 반환 (하드코딩된 데이터로 폴백)
-      console.log('[Holiday API] No API key configured')
       return NextResponse.json({ holidays: [] })
     }
 
@@ -30,7 +29,6 @@ export async function GET(request: NextRequest) {
     // 캐시 확인
     const cached = holidayCache.get(cacheKey)
     if (cached && now - cached.cachedAt < CACHE_DURATION) {
-      console.log(`[Holiday API] Returning cached data for ${cacheKey}`)
       return NextResponse.json({ holidays: cached.data })
     }
 
@@ -48,9 +46,7 @@ export async function GET(request: NextRequest) {
     }
 
     const apiUrl = `http://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo?${params.toString()}`
-    
-    console.log(`[Holiday API] Fetching holidays for ${year}-${month}`)
-    
+
     const response = await fetch(apiUrl, {
       method: "GET",
       headers: {
@@ -66,17 +62,13 @@ export async function GET(request: NextRequest) {
     }
 
     const data = await response.json()
-    console.log(`[Holiday API] Response received:`, data?.response?.header)
-    
+
     // API 응답 구조 확인 및 파싱
     let holidays: any[] = []
     
     if (data?.response?.body?.items?.item) {
       const items = data.response.body.items.item
       holidays = Array.isArray(items) ? items : [items]
-      console.log(`[Holiday API] Parsed ${holidays.length} holidays`)
-    } else {
-      console.log(`[Holiday API] No holidays found in response for ${year}-${month}`)
     }
 
     // 캐시에 저장

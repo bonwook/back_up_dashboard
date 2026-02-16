@@ -102,12 +102,6 @@ export async function POST(request: NextRequest) {
       targetPath?: string
     }
 
-    console.log("[Extract] Request:", {
-      zipKey: zipKey?.slice(0, 80),
-      targetPath: requestedTargetPath ?? "(none)",
-      userId,
-    })
-
     if (!zipKey) {
       return NextResponse.json({ error: "zipKey is required" }, { status: 400 })
     }
@@ -152,8 +146,6 @@ export async function POST(request: NextRequest) {
     const targetFolderPath = basePath ? `${basePath}/${archiveBaseName}` : archiveBaseName
     const is7z = key.toLowerCase().endsWith(".7z")
 
-    console.log(`[Extract] Extracting ${key} to ${targetFolderPath}`)
-
     const getObjectCommand = new GetObjectCommand({
       Bucket: BUCKET_NAME,
       Key: key,
@@ -190,10 +182,8 @@ export async function POST(request: NextRequest) {
           }
           const totalFiles = stats.count
           const totalSize = stats.totalUncompressedSize
-          console.log("[Extract] Archive stats:", { totalFiles, totalSize })
 
           if (!is7z && totalFiles === 0) {
-            console.log("[Extract] Zip has 0 extractable files (skipped or empty), returning early")
             controller.enqueue(
               encoder.encode(
                 JSON.stringify({
@@ -241,7 +231,6 @@ export async function POST(request: NextRequest) {
               extractedSize += r.fileSize
             }
             extractedCount += batch.length
-            console.log("[Extract] Batch done:", { batchSize: batch.length, extractedCount, totalFiles })
 
             const progress =
               totalFiles > 0
@@ -272,8 +261,6 @@ export async function POST(request: NextRequest) {
               )
             )
           }
-
-          console.log("[Extract] Complete:", { extractedCount, totalFiles, sampleKeys: extractedFiles.slice(0, 5) })
 
           if (totalFiles > 0 && extractedCount === 0) {
             const errMsg =
