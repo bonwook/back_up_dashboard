@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3"
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command, HeadObjectCommand } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 
 const BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME!
@@ -97,6 +97,19 @@ export async function getSignedDownloadUrl(key: string, expiresIn = 3600): Promi
     Key: key,
   })
   return await getSignedUrl(getS3Client(), command, { expiresIn })
+}
+
+/**
+ * S3 task(s3_updates)에서 온 파일 다운로드 전용 — 객체 존재 여부 확인.
+ * 없으면 NoSuchKey 등으로 throw.
+ */
+export async function headTaskDownloadObject(key: string): Promise<void> {
+  const client = getTaskDownloadS3Client()
+  const command = new HeadObjectCommand({
+    Bucket: BUCKET_NAME,
+    Key: key,
+  })
+  await client.send(command)
 }
 
 /**

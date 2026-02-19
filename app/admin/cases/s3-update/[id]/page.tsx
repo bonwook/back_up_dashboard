@@ -38,7 +38,6 @@ export default function S3UpdateDetailPage({
   const [isGettingUrl, setIsGettingUrl] = useState(false)
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
   const [downloadExpiresAt, setDownloadExpiresAt] = useState<number | null>(null)
-  const [isUrlLoading, setIsUrlLoading] = useState(false)
   const [id, setId] = useState<string | null>(null)
   const router = useRouter()
   const { toast } = useToast()
@@ -71,29 +70,7 @@ export default function S3UpdateDetailPage({
     load()
   }, [id, router])
 
-  // 상세 페이지 열 때마다 presigned URL 실시간 발급
-  useEffect(() => {
-    if (!s3Update?.id) return
-    let cancelled = false
-    const fetchUrl = async () => {
-      setIsUrlLoading(true)
-      try {
-        const res = await fetch(`/api/s3-updates/${s3Update.id}/presigned-url`, { credentials: "include" })
-        if (cancelled) return
-        if (!res.ok) return
-        const data = await res.json() as { url: string; expiresIn: number; fileName?: string }
-        if (cancelled) return
-        setDownloadUrl(data.url)
-        setDownloadExpiresAt(Date.now() + data.expiresIn * 1000)
-      } catch {
-        if (!cancelled) setDownloadUrl(null)
-      } finally {
-        if (!cancelled) setIsUrlLoading(false)
-      }
-    }
-    fetchUrl()
-    return () => { cancelled = true }
-  }, [s3Update?.id])
+  // presigned URL은 다운로드 버튼 클릭 시에만 발급 (24시간 유효, 한 번만 발급)
 
   const isDownloadExpired = downloadExpiresAt != null && Date.now() > downloadExpiresAt
 
@@ -118,7 +95,7 @@ export default function S3UpdateDetailPage({
       window.open(data.url, "_blank", "noopener,noreferrer")
       toast({
         title: "다운로드 링크 생성됨",
-        description: "1시간 유효한 링크가 새 탭에서 열립니다.",
+        description: "24시간 유효한 링크가 새 탭에서 열립니다.",
       })
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "다운로드 URL을 가져오지 못했습니다."
@@ -154,12 +131,12 @@ export default function S3UpdateDetailPage({
       </div>
 
       {/* 1. 버킷(S3) 관련 — 제목 옆 다운로드 버튼·설명 한 줄 */}
-      <Card className="mb-4 border-l-4 border-l-amber-500/50">
+      <Card className="mb-4">
         <CardHeader className="py-2 px-4 space-y-0">
           <div className="flex flex-row items-center gap-3 flex-wrap">
             <CardTitle className="text-xl">버킷 정보</CardTitle>
-            <Button variant="outline" size="sm" onClick={handleDownload} disabled={isGettingUrl || isUrlLoading}>
-              {(isGettingUrl || isUrlLoading) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            <Button variant="outline" size="sm" onClick={handleDownload} disabled={isGettingUrl}>
+              {isGettingUrl ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
               {isDownloadExpired ? "새 링크 발급" : "다운로드 (1시간 유효 링크)"}
             </Button>
             <span className="text-xs text-muted-foreground">
@@ -179,7 +156,7 @@ export default function S3UpdateDetailPage({
       </Card>
 
       {/* 2. 업무 할당 */}
-      <Card className="border-l-4 border-l-blue-500/50">
+      <Card>
         <CardHeader>
           <CardTitle className="text-lg">업무 할당</CardTitle>
 

@@ -66,7 +66,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [isGettingS3Url, setIsGettingS3Url] = useState(false)
   const [s3DownloadUrl, setS3DownloadUrl] = useState<string | null>(null)
   const [s3DownloadExpiresAt, setS3DownloadExpiresAt] = useState<number | null>(null)
-  const [isS3UrlLoading, setIsS3UrlLoading] = useState(false)
   const router = useRouter()
   const [taskId, setTaskId] = useState<string | null>(null)
   const { toast } = useToast()
@@ -200,29 +199,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     loadTask()
   }, [taskId, router, toast])
 
-  // task 상세 진입 시 S3 다운로드용 presigned URL 실시간 발급
-  useEffect(() => {
-    if (!s3Update?.id) return
-    let cancelled = false
-    const fetchUrl = async () => {
-      setIsS3UrlLoading(true)
-      try {
-        const res = await fetch(`/api/s3-updates/${s3Update.id}/presigned-url`, { credentials: "include" })
-        if (cancelled) return
-        if (!res.ok) return
-        const data = await res.json() as { url: string; expiresIn: number; fileName?: string }
-        if (cancelled) return
-        setS3DownloadUrl(data.url)
-        setS3DownloadExpiresAt(Date.now() + data.expiresIn * 1000)
-      } catch {
-        if (!cancelled) setS3DownloadUrl(null)
-      } finally {
-        if (!cancelled) setIsS3UrlLoading(false)
-      }
-    }
-    fetchUrl()
-    return () => { cancelled = true }
-  }, [s3Update?.id])
+  // S3 다운로드용 presigned URL은 다운로드 버튼 클릭 시에만 발급 (24시간 유효, 한 번만 발급)
 
   // 첨부파일 resolve + 업로더 기준으로 분리(기존 데이터에서 file_keys에 섞여 있는 사용자 파일도 분리)
   useEffect(() => {
@@ -923,7 +900,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       setS3DownloadUrl(data.url)
       setS3DownloadExpiresAt(Date.now() + data.expiresIn * 1000)
       window.open(data.url, "_blank", "noopener,noreferrer")
-      toast({ title: "다운로드 링크 생성됨", description: "1시간 유효한 링크가 새 탭에서 열립니다." })
+      toast({ title: "다운로드 링크 생성됨", description: "24시간 유효한 링크가 새 탭에서 열립니다." })
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "다운로드 URL을 가져오지 못했습니다."
       toast({ title: "다운로드 실패", description: message, variant: "destructive" })
@@ -943,12 +920,10 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         </Button>
       </div>
 
-      {s3Update && (
-        <Card className="mb-6">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+      <Card className="mb-6">
+        {s3Update && (
+          <div className="px-6 pt-6 pb-4 space-y-2 border-b border-border/50">
             <CardTitle className="text-xl">버킷 정보</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 px-6 pb-4 pt-0">
             <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
               <div>
                 <p className="text-xs font-medium text-muted-foreground">파일명</p>
@@ -984,20 +959,17 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 pt-3">
-              <Button variant="outline" size="sm" onClick={handleS3Download} disabled={isGettingS3Url || isS3UrlLoading}>
-                {(isGettingS3Url || isS3UrlLoading) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+              <Button variant="outline" size="sm" onClick={handleS3Download} disabled={isGettingS3Url}>
+                {isGettingS3Url ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                 {isS3DownloadExpired ? "새 링크 발급" : "다운로드 (1시간 유효 링크)"}
               </Button>
               <span className="text-xs text-muted-foreground">
                 {isS3DownloadExpired ? "만료됨 — 다시 클릭하여 새 링크를 발급받으세요." : "※ 링크는 1시간 후 만료됩니다."}
               </span>
             </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <Card className="mb-6">
-        <CardHeader className="pb-0.5 pt-3">
+          </div>
+        )}
+        <CardHeader className={cn("pb-0.5 pt-3", s3Update && "pt-4")}>
           <div className="flex items-start justify-between gap-4 mb-1">
             <CardTitle className="text-xl font-bold">{task.title}</CardTitle>
             {canChangeStatus && task.status !== "completed" && (
@@ -1520,6 +1492,98 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               </div>
             </div>
           )}
+
+          {/* 공동 할당: 첫 그룹 요청자 내용을 같은 카드 안에 이어서 표시 (제목+본문 하나로) */}
+          {subtasks.length > 0 && !showMyAssignment && groupedSubtasks[0] && (() => {
+            const firstGroup = groupedSubtasks[0]
+            const firstGroupContent = firstGroup.tasks[0]?.content ?? ""
+            return (
+              <div className="mt-4 pt-4 border-t border-border/50">
+                <div className="flex flex-row items-center justify-between pb-2">
+                  <h3 className="text-lg font-semibold">{firstGroup.subtitle}</h3>
+                  {canEditTask && !isEditingRequesterContent && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        editingSubtitleRef.current = firstGroup.subtitle
+                        setSelectedSubtitle(firstGroup.subtitle)
+                        setEditingRequesterFileKeys(resolvedFileKeys.map((f) => f.s3Key))
+                        setIsEditingRequesterContent(true)
+                      }}
+                    >
+                      수정
+                    </Button>
+                  )}
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium text-muted-foreground mb-1">요청자 내용</p>
+                  {canEditTask && isEditingRequesterContent && selectedSubtitle === firstGroup.subtitle ? (
+                    <>
+                      <div className="grid gap-2 mb-3">
+                        <Label className="text-xs">첨부파일 (요청자)</Label>
+                        <div className="flex flex-col gap-2">
+                          {editingRequesterFileKeys.map((key, idx) => (
+                            <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
+                              <button type="button" className="text-blue-600 hover:underline truncate max-w-[180px]" onClick={() => handleDownload(key, extractFileName(key, "파일"))}>{extractFileName(key, "파일")}</button>
+                              <button type="button" aria-label="첨부 제거" className="p-0.5 text-muted-foreground hover:text-destructive" onClick={() => setEditingRequesterFileKeys((prev) => prev.filter((_, i) => i !== idx))}><Trash2 className="h-3.5 w-3.5" /></button>
+                            </div>
+                          ))}
+                          <Button type="button" variant="outline" size="sm" className="w-fit" disabled={isUploadingRequesterFile} onClick={() => requesterFileInputRef.current?.click()}>
+                            {isUploadingRequesterFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                            파일 추가
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="border rounded-md overflow-hidden bg-background flex flex-col" style={{ height: "400px", minHeight: "400px", maxHeight: "400px" }}>
+                        <div className="flex items-center gap-1 p-2 flex-wrap shrink-0 border-b">
+                          <Button type="button" variant={requesterEditorState.bold ? "secondary" : "ghost"} size="sm" className={`h-8 w-8 p-0 ${requesterEditorState.bold ? "bg-primary/10" : ""}`} onClick={(e) => { e.preventDefault(); const editor = document.getElementById("requester-content-editor"); if (editor) { editor.focus(); document.execCommand("bold", false); updateRequesterEditorState() } }} title="굵게"><Bold className={`h-4 w-4 ${requesterEditorState.bold ? "text-primary" : ""}`} /></Button>
+                          <Button type="button" variant={requesterEditorState.italic ? "secondary" : "ghost"} size="sm" className={`h-8 w-8 p-0 ${requesterEditorState.italic ? "bg-primary/10" : ""}`} onClick={(e) => { e.preventDefault(); const editor = document.getElementById("requester-content-editor"); if (editor) { editor.focus(); document.execCommand("italic", false); updateRequesterEditorState() } }} title="기울임"><Italic className={`h-4 w-4 ${requesterEditorState.italic ? "text-primary" : ""}`} /></Button>
+                          <Button type="button" variant={requesterEditorState.underline ? "secondary" : "ghost"} size="sm" className={`h-8 w-8 p-0 ${requesterEditorState.underline ? "bg-primary/10" : ""}`} onClick={(e) => { e.preventDefault(); const editor = document.getElementById("requester-content-editor"); if (editor) { editor.focus(); document.execCommand("underline", false); updateRequesterEditorState() } }} title="밑줄"><Underline className={`h-4 w-4 ${requesterEditorState.underline ? "text-primary" : ""}`} /></Button>
+                          <div className="w-px h-6 bg-border mx-1" />
+                          <div className="relative">
+                            <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => { e.preventDefault(); setRequesterTableGridHover(requesterTableGridHover.show ? { row: 0, col: 0, show: false } : { row: 0, col: 0, show: true }) }} title="테이블"><TableIcon className="h-4 w-4" /></Button>
+                            {requesterTableGridHover.show && (
+                              <div className="absolute top-full left-0 mt-2 bg-background border rounded-lg shadow-xl p-4 z-50 min-w-[280px]" onMouseLeave={() => setRequesterTableGridHover({ row: 0, col: 0, show: false })}>
+                                <div className="grid grid-cols-10 gap-1 mb-3">
+                                  {Array.from({ length: 100 }).map((_, idx) => {
+                                    const row = Math.floor(idx / 10) + 1
+                                    const col = (idx % 10) + 1
+                                    const isSelected = row <= requesterTableGridHover.row && col <= requesterTableGridHover.col
+                                    return (
+                                      <div key={idx} className={`w-5 h-5 border border-border rounded-sm transition-colors ${isSelected ? "bg-primary border-primary" : "bg-muted hover:bg-muted/80"}`} onMouseEnter={() => setRequesterTableGridHover({ row, col, show: true })} onClick={() => { createRequesterTable(row, col); setRequesterTableGridHover({ row: 0, col: 0, show: false }) }} />
+                                    )
+                                  })}
+                                </div>
+                                <div className="text-sm text-center font-medium text-foreground border-t pt-2">
+                                  {requesterTableGridHover.row > 0 && requesterTableGridHover.col > 0 ? `${requesterTableGridHover.row} x ${requesterTableGridHover.col} 테이블` : "테이블 크기 선택"}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          <div className="w-px h-6 bg-border mx-1" />
+                          <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => { e.preventDefault(); const editor = document.getElementById("requester-content-editor") as HTMLElement; if (editor) { editor.focus(); const hr = document.createElement("hr"); hr.style.border = "none"; hr.style.borderTop = "2px solid #6b7280"; hr.style.margin = "10px 0"; const selection = window.getSelection(); if (selection && selection.rangeCount > 0) { const range = selection.getRangeAt(0); range.deleteContents(); range.insertNode(hr); range.setStartAfter(hr); range.collapse(true); selection.removeAllRanges(); selection.addRange(range) } } }} title="구분선"><Minus className="h-4 w-4" /></Button>
+                        </div>
+                        <div id="requester-content-editor" contentEditable suppressContentEditableWarning data-placeholder="내용을 입력하세요." onInput={() => { updateRequesterEditorState(); const editor = document.getElementById("requester-content-editor"); if (editor) editor.querySelectorAll("table[data-resizable='true']").forEach((table) => addResizeHandlersToRequesterTable(table as HTMLTableElement)) }} onBlur={updateRequesterEditorState} onMouseUp={updateRequesterEditorState} onKeyUp={updateRequesterEditorState} className="text-sm p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 custom-scrollbar focus:outline-none focus:ring-0 resize-none w-full min-w-0" style={{ minHeight: "280px", whiteSpace: "pre-wrap" }} />
+                      </div>
+                      <div className="flex gap-2 mt-3 justify-end">
+                        <Button size="sm" onClick={handleSaveRequesterContent} disabled={isSavingRequesterContent}>{isSavingRequesterContent ? <Loader2 className="h-4 w-4 animate-spin" /> : "저장"}</Button>
+                        <Button size="sm" variant="outline" onClick={() => { editingSubtitleRef.current = null; setIsEditingRequesterContent(false) }} disabled={isSavingRequesterContent}>취소</Button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="border rounded-md overflow-hidden bg-muted/30 p-4" style={{ minHeight: "300px" }}>
+                      {firstGroupContent ? (
+                        <div className="text-base p-3 prose prose-base max-w-none dark:prose-invert" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }} dangerouslySetInnerHTML={{ __html: sanitizeHtml(firstGroupContent) }} />
+                      ) : (
+                        <span className="text-muted-foreground">내용이 없습니다</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
         </CardContent>
       </Card>
 
@@ -1832,11 +1896,12 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           </Card>
         </>
       ) : (
-        /* 요청자 내용 보기: 그룹별 요청자 내용 + 분담내용 카드 (수정 시 해당 카드 내부에서 인라인 편집) */
+        /* 요청자 내용 보기: 그룹별 요청자 내용 + 분담내용 카드 (첫 그룹 요청자 내용은 상단 카드에 통합됨) */
         <>
-          {groupedSubtasks.map((group) => {
+          {groupedSubtasks.map((group, groupIndex) => {
             const selectedSubtaskInGroup = group.tasks.find((t) => t.id === selectedSubtaskIdBySubtitle[group.subtitle]) ?? null
             const groupRequesterContent = group.tasks[0]?.content ?? ""
+            const isFirstGroup = groupIndex === 0
             return (
               <Card key={group.subtitle}>
                 <CardHeader className="flex flex-row items-center justify-between">
@@ -1857,6 +1922,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   )}
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {!isFirstGroup && (
                   <div>
                     <p className="text-[11px] font-medium text-muted-foreground mb-1">요청자 내용</p>
                     {canEditTask && isEditingRequesterContent && selectedSubtitle === group.subtitle ? (
@@ -2099,6 +2165,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       </div>
                     )}
                   </div>
+                  )}
                   <div>
                     <p className="text-[11px] font-medium text-muted-foreground mb-1">분담내용</p>
                     <div className="border rounded-md overflow-hidden" style={{ height: "520px", display: "flex", gap: "8px" }}>
