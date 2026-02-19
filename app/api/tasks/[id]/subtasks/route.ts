@@ -65,20 +65,49 @@ export async function GET(
       ORDER BY ts.created_at ASC
     `, [taskId])
 
-    // Parse JSON file_keys, comment_file_keys
-    const parsedSubtasks = subtasks.map((subtask: any) => {
+    const subtaskIds = (subtasks as any[]).map((s: any) => s.id)
+    let attachmentsBySubtask: Record<string, { file_keys: Array<{ key: string; uploaded_at: string | null }>; comment_file_keys: Array<{ key: string; uploaded_at: string | null }> }> = {}
+    if (subtaskIds.length > 0) {
       try {
-        const fileKeys = typeof subtask.file_keys === 'string' 
-          ? JSON.parse(subtask.file_keys) 
-          : subtask.file_keys || []
-        const commentFileKeys = typeof subtask.comment_file_keys === 'string'
-          ? JSON.parse(subtask.comment_file_keys)
-          : subtask.comment_file_keys || []
-        
+        const placeholders = subtaskIds.map(() => "?").join(",")
+        const rows = await query(
+          `SELECT subtask_id, s3_key, attachment_type, uploaded_at FROM task_file_attachments WHERE task_id = ? AND subtask_id IN (${placeholders}) ORDER BY created_at ASC`,
+          [taskId, ...subtaskIds]
+        )
+        for (const sid of subtaskIds) {
+          attachmentsBySubtask[sid] = { file_keys: [], comment_file_keys: [] }
+        }
+        for (const r of rows as any[]) {
+          const sid = r.subtask_id
+          if (!sid || !attachmentsBySubtask[sid]) continue
+          const item = { key: r.s3_key, uploaded_at: r.uploaded_at ?? null }
+          if (r.attachment_type === "requester") attachmentsBySubtask[sid].file_keys.push(item)
+          else attachmentsBySubtask[sid].comment_file_keys.push(item)
+        }
+      } catch {
+        // 테이블 없으면 무시
+      }
+    }
+
+    // Parse JSON file_keys, comment_file_keys; task_file_attachments 있으면 해당 값 사용
+    const parsedSubtasks = subtasks.map((subtask: any) => {
+      const fromTable = attachmentsBySubtask[subtask.id]
+      if (fromTable && (fromTable.file_keys.length > 0 || fromTable.comment_file_keys.length > 0)) {
         return {
           ...subtask,
-          file_keys: fileKeys,
-          comment_file_keys: commentFileKeys,
+          file_keys: fromTable.file_keys,
+          comment_file_keys: fromTable.comment_file_keys,
+        }
+      }
+      try {
+        const fileKeys = typeof subtask.file_keys === "string" ? JSON.parse(subtask.file_keys) : subtask.file_keys || []
+        const commentFileKeys = typeof subtask.comment_file_keys === "string" ? JSON.parse(subtask.comment_file_keys) : subtask.comment_file_keys || []
+        const fk = Array.isArray(fileKeys) ? fileKeys.map((k: any) => (typeof k === "object" && k?.key != null ? { key: k.key, uploaded_at: k.uploaded_at ?? null } : { key: String(k), uploaded_at: null })) : []
+        const cfk = Array.isArray(commentFileKeys) ? commentFileKeys.map((k: any) => (typeof k === "object" && k?.key != null ? { key: k.key, uploaded_at: k.uploaded_at ?? null } : { key: String(k), uploaded_at: null })) : []
+        return {
+          ...subtask,
+          file_keys: fk,
+          comment_file_keys: cfk,
         }
       } catch {
         return {

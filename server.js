@@ -17,11 +17,12 @@ if (fs.existsSync(envPath)) {
   console.warn("[Server] .env not found")
 }
 
-// 필수 환경변수 체크
+// 필수 환경변수 체크 (Secrets Manager 사용 시 DB_PASSWORD 생략 가능)
+const useDbSecret = !!(process.env.AWS_DB_SECRET_NAME || process.env.DB_SECRET_ARN)
 const requiredVars = [
   'DB_HOST',
   'DB_USER',
-  'DB_PASSWORD',
+  ...(useDbSecret ? [] : ['DB_PASSWORD']),
   'DB_NAME',
   'JWT_SECRET',
 ]

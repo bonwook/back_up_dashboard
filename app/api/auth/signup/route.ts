@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
 
     const { getPool } = await import("@/lib/db/mysql")
     try {
-      const pool = getPool()
+      const pool = await getPool()
       await pool.query("SELECT 1")
     } catch (dbError: unknown) {
       const errorMessage = dbError instanceof Error ? dbError.message : "Database connection failed"

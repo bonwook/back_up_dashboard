@@ -36,6 +36,9 @@ export default function S3UpdateDetailPage({
   const [s3Update, setS3Update] = useState<S3Update | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isGettingUrl, setIsGettingUrl] = useState(false)
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
+  const [downloadExpiresAt, setDownloadExpiresAt] = useState<number | null>(null)
+  const [isUrlLoading, setIsUrlLoading] = useState(false)
   const [id, setId] = useState<string | null>(null)
   const router = useRouter()
   const { toast } = useToast()
@@ -68,8 +71,38 @@ export default function S3UpdateDetailPage({
     load()
   }, [id, router])
 
+  // 상세 페이지 열 때마다 presigned URL 실시간 발급
+  useEffect(() => {
+    if (!s3Update?.id) return
+    let cancelled = false
+    const fetchUrl = async () => {
+      setIsUrlLoading(true)
+      try {
+        const res = await fetch(`/api/s3-updates/${s3Update.id}/presigned-url`, { credentials: "include" })
+        if (cancelled) return
+        if (!res.ok) return
+        const data = await res.json() as { url: string; expiresIn: number; fileName?: string }
+        if (cancelled) return
+        setDownloadUrl(data.url)
+        setDownloadExpiresAt(Date.now() + data.expiresIn * 1000)
+      } catch {
+        if (!cancelled) setDownloadUrl(null)
+      } finally {
+        if (!cancelled) setIsUrlLoading(false)
+      }
+    }
+    fetchUrl()
+    return () => { cancelled = true }
+  }, [s3Update?.id])
+
+  const isDownloadExpired = downloadExpiresAt != null && Date.now() > downloadExpiresAt
+
   const handleDownload = async () => {
     if (!id) return
+    if (downloadUrl && !isDownloadExpired) {
+      window.open(downloadUrl, "_blank", "noopener,noreferrer")
+      return
+    }
     setIsGettingUrl(true)
     try {
       const res = await fetch(`/api/s3-updates/${id}/presigned-url`, {
@@ -79,12 +112,13 @@ export default function S3UpdateDetailPage({
         const err = await res.json().catch(() => ({}))
         throw new Error((err as { error?: string }).error || "다운로드 URL 생성 실패")
       }
-      const data = await res.json()
-      const url = (data as { url: string }).url
-      window.open(url, "_blank", "noopener,noreferrer")
+      const data = await res.json() as { url: string; expiresIn: number; fileName?: string }
+      setDownloadUrl(data.url)
+      setDownloadExpiresAt(Date.now() + data.expiresIn * 1000)
+      window.open(data.url, "_blank", "noopener,noreferrer")
       toast({
         title: "다운로드 링크 생성됨",
-        description: "20분간 유효한 링크가 새 탭에서 열립니다.",
+        description: "1시간 유효한 링크가 새 탭에서 열립니다.",
       })
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "다운로드 URL을 가져오지 못했습니다."
@@ -124,11 +158,13 @@ export default function S3UpdateDetailPage({
         <CardHeader className="py-2 px-4 space-y-0">
           <div className="flex flex-row items-center gap-3 flex-wrap">
             <CardTitle className="text-xl">버킷 정보</CardTitle>
-            <Button variant="outline" size="sm" onClick={handleDownload} disabled={isGettingUrl}>
-              {isGettingUrl ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-              다운로드 (20분 유효 링크)
+            <Button variant="outline" size="sm" onClick={handleDownload} disabled={isGettingUrl || isUrlLoading}>
+              {(isGettingUrl || isUrlLoading) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+              {isDownloadExpired ? "새 링크 발급" : "다운로드 (1시간 유효 링크)"}
             </Button>
-            <span className="text-xs text-muted-foreground">※ 한 번만 다운로드 가능합니다.</span>
+            <span className="text-xs text-muted-foreground">
+              {isDownloadExpired ? "만료됨 — 다시 클릭하여 새 링크를 발급받으세요." : "※ 링크는 1시간 후 만료됩니다."}
+            </span>
           </div>
           <div className="flex flex-row flex-wrap items-baseline gap-x-6 gap-y-1 text-sm mt-1.5">
             <span><span className="text-xs font-medium text-muted-foreground">파일명</span> <span className="font-medium break-all">{s3Update.file_name}</span></span>

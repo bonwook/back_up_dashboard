@@ -1,23 +1,115 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { randomUUID } from "crypto"
 import { verifyToken } from "@/lib/auth"
 import { query } from "@/lib/db/mysql"
-import { randomUUID } from "crypto"
 import { writeAuditLog } from "@/lib/db/audit"
 import { toS3Key } from "@/lib/utils/s3Updates"
 import { normalizeFileKeyArray } from "@/lib/utils/fileKeyHelpers"
 
-/** 파일 키 배열에 대해 user_files의 uploaded_at을 한 번의 IN 쿼리로 조회 */
+/** 파일 키 배열에 대해 user_files의 uploaded_at을 한 번의 IN 쿼리로 조회 (같은 키 여러 행 시 최신만) */
 async function getFileKeysWithDates(
   keys: string[]
 ): Promise<Array<{ key: string; uploaded_at: string | null }>> {
   if (keys.length === 0) return []
   const placeholders = keys.map(() => "?").join(",")
   const rows = await query<{ s3_key: string; uploaded_at: string | null }>(
-    `SELECT s3_key, uploaded_at FROM user_files WHERE s3_key IN (${placeholders})`,
+    `SELECT s3_key, uploaded_at FROM user_files WHERE s3_key IN (${placeholders}) ORDER BY uploaded_at DESC`,
     keys
   )
-  const map = new Map(rows.map((r) => [r.s3_key, r.uploaded_at]))
+  const map = new Map<string, string | null>()
+  for (const r of rows) {
+    if (!map.has(r.s3_key)) map.set(r.s3_key, r.uploaded_at)
+  }
   return keys.map((key) => ({ key, uploaded_at: map.get(key) ?? null }))
+}
+
+/** task_file_attachments 테이블에서 task_id(, subtask_id) 기준 첨부 목록 조회. 실패 시 null */
+async function getTaskAttachmentsFromTable(
+  taskId: string,
+  subtaskId: string | null
+): Promise<{ file_keys: Array<{ key: string; uploaded_at: string | null }>; comment_file_keys: Array<{ key: string; uploaded_at: string | null }> } | null> {
+  try {
+    const condition = subtaskId
+      ? "task_id = ? AND subtask_id = ?"
+      : "task_id = ? AND (subtask_id IS NULL OR subtask_id = '')"
+    const params = subtaskId ? [taskId, subtaskId] : [taskId]
+    const rows = await query<{ s3_key: string; file_name: string | null; attachment_type: string; uploaded_at: string | null }>(
+      `SELECT s3_key, file_name, attachment_type, uploaded_at FROM task_file_attachments WHERE ${condition} ORDER BY created_at ASC`,
+      params
+    )
+    if (!rows || rows.length === 0) return null
+    const fileKeys = rows.filter((r) => r.attachment_type === "requester").map((r) => ({ key: r.s3_key, uploaded_at: r.uploaded_at }))
+    const commentFileKeys = rows.filter((r) => r.attachment_type === "assignee").map((r) => ({ key: r.s3_key, uploaded_at: r.uploaded_at }))
+    return { file_keys: fileKeys, comment_file_keys: commentFileKeys }
+  } catch (e: any) {
+    if (e?.code === "ER_NO_SUCH_TABLE") return null
+    throw e
+  }
+}
+
+/** user_files에서 키별 최신 행의 uploaded_at, file_name 조회 */
+async function getUserFilesMeta(
+  keys: string[]
+): Promise<Map<string, { uploaded_at: string | null; file_name: string | null }>> {
+  if (keys.length === 0) return new Map()
+  const placeholders = keys.map(() => "?").join(",")
+  try {
+    const rows = await query<{ s3_key: string; uploaded_at: string | null; file_name: string | null }>(
+      `SELECT s3_key, uploaded_at, file_name FROM user_files WHERE s3_key IN (${placeholders}) ORDER BY uploaded_at DESC`,
+      keys
+    )
+    const map = new Map<string, { uploaded_at: string | null; file_name: string | null }>()
+    for (const r of rows) {
+      if (!map.has(r.s3_key)) map.set(r.s3_key, { uploaded_at: r.uploaded_at, file_name: r.file_name })
+    }
+    return map
+  } catch {
+    return new Map()
+  }
+}
+
+/**
+ * task_file_attachments 동기화: 기존 행 삭제 후 키 목록으로 재등록.
+ * uploaded_at은 user_files 최신 또는 NOW() 단, minUploadedAt보다 이전이 되지 않도록 함
+ * (업무 생성일보다 과거로 찍히면 7일 만료가 이미 지나 만료로 표시되므로, 첨부 시점은 생성/수정 시점 이후로 유지)
+ */
+async function syncTaskFileAttachments(
+  taskId: string,
+  subtaskId: string | null,
+  requesterKeys: string[],
+  assigneeKeys: string[],
+  minUploadedAt?: Date | null
+): Promise<void> {
+  try {
+    const condition = subtaskId ? "task_id = ? AND subtask_id = ?" : "task_id = ? AND (subtask_id IS NULL OR subtask_id = '')"
+    const params = subtaskId ? [taskId, subtaskId] : [taskId]
+    await query(`DELETE FROM task_file_attachments WHERE ${condition}`, params)
+  } catch (e: any) {
+    if (e?.code === "ER_NO_SUCH_TABLE") return
+    throw e
+  }
+  const allKeys = [...requesterKeys, ...assigneeKeys]
+  const meta = await getUserFilesMeta(allKeys)
+  const extractFileName = (k: string) => (k.split("/").pop() || null)
+  const now = new Date()
+  const floor = minUploadedAt && minUploadedAt.getTime() > 0 ? minUploadedAt : null
+  const clampAt = (candidate: Date) => (floor && candidate.getTime() < floor.getTime() ? floor : candidate)
+  for (const key of requesterKeys) {
+    const { uploaded_at, file_name } = meta.get(key) ?? { uploaded_at: null, file_name: null }
+    const at = clampAt(uploaded_at ? new Date(uploaded_at) : now)
+    await query(
+      `INSERT INTO task_file_attachments (id, task_id, subtask_id, s3_key, file_name, attachment_type, uploaded_at) VALUES (?, ?, ?, ?, ?, 'requester', ?)`,
+      [randomUUID(), taskId, subtaskId ?? null, key, file_name ?? extractFileName(key), at]
+    )
+  }
+  for (const key of assigneeKeys) {
+    const { uploaded_at, file_name } = meta.get(key) ?? { uploaded_at: null, file_name: null }
+    const at = clampAt(uploaded_at ? new Date(uploaded_at) : now)
+    await query(
+      `INSERT INTO task_file_attachments (id, task_id, subtask_id, s3_key, file_name, attachment_type, uploaded_at) VALUES (?, ?, ?, ?, ?, 'assignee', ?)`,
+      [randomUUID(), taskId, subtaskId ?? null, key, file_name ?? extractFileName(key), at]
+    )
+  }
 }
 
 // GET /api/tasks/[id] - Task 또는 Subtask 상세 정보 조회
@@ -98,18 +190,35 @@ export async function GET(
         // s3_updates 없거나 컬럼 없으면 무시
       }
 
-      // file_keys, comment_file_keys 정규화 및 업로드 날짜 한 번에 조회
+      // file_keys, comment_file_keys: task_file_attachments 우선, 없으면 기존 JSON + user_files
       try {
-        const rawFileKeys = typeof task.file_keys === "string" ? JSON.parse(task.file_keys) : task.file_keys ?? []
-        const rawCommentFileKeys = typeof task.comment_file_keys === "string" ? JSON.parse(task.comment_file_keys) : task.comment_file_keys ?? []
-        const fileKeys = normalizeFileKeyArray(rawFileKeys)
-        const commentFileKeys = normalizeFileKeyArray(rawCommentFileKeys)
-
-        const [fileKeysWithDates, commentFileKeysWithDates] = await Promise.all([
-          getFileKeysWithDates(fileKeys),
-          getFileKeysWithDates(commentFileKeys),
-        ])
-
+        const fromTable = await getTaskAttachmentsFromTable(taskId, null)
+        let fileKeysWithDates: Array<{ key: string; uploaded_at: string | null }>
+        let commentFileKeysWithDates: Array<{ key: string; uploaded_at: string | null }>
+        if (fromTable && (fromTable.file_keys.length > 0 || fromTable.comment_file_keys.length > 0)) {
+          fileKeysWithDates = fromTable.file_keys
+          commentFileKeysWithDates = fromTable.comment_file_keys
+        } else {
+          const rawFileKeys = typeof task.file_keys === "string" ? JSON.parse(task.file_keys) : task.file_keys ?? []
+          const rawCommentFileKeys = typeof task.comment_file_keys === "string" ? JSON.parse(task.comment_file_keys) : task.comment_file_keys ?? []
+          const fileKeys = normalizeFileKeyArray(rawFileKeys)
+          const commentFileKeys = normalizeFileKeyArray(rawCommentFileKeys)
+          const [fk, cfk] = await Promise.all([
+            getFileKeysWithDates(fileKeys),
+            getFileKeysWithDates(commentFileKeys),
+          ])
+          fileKeysWithDates = fk
+          commentFileKeysWithDates = cfk
+          // 백필: 다음 조회부터 task_file_attachments 사용 (uploaded_at은 업무 생성일 이전이 되지 않도록)
+          if (fileKeys.length > 0 || commentFileKeys.length > 0) {
+            try {
+              const taskCreatedAt = task.created_at ? new Date(task.created_at) : null
+              await syncTaskFileAttachments(taskId, null, fileKeys, commentFileKeys, taskCreatedAt)
+            } catch {
+              // 테이블 없거나 실패 시 무시
+            }
+          }
+        }
         return NextResponse.json({
           task: {
             ...task,
@@ -163,18 +272,34 @@ export async function GET(
         return NextResponse.json({ error: "권한이 없습니다" }, { status: 403 })
       }
 
-      // file_keys, comment_file_keys 정규화 및 업로드 날짜 한 번에 조회
+      // file_keys, comment_file_keys: task_file_attachments(세부업무) 우선
       try {
-        const rawFileKeys = typeof subtask.file_keys === "string" ? JSON.parse(subtask.file_keys) : subtask.file_keys ?? []
-        const rawCommentFileKeys = typeof subtask.comment_file_keys === "string" ? JSON.parse(subtask.comment_file_keys) : subtask.comment_file_keys ?? []
-        const fileKeys = normalizeFileKeyArray(rawFileKeys)
-        const commentFileKeys = normalizeFileKeyArray(rawCommentFileKeys)
-
-        const [fileKeysWithDates, commentFileKeysWithDates] = await Promise.all([
-          getFileKeysWithDates(fileKeys),
-          getFileKeysWithDates(commentFileKeys),
-        ])
-
+        const fromTable = await getTaskAttachmentsFromTable(subtask.task_id, subtask.id)
+        let fileKeysWithDates: Array<{ key: string; uploaded_at: string | null }>
+        let commentFileKeysWithDates: Array<{ key: string; uploaded_at: string | null }>
+        if (fromTable && (fromTable.file_keys.length > 0 || fromTable.comment_file_keys.length > 0)) {
+          fileKeysWithDates = fromTable.file_keys
+          commentFileKeysWithDates = fromTable.comment_file_keys
+        } else {
+          const rawFileKeys = typeof subtask.file_keys === "string" ? JSON.parse(subtask.file_keys) : subtask.file_keys ?? []
+          const rawCommentFileKeys = typeof subtask.comment_file_keys === "string" ? JSON.parse(subtask.comment_file_keys) : subtask.comment_file_keys ?? []
+          const fileKeys = normalizeFileKeyArray(rawFileKeys)
+          const commentFileKeys = normalizeFileKeyArray(rawCommentFileKeys)
+          const [fk, cfk] = await Promise.all([
+            getFileKeysWithDates(fileKeys),
+            getFileKeysWithDates(commentFileKeys),
+          ])
+          fileKeysWithDates = fk
+          commentFileKeysWithDates = cfk
+          if (fileKeys.length > 0 || commentFileKeys.length > 0) {
+            try {
+              const subCreatedAt = subtask.created_at ? new Date(subtask.created_at) : null
+              await syncTaskFileAttachments(subtask.task_id, subtask.id, fileKeys, commentFileKeys, subCreatedAt)
+            } catch {
+              // ignore
+            }
+          }
+        }
         return NextResponse.json({
           task: {
             id: subtask.id,
@@ -306,6 +431,11 @@ export async function PATCH(
       return NextResponse.json({ error: "권한이 없습니다" }, { status: 403 })
     }
 
+    const currentRequesterKeys = normalizeFileKeyArray(typeof task.file_keys === "string" ? JSON.parse(task.file_keys || "[]") : task.file_keys ?? [])
+    const currentAssigneeKeys = normalizeFileKeyArray(typeof task.comment_file_keys === "string" ? JSON.parse(task.comment_file_keys || "[]") : task.comment_file_keys ?? [])
+    let finalRequesterKeys: string[] | null = null
+    let finalAssigneeKeys: string[] | null = null
+
     // 상태 업데이트 또는 description 업데이트
     const updateFields: string[] = ["updated_at = NOW()"]
     const updateParams: (string | null)[] = []
@@ -381,6 +511,7 @@ export async function PATCH(
         seen.add(key)
         deduped.push(key)
       }
+      finalRequesterKeys = deduped
 
       const fileKeysJson = JSON.stringify(deduped)
       updateFields.push("file_keys = ?")
@@ -397,16 +528,17 @@ export async function PATCH(
     if (!isRequesterOnly && comment_file_keys !== undefined) {
       // Comment 첨부파일 여러 개 허용. 중복 제거만 수행.
       const raw = Array.isArray(comment_file_keys) ? comment_file_keys : []
-      const deduped: string[] = []
+      const dedupedComment: string[] = []
       const seen = new Set<string>()
       for (const k of raw) {
         const key = typeof k === "string" ? k : ""
         if (!key) continue
         if (seen.has(key)) continue
         seen.add(key)
-        deduped.push(key)
+        dedupedComment.push(key)
       }
-      const commentFileKeysJson = JSON.stringify(deduped)
+      finalAssigneeKeys = dedupedComment
+      const commentFileKeysJson = JSON.stringify(dedupedComment)
       updateFields.push("comment_file_keys = ?")
       updateParams.push(commentFileKeysJson)
     }
@@ -434,6 +566,15 @@ export async function PATCH(
       `UPDATE task_assignments SET ${updateFields.join(", ")} WHERE id = ?`,
       [...updateParams, taskId]
     )
+
+    // task_file_attachments 동기화 (저장 시점을 최소값으로 두어 7일 만료가 저장 시점부터 적용되도록)
+    const requesterKeys = finalRequesterKeys !== null ? finalRequesterKeys : currentRequesterKeys
+    const assigneeKeys = finalAssigneeKeys !== null ? finalAssigneeKeys : currentAssigneeKeys
+    try {
+      await syncTaskFileAttachments(taskId, null, requesterKeys, assigneeKeys, new Date())
+    } catch {
+      // 테이블 없거나 실패 시 무시
+    }
 
     // task 상태 변경 시 연결된 s3_updates.status 동기화
     if (statusChanged && status !== undefined) {
@@ -536,13 +677,18 @@ async function handleSubtaskUpdate(
 
   // Subtask 확인
   const [subtask] = await query(
-    "SELECT id, task_id, assigned_to, status as current_status FROM task_subtasks WHERE id = ?",
+    "SELECT id, task_id, assigned_to, status as current_status, file_keys, comment_file_keys FROM task_subtasks WHERE id = ?",
     [subtaskId]
   )
 
   if (!subtask) {
     return NextResponse.json({ error: "Subtask를 찾을 수 없습니다" }, { status: 404 })
   }
+
+  const currentSubtaskRequester = normalizeFileKeyArray(typeof subtask.file_keys === "string" ? JSON.parse(subtask.file_keys || "[]") : subtask.file_keys ?? [])
+  const currentSubtaskAssignee = normalizeFileKeyArray(typeof subtask.comment_file_keys === "string" ? JSON.parse(subtask.comment_file_keys || "[]") : subtask.comment_file_keys ?? [])
+  let finalSubtaskRequester: string[] | null = null
+  let finalSubtaskAssignee: string[] | null = null
 
   // 사용자 역할 확인
   const userRoleRes = await query(
@@ -611,7 +757,7 @@ async function handleSubtaskUpdate(
       seen.add(key)
       deduped.push(key)
     }
-
+    finalSubtaskRequester = deduped
     const fileKeysJson = JSON.stringify(deduped)
     updateFields.push("file_keys = ?")
     updateParams.push(fileKeysJson)
@@ -625,16 +771,17 @@ async function handleSubtaskUpdate(
 
   if (comment_file_keys !== undefined) {
     const raw = Array.isArray(comment_file_keys) ? comment_file_keys : []
-    const deduped: string[] = []
+    const dedupedSubComment: string[] = []
     const seen = new Set<string>()
     for (const k of raw) {
       const key = typeof k === "string" ? k : ""
       if (!key) continue
       if (seen.has(key)) continue
       seen.add(key)
-      deduped.push(key)
+      dedupedSubComment.push(key)
     }
-    const commentFileKeysJson = JSON.stringify(deduped)
+    finalSubtaskAssignee = dedupedSubComment
+    const commentFileKeysJson = JSON.stringify(dedupedSubComment)
     updateFields.push("comment_file_keys = ?")
     updateParams.push(commentFileKeysJson)
   }
@@ -648,6 +795,14 @@ async function handleSubtaskUpdate(
     `UPDATE task_subtasks SET ${updateFields.join(", ")} WHERE id = ?`,
     [...updateParams, subtaskId]
   )
+
+  const subRequester = finalSubtaskRequester !== null ? finalSubtaskRequester : currentSubtaskRequester
+  const subAssignee = finalSubtaskAssignee !== null ? finalSubtaskAssignee : currentSubtaskAssignee
+  try {
+    await syncTaskFileAttachments(subtask.task_id, subtaskId, subRequester, subAssignee, new Date())
+  } catch {
+    // ignore
+  }
 
   // 상태가 변경된 경우 task_status_history에 기록
   if (statusChanged && status !== undefined) {

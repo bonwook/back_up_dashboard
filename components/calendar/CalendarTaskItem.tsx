@@ -2,6 +2,7 @@
 
 import { useCallback } from "react"
 import { Users } from "lucide-react"
+import { parseDateOnly } from "@/lib/utils/dateHelpers"
 
 interface CalendarTaskItemProps {
   task: any
@@ -50,7 +51,8 @@ export function CalendarTaskItem({
   }, [])
 
   const statusColor = getStatusColor(task.status || 'pending')
-  const isDueDateEnd = Boolean(task.due_date && formatCalendarDate(new Date(task.due_date)) === dayStr)
+  const dueDateParsed = parseDateOnly(task.due_date)
+  const isDueDateEnd = Boolean(dueDateParsed && formatCalendarDate(dueDateParsed) === dayStr)
   const isCompletedDay = Boolean(task?.status === "completed" && task?.completed_at && formatCalendarDate(new Date(task.completed_at)) === dayStr)
   const priorityBorder = getPriorityBorderColor(task?.priority)
   const hasMultipleAssignees = task.assignees && task.assignees.length > 0

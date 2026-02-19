@@ -13,6 +13,7 @@ import Link from "next/link"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/hooks/use-toast"
 import { isTaskExpired } from "@/lib/utils/taskHelpers"
+import { parseFlexibleDate } from "@/lib/utils/dateHelpers"
 import type { Task, S3UpdateRow } from "@/lib/types"
 
 export default function WorklistPage() {
@@ -345,7 +346,8 @@ export default function WorklistPage() {
   }
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString)
+    const date = parseFlexibleDate(dateString)
+    if (!date) return "-"
     return date.toLocaleDateString('ko-KR', {
       year: 'numeric',
       month: '2-digit',

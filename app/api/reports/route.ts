@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { query, getPool } from "@/lib/db/mysql"
+import { query } from "@/lib/db/mysql"
 import { verifyToken } from "@/lib/auth"
 import { uploadToS3 } from "@/lib/aws/s3"
 import { randomUUID } from "crypto"

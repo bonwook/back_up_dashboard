@@ -4,9 +4,9 @@ import { queryOne } from "@/lib/db/mysql"
 import { getSignedDownloadUrlForTaskDownload } from "@/lib/aws/s3"
 import { toS3Key } from "@/lib/utils/s3Updates"
 
-const PRESIGN_EXPIRES_SECONDS = 20 * 60 // 20분
+const PRESIGN_EXPIRES_SECONDS = 60 * 60 // 1시간
 
-// GET /api/s3-updates/[id]/presigned-url - 20분 유효 다운로드 URL
+// GET /api/s3-updates/[id]/presigned-url - 1시간 유효 다운로드 URL
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -20,14 +20,6 @@ export async function GET(
     const decoded = verifyToken(token)
     if (!decoded) {
       return NextResponse.json({ error: "Invalid token" }, { status: 401 })
-    }
-
-    const roleRes = await queryOne(
-      `SELECT role FROM profiles WHERE id = ?`,
-      [decoded.id]
-    )
-    if (!roleRes || (roleRes as { role: string }).role === "client") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
     const { id } = await params

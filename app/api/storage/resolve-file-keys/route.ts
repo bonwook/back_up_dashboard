@@ -31,25 +31,43 @@ export async function POST(request: NextRequest) {
     const role = roleRows && roleRows.length > 0 ? (roleRows[0] as any).role : null
     const isStaffOrAdmin = role === "admin" || role === "staff"
 
-    // user_files 테이블에서 s3_key로 직접 조회
+    // user_files 테이블에서 s3_key로 직접 조회 (같은 키로 재업로드된 경우 최신 행을 쓰기 위해 uploaded_at DESC)
     const placeholders = fileKeys.map(() => '?').join(',')
     const files = await query(
       `SELECT s3_key, file_name, user_id, uploaded_at
        FROM user_files
-       WHERE s3_key IN (${placeholders})${isStaffOrAdmin ? "" : " AND user_id = ?"}`,
+       WHERE s3_key IN (${placeholders})${isStaffOrAdmin ? "" : " AND user_id = ?"}
+       ORDER BY uploaded_at DESC`,
       isStaffOrAdmin ? [...fileKeys] : [...fileKeys, decoded.id]
     )
 
-    // file_keys 순서대로 매핑
+    // 같은 s3_key로 여러 행이 있으면(재업로드) 가장 최근 업로드(uploaded_at 최신) 사용
+    const getLatestByKey = (key: string) => {
+      const matching = (files as any[]).filter((f: any) => f.s3_key === key)
+      if (matching.length === 0) return null
+      return matching[0] // 이미 ORDER BY uploaded_at DESC 라서 첫 번째가 최신
+    }
+
+    // file_keys 순서대로 매핑. uploaded_at은 ISO 문자열로 통일해 클라이언트에서 파일별 7일 만료 계산이 일관되게 되도록 함.
     const resolvedKeys = fileKeys.map((fileKey: string) => {
-      const file = files.find((f: any) => f.s3_key === fileKey)
+      const file = getLatestByKey(fileKey)
       if (file) {
+        const raw = (file as any).uploaded_at
+        let uploadedAt: string | null = null
+        if (raw != null) {
+          try {
+            const d = raw instanceof Date ? raw : new Date(raw)
+            uploadedAt = Number.isNaN(d.getTime()) ? null : d.toISOString()
+          } catch {
+            uploadedAt = null
+          }
+        }
         return {
           originalKey: fileKey,
           s3Key: file.s3_key,
           fileName: file.file_name,
           userId: (file as any).user_id || null,
-          uploadedAt: (file as any).uploaded_at || null,
+          uploadedAt,
         }
       }
       // 찾지 못한 경우 원래 키를 그대로 사용

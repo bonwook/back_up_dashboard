@@ -21,7 +21,7 @@ import { format } from "date-fns"
 import { ko } from "date-fns/locale"
 import { uploadWithProgress } from "@/lib/utils/upload-with-progress"
 import { downloadWithProgress } from "@/lib/utils/download-with-progress"
-import { calculateFileExpiry, formatDateShort } from "@/lib/utils/dateHelpers"
+import { calculateFileExpiry, formatDateShort, parseDateOnly } from "@/lib/utils/dateHelpers"
 import { Task, TaskStatus, ResolvedFileKey } from "./types"
 import TaskBlock from "./components/TaskBoard/TaskBlock"
 import { TaskCommentSection, TaskDetailDialog, normalizeFileKeys } from "@/components/task"
@@ -899,7 +899,7 @@ export default function AdminProgressPage() {
                       const dueDatePatchId = currentTask.is_subtask && currentTask.task_id ? currentTask.task_id : workTaskId
                       const taskToUpdate = tasks.find(t => t.id === dueDatePatchId)
                       const canEditDueDate = taskToUpdate?.status !== "completed"
-                      const serverDueDate = taskToUpdate?.due_date ? new Date(taskToUpdate.due_date) : null
+                      const serverDueDate = parseDateOnly(taskToUpdate?.due_date) ?? null
                       // 아이콘/달력에 표시할 날짜: 달력에서 선택한 값이 있으면 그대로, 없으면 서버 값
                       const displayDueDate = workDueDatePickerValue !== undefined ? workDueDatePickerValue : serverDueDate
                       const selectedInCalendar = workDueDatePickerValue !== undefined ? workDueDatePickerValue : serverDueDate

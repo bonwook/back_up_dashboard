@@ -20,7 +20,7 @@ import { format } from "date-fns"
 import { ko } from "date-fns/locale"
 import { uploadWithProgress } from "@/lib/utils/upload-with-progress"
 import { downloadWithProgress } from "@/lib/utils/download-with-progress"
-import { calculateFileExpiry, formatDateShort } from "@/lib/utils/dateHelpers"
+import { calculateFileExpiry, formatDateShort, parseDateOnly } from "@/lib/utils/dateHelpers"
 import { Task, TaskStatus, ResolvedFileKey } from "./types"
 import { TaskBlock } from "./components/TaskBoard/TaskBlock"
 import { TaskCommentSection, TaskDetailDialog, normalizeFileKeys } from "@/components/task"
@@ -771,11 +771,12 @@ export default function ClientProgressPage() {
                     </Select>
                     {(() => {
                       const currentTask = workTaskId ? tasks.find(t => t.id === workTaskId) : null
-                      if (!currentTask || !currentTask.due_date) return null
+                      const dueDate = currentTask?.due_date ? parseDateOnly(currentTask.due_date) : null
+                      if (!currentTask || !dueDate) return null
                       return (
                         <div className="space-y-2">
                           <div className="flex items-center justify-center h-auto py-1">
-                            <span className="px-2 py-1 rounded text-sm font-medium">{"~" + new Date(currentTask.due_date).toLocaleDateString('ko-KR', { 
+                            <span className="px-2 py-1 rounded text-sm font-medium">{"~" + dueDate.toLocaleDateString('ko-KR', { 
                               year: 'numeric',
                               month: '2-digit',
                               day: '2-digit',

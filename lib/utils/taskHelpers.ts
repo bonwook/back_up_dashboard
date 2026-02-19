@@ -1,3 +1,5 @@
+import { parseDateOnly, parseFlexibleDate } from "@/lib/utils/dateHelpers"
+
 export function getStatusBadgeVariant(status: string) {
   switch (status) {
     case "completed":
@@ -101,14 +103,12 @@ export function isTaskOverdue(task: any): boolean {
   if (!task.due_date || task.status === 'completed' || task.status === 'awaiting_completion') {
     return false
   }
-  
+  const dueDate = parseDateOnly(task.due_date)
+  if (!dueDate) return false
   const now = new Date()
   const koreaDate = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Seoul" }))
   const today = new Date(koreaDate.getFullYear(), koreaDate.getMonth(), koreaDate.getDate())
-  
-  const dueDate = new Date(task.due_date)
   const dueDateOnly = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate())
-  
   return dueDateOnly < today
 }
 
@@ -122,19 +122,18 @@ export function isTaskExpired(task: any): boolean {
   if (!task.due_date || task.status === 'completed') {
     return false
   }
-  
+  const dueDate = parseDateOnly(task.due_date)
+  if (!dueDate) return false
   const now = new Date()
   const koreaDate = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Seoul" }))
   const today = new Date(koreaDate.getFullYear(), koreaDate.getMonth(), koreaDate.getDate())
-  
-  const dueDate = new Date(task.due_date)
   const dueDateOnly = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate())
-  
   return dueDateOnly < today
 }
 
 export function formatDateTime(dateString: string): string {
-  const date = new Date(dateString)
+  const date = parseFlexibleDate(dateString)
+  if (!date) return "-"
   const formatter = new Intl.DateTimeFormat('ko-KR', {
     year: 'numeric',
     month: '2-digit',

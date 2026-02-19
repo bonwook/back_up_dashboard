@@ -56,7 +56,8 @@ const finalEnv = {
   // NODE_ENV is intentionally omitted - Next.js will set it automatically
 }
 
-const requiredVars = ["DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME", "JWT_SECRET"]
+const useDbSecret = !!(finalEnv.AWS_DB_SECRET_NAME || finalEnv.DB_SECRET_ARN)
+const requiredVars = ["DB_HOST", "DB_USER", ...(useDbSecret ? [] : ["DB_PASSWORD"]), "DB_NAME", "JWT_SECRET"]
 const loadedVars = requiredVars.map((key) => ({
   key,
   loaded: !!finalEnv[key],

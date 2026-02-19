@@ -35,6 +35,7 @@ import {
 } from "@/lib/utils/fileKeyHelpers"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { getStatusBadge, getStatusColor, getStatusBorderColor, getStatusTextColor, getPriorityBadge } from "@/lib/utils/taskStatusHelpers"
+import { parseDateOnly } from "@/lib/utils/dateHelpers"
 import { FileListItem } from "./components/FileListItem"
 import { StaffSessionBlock } from "./components/StaffSessionBlock"
 import { useSubtaskCompletion } from "@/lib/hooks/useSubtaskCompletion"
@@ -54,6 +55,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [s3Update, setS3Update] = useState<S3UpdateForTask | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isGettingS3Url, setIsGettingS3Url] = useState(false)
+  const [s3DownloadUrl, setS3DownloadUrl] = useState<string | null>(null)
+  const [s3DownloadExpiresAt, setS3DownloadExpiresAt] = useState<number | null>(null)
+  const [isS3UrlLoading, setIsS3UrlLoading] = useState(false)
   const router = useRouter()
   const [taskId, setTaskId] = useState<string | null>(null)
   const { toast } = useToast()
@@ -167,11 +171,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         const data = await response.json()
         setTask(data.task)
         setS3Update(data.s3Update ?? null)
-        if (data.task.due_date) {
-          setSelectedDueDate(new Date(data.task.due_date))
-        } else {
-          setSelectedDueDate(null)
-        }
+        setSelectedDueDate(parseDateOnly(data.task.due_date) ?? null)
       } catch (error) {
         console.error("Failed to load task:", error)
         router.push("/admin/cases")
@@ -182,6 +182,30 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
 
     loadTask()
   }, [taskId, router, toast])
+
+  // task 상세 진입 시 S3 다운로드용 presigned URL 실시간 발급
+  useEffect(() => {
+    if (!s3Update?.id) return
+    let cancelled = false
+    const fetchUrl = async () => {
+      setIsS3UrlLoading(true)
+      try {
+        const res = await fetch(`/api/s3-updates/${s3Update.id}/presigned-url`, { credentials: "include" })
+        if (cancelled) return
+        if (!res.ok) return
+        const data = await res.json() as { url: string; expiresIn: number; fileName?: string }
+        if (cancelled) return
+        setS3DownloadUrl(data.url)
+        setS3DownloadExpiresAt(Date.now() + data.expiresIn * 1000)
+      } catch {
+        if (!cancelled) setS3DownloadUrl(null)
+      } finally {
+        if (!cancelled) setIsS3UrlLoading(false)
+      }
+    }
+    fetchUrl()
+    return () => { cancelled = true }
+  }, [s3Update?.id])
 
   // 첨부파일 resolve + 업로더 기준으로 분리(기존 데이터에서 file_keys에 섞여 있는 사용자 파일도 분리)
   useEffect(() => {
@@ -195,6 +219,26 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         setResolvedCommentFileKeys([])
         return
       }
+
+      // task_file_attachments에서 온 uploaded_at 맵 (만료 계산 안정화)
+      const taskRequesterUploadedAt = new Map<string, string | null>()
+      const taskCommentUploadedAt = new Map<string, string | null>()
+      ;(task?.file_keys || []).forEach((f: unknown) => {
+        const o = f as { key?: string; uploaded_at?: string | null }
+        const k = typeof o === "object" && o?.key != null ? o.key : String(f)
+        if (k) taskRequesterUploadedAt.set(k, o.uploaded_at ?? null)
+      })
+      ;(task?.comment_file_keys || []).forEach((f: unknown) => {
+        const o = f as { key?: string; uploaded_at?: string | null }
+        const k = typeof o === "object" && o?.key != null ? o.key : String(f)
+        if (k) taskCommentUploadedAt.set(k, o.uploaded_at ?? null)
+      })
+      const applyTaskUploadedAt = (list: ResolvedFileKey[], isRequester: boolean) =>
+        list.map((item) => {
+          const fromTask = isRequester ? taskRequesterUploadedAt.get(item.s3Key) : taskCommentUploadedAt.get(item.s3Key)
+          const uploadedAt = fromTask !== undefined ? fromTask : item.uploadedAt
+          return uploadedAt !== item.uploadedAt ? { ...item, uploadedAt } : item
+        })
 
       const allKeys = Array.from(new Set([...fileKeys, ...commentKeys]))
       setIsResolvingFiles(true)
@@ -227,12 +271,12 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           preferUserKeys: commentKeys,
         })
 
-        setResolvedFileKeys(adminFiles)
-        setResolvedCommentFileKeys(userFiles)
+        setResolvedFileKeys(applyTaskUploadedAt(adminFiles, true))
+        setResolvedCommentFileKeys(applyTaskUploadedAt(userFiles, false))
       } catch {
-        // fallback: 원본 배열 기준으로만 분리
-        setResolvedFileKeys(resolveFileKeys(fileKeys))
-        setResolvedCommentFileKeys(resolveFileKeys(commentKeys))
+        // fallback: 원본 배열 기준으로만 분리 + task의 uploaded_at 적용
+        setResolvedFileKeys(applyTaskUploadedAt(resolveFileKeys(fileKeys), true))
+        setResolvedCommentFileKeys(applyTaskUploadedAt(resolveFileKeys(commentKeys), false))
       } finally {
         setIsResolvingFiles(false)
         setIsResolvingCommentFiles(false)
@@ -381,14 +425,19 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     [taskId, task?.is_multi_assign, reloadTask, loadSubtasks, toast, router]
   )
 
-  // subtask 첨부파일 resolve
+  // subtask 첨부파일 resolve (task_file_attachments의 uploaded_at 우선 사용)
   useEffect(() => {
     const run = async () => {
-      // 모든 subtask의 comment_file_keys 수집
       const subtaskFileKeys: SubtaskFileKeyItem[] = []
+      const subtaskUploadedAt = new Map<string, string | null>() // "subtaskId:key" -> uploaded_at
       
       subtasks.forEach((subtask) => {
         const commentKeys = normalizeFileKeyArray(subtask.comment_file_keys)
+        ;(subtask.comment_file_keys || []).forEach((f: unknown) => {
+          const o = f as { key?: string; uploaded_at?: string | null }
+          const k = typeof o === "object" && o?.key != null ? o.key : String(f)
+          if (k) subtaskUploadedAt.set(`${subtask.id}:${k}`, o.uploaded_at ?? null)
+        })
         if (commentKeys.length > 0) {
           commentKeys.forEach((key) => {
             subtaskFileKeys.push({
@@ -421,7 +470,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         const data = await res.json()
         const resolvedKeys = Array.isArray(data.resolvedKeys) ? data.resolvedKeys : []
         
-        // API 응답을 Map으로 변환 (userId 필드는 제외)
         const resolvedKeyMap = new Map<string, { s3Key: string; fileName: string; uploadedAt?: string | null }>()
         resolvedKeys.forEach((k: any) => {
           if (typeof k === "object" && k !== null && "originalKey" in k) {
@@ -433,8 +481,12 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           }
         })
         
-        // 서브태스크 파일 키 resolve
-        const resolved = resolveSubtaskFileKeys(subtaskFileKeys, resolvedKeyMap)
+        let resolved = resolveSubtaskFileKeys(subtaskFileKeys, resolvedKeyMap)
+        resolved = resolved.map((r) => {
+          const fromTable = subtaskUploadedAt.get(`${r.subtaskId}:${r.s3Key}`)
+          const uploadedAt = fromTable !== undefined ? fromTable : r.uploadedAt
+          return uploadedAt !== r.uploadedAt ? { ...r, uploadedAt } : r
+        })
         setResolvedSubtaskFileKeys(resolved)
       } catch (error) {
         console.error("subtask 첨부파일 resolve 오류:", error)
@@ -661,7 +713,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         variant: "destructive",
       })
       // 실패 시 원래 값으로 복원
-      setSelectedDueDate(task?.due_date ? new Date(task.due_date) : null)
+      setSelectedDueDate(parseDateOnly(task?.due_date) ?? null)
       return false
     } finally {
       setIsUpdatingDueDate(false)
@@ -776,8 +828,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const canChangeStatus =
     (userRole === "staff" || userRole === "admin") && me?.id !== task.assigned_by
 
+  const isS3DownloadExpired = s3DownloadExpiresAt != null && Date.now() > s3DownloadExpiresAt
+
   const handleS3Download = async () => {
     if (!s3Update?.id) return
+    if (s3DownloadUrl && !isS3DownloadExpired) {
+      window.open(s3DownloadUrl, "_blank", "noopener,noreferrer")
+      return
+    }
     setIsGettingS3Url(true)
     try {
       const res = await fetch(`/api/s3-updates/${s3Update.id}/presigned-url`, { credentials: "include" })
@@ -785,10 +843,11 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         const err = await res.json().catch(() => ({}))
         throw new Error((err as { error?: string }).error || "다운로드 URL 생성 실패")
       }
-      const data = await res.json()
-      const url = (data as { url: string }).url
-      window.open(url, "_blank", "noopener,noreferrer")
-      toast({ title: "다운로드 링크 생성됨", description: "20분간 유효한 링크가 새 탭에서 열립니다." })
+      const data = await res.json() as { url: string; expiresIn: number; fileName?: string }
+      setS3DownloadUrl(data.url)
+      setS3DownloadExpiresAt(Date.now() + data.expiresIn * 1000)
+      window.open(data.url, "_blank", "noopener,noreferrer")
+      toast({ title: "다운로드 링크 생성됨", description: "1시간 유효한 링크가 새 탭에서 열립니다." })
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "다운로드 URL을 가져오지 못했습니다."
       toast({ title: "다운로드 실패", description: message, variant: "destructive" })
@@ -849,11 +908,13 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 pt-3">
-              <Button variant="outline" size="sm" onClick={handleS3Download} disabled={isGettingS3Url}>
-                {isGettingS3Url ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-                다운로드 (20분 유효 링크)
+              <Button variant="outline" size="sm" onClick={handleS3Download} disabled={isGettingS3Url || isS3UrlLoading}>
+                {(isGettingS3Url || isS3UrlLoading) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                {isS3DownloadExpired ? "새 링크 발급" : "다운로드 (1시간 유효 링크)"}
               </Button>
-              <span className="text-xs text-muted-foreground">※ 한 번만 다운로드 가능합니다.</span>
+              <span className="text-xs text-muted-foreground">
+                {isS3DownloadExpired ? "만료됨 — 다시 클릭하여 새 링크를 발급받으세요." : "※ 링크는 1시간 후 만료됩니다."}
+              </span>
             </div>
           </CardContent>
         </Card>
@@ -1383,7 +1444,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       onClick={() => {
                         setEditingRequesterTitle("")
                         setEditingRequesterFileKeys([])
-                        setSelectedDueDate(task?.due_date ? new Date(task.due_date) : null)
+                        setSelectedDueDate(parseDateOnly(task?.due_date) ?? null)
                         editingSubtitleRef.current = null
                         setIsEditingRequesterContent(false)
                       }}
