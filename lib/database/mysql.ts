@@ -6,19 +6,18 @@ const globalForPool = globalThis as unknown as {
 }
 
 function checkRequiredEnvVars(): void {
-  const useSecretsManager = !!(process.env.AWS_DB_SECRET_NAME || process.env.DB_SECRET_ARN)
   const required = ["DB_HOST", "DB_USER", "DB_NAME"] as const
-  if (!useSecretsManager) {
-    required.push("DB_PASSWORD")
-  }
   const missingVars = required.filter((varName) => !process.env[varName]?.trim())
   if (missingVars.length > 0) {
     throw new Error(`Missing required environment variables: ${missingVars.join(", ")}`)
   }
+  if (!process.env.AWS_DB_SECRET_NAME?.trim() && !process.env.DB_SECRET_ARN?.trim()) {
+    throw new Error("DB password is managed by AWS Secrets Manager. Set AWS_DB_SECRET_NAME or DB_SECRET_ARN.")
+  }
 }
 
 /**
- * MySQL 연결 풀 반환. 첫 호출 시 비밀번호를 env 또는 AWS Secrets Manager에서 로드합니다.
+ * MySQL 연결 풀 반환. 비밀번호는 AWS Secrets Manager에서 로드합니다.
  */
 export async function getPool(): Promise<mysql.Pool> {
   if (!globalForPool.__flonicsMysqlPool) {

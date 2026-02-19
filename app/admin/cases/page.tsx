@@ -559,7 +559,7 @@ export default function WorklistPage() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={(e) => handleDeleteS3Update(row.id, e)}
+                                onClick={(e) => handleDeleteS3Update(String(row.id), e)}
                                 className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
                                 title="S3 업무 삭제"
                               >

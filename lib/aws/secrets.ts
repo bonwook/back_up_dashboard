@@ -30,16 +30,9 @@ export async function getDbPasswordFromSecretsManager(): Promise<string> {
 }
 
 /**
- * DB 비밀번호 반환: AWS_DB_SECRET_NAME 또는 DB_SECRET_ARN이 있으면 Secrets Manager에서 조회,
- * 없으면 process.env.DB_PASSWORD 사용 (로컬 개발용).
+ * DB 비밀번호 반환. AWS Secrets Manager에서만 조회합니다.
+ * AWS_DB_SECRET_NAME 또는 DB_SECRET_ARN 환경 변수가 필요합니다.
  */
 export async function getDbPassword(): Promise<string> {
-  if (process.env.AWS_DB_SECRET_NAME || process.env.DB_SECRET_ARN) {
-    return getDbPasswordFromSecretsManager()
-  }
-  const fromEnv = process.env.DB_PASSWORD
-  if (!fromEnv) {
-    throw new Error("DB_PASSWORD is not set and no AWS_DB_SECRET_NAME/DB_SECRET_ARN configured")
-  }
-  return fromEnv
+  return getDbPasswordFromSecretsManager()
 }
