@@ -961,10 +961,10 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             <div className="flex flex-wrap items-center gap-2 pt-3">
               <Button variant="outline" size="sm" onClick={handleS3Download} disabled={isGettingS3Url}>
                 {isGettingS3Url ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-                {isS3DownloadExpired ? "새 링크 발급" : "다운로드 (1시간 유효 링크)"}
+                {isS3DownloadExpired ? "새 링크 발급" : "다운로드 (24시간 유효 링크)"}
               </Button>
               <span className="text-xs text-muted-foreground">
-                {isS3DownloadExpired ? "만료됨 — 다시 클릭하여 새 링크를 발급받으세요." : "※ 링크는 1시간 후 만료됩니다."}
+                {isS3DownloadExpired ? "만료됨 — 다시 클릭하여 새 링크를 발급받으세요." : "※ 링크는 24시간 후 만료됩니다."}
               </span>
             </div>
           </div>

@@ -137,10 +137,10 @@ export default function S3UpdateDetailPage({
             <CardTitle className="text-xl">버킷 정보</CardTitle>
             <Button variant="outline" size="sm" onClick={handleDownload} disabled={isGettingUrl}>
               {isGettingUrl ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-              {isDownloadExpired ? "새 링크 발급" : "다운로드 (1시간 유효 링크)"}
+              {isDownloadExpired ? "새 링크 발급" : "다운로드 (24시간 유효 링크)"}
             </Button>
             <span className="text-xs text-muted-foreground">
-              {isDownloadExpired ? "만료됨 — 다시 클릭하여 새 링크를 발급받으세요." : "※ 링크는 1시간 후 만료됩니다."}
+              {isDownloadExpired ? "만료됨 — 다시 클릭하여 새 링크를 발급받으세요." : "※ 링크는 24시간 후 만료됩니다."}
             </span>
           </div>
           <div className="flex flex-row flex-wrap items-baseline gap-x-6 gap-y-1 text-sm mt-1.5">

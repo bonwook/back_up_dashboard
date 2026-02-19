@@ -114,12 +114,17 @@ export async function headTaskDownloadObject(key: string): Promise<void> {
 
 /**
  * S3 task(s3_updates)에서 온 파일 다운로드 전용 presigned URL.
- * 기본 자격증명 체인(SSO 세션 등)을 사용하므로, task 다운로드에만 사용할 것.
+ * bucket을 넘기면 해당 버킷 사용(보통 s3_updates.bucket_name), 없으면 AWS_S3_BUCKET_NAME 사용.
  */
-export async function getSignedDownloadUrlForTaskDownload(key: string, expiresIn = 3600): Promise<string> {
+export async function getSignedDownloadUrlForTaskDownload(
+  key: string,
+  expiresIn = 3600,
+  bucket?: string | null
+): Promise<string> {
+  const bucketName = (bucket?.trim()) || BUCKET_NAME
   const client = getTaskDownloadS3Client()
   const command = new GetObjectCommand({
-    Bucket: BUCKET_NAME,
+    Bucket: bucketName,
     Key: key,
   })
   return await getSignedUrl(client, command, { expiresIn })

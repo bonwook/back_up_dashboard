@@ -3,7 +3,6 @@ import { NoSuchKey } from "@aws-sdk/client-s3"
 import { verifyToken } from "@/lib/auth"
 import { queryOne } from "@/lib/db/mysql"
 import { getSignedDownloadUrlForTaskDownload } from "@/lib/aws/s3"
-import { toS3Key } from "@/lib/utils/s3Updates"
 
 const PRESIGN_EXPIRES_SECONDS = 24 * 60 * 60 // 24시간
 
@@ -52,9 +51,14 @@ export async function GET(
     }
 
     const r = row as { file_name: string; bucket_name?: string | null }
-    const rawKey = toS3Key(r)
-    const s3Key = normalizeS3Key(rawKey)
-
+    const bucketName = (r.bucket_name ?? "").trim()
+    if (!bucketName) {
+      return NextResponse.json(
+        { error: "s3_updates.bucket_name이 비어 있습니다. 버킷 이름을 설정하세요." },
+        { status: 400 }
+      )
+    }
+    const s3Key = normalizeS3Key(r.file_name ?? "")
     if (!s3Key) {
       return NextResponse.json(
         { error: "S3 객체 키를 확인할 수 없습니다. file_name을 확인하세요." },
@@ -62,7 +66,7 @@ export async function GET(
       )
     }
 
-    const signedUrl = await getSignedDownloadUrlForTaskDownload(s3Key, PRESIGN_EXPIRES_SECONDS)
+    const signedUrl = await getSignedDownloadUrlForTaskDownload(s3Key, PRESIGN_EXPIRES_SECONDS, bucketName)
 
     return NextResponse.json({
       url: signedUrl,
