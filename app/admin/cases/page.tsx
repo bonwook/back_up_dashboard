@@ -302,6 +302,28 @@ export default function WorklistPage() {
     }
   }
 
+  const handleDeleteS3Update = async (s3UpdateId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!confirm("이 S3 업무를 삭제하시겠습니까? 목록에서 제거됩니다.")) return
+    try {
+      const response = await fetch(`/api/s3-updates/${s3UpdateId}`, {
+        method: "DELETE",
+        credentials: "include",
+      })
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}))
+        const message = body.error || "S3 업무 삭제에 실패했습니다"
+        toast({ title: "삭제 실패", description: message, variant: "destructive" })
+        return
+      }
+      toast({ title: "S3 업무가 삭제되었습니다", description: "목록에서 제거되었습니다." })
+      await loadTasks()
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "S3 업무 삭제 중 오류가 발생했습니다."
+      toast({ title: "삭제 실패", description: message, variant: "destructive" })
+    }
+  }
+
   const filteredCompletedReports = useMemo(() => {
     if (!searchQuery) return completedReports
     const q = searchQuery.toLowerCase()
@@ -532,7 +554,19 @@ export default function WorklistPage() {
                             {formatDate(row.upload_time || row.created_at)}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">-</TableCell>
-                          <TableCell />
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            {(me?.role === "admin" || me?.role === "staff") && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={(e) => handleDeleteS3Update(row.id, e)}
+                                className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                title="S3 업무 삭제"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </TableCell>
                         </TableRow>
                       ))}
                       {filteredTasks.map((task) => {
