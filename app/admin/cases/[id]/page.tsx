@@ -50,6 +50,15 @@ function formatBytes(bytes: number | null | undefined): string {
   return `${Number((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`
 }
 
+/** 담당자/요청자별 괄호 색상 (같은 이름이면 같은 색) */
+const ASSIGNEE_COLOR_CLASSES = ["text-blue-600", "text-emerald-600", "text-violet-600", "text-amber-600", "text-rose-600", "text-cyan-600"]
+function getAssigneeColorClass(name: string | undefined): string {
+  if (!name) return "text-muted-foreground"
+  let n = 0
+  for (let i = 0; i < name.length; i++) n = (n * 31 + name.charCodeAt(i)) >>> 0
+  return ASSIGNEE_COLOR_CLASSES[n % ASSIGNEE_COLOR_CLASSES.length]
+}
+
 export default function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const [task, setTask] = useState<Task | null>(null)
   const [s3Update, setS3Update] = useState<S3UpdateForTask | null>(null)
@@ -935,7 +944,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       </div>
 
       {s3Update && (
-        <Card className="mb-6 border-l-4 border-l-amber-500/50">
+        <Card className="mb-6">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-xl">버킷 정보</CardTitle>
           </CardHeader>
@@ -1178,19 +1187,341 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               <span className="font-medium text-foreground">{format(new Date(task.completed_at), "yyyy년 MM월 dd일 HH:mm", { locale: ko })}</span>
             </div>
           )}
+
+          {/* 설명 (본문) */}
+          {task.description && (
+            <div className="mt-4 pt-4 border-t border-border/50">
+              <h3 className="text-sm font-semibold text-foreground mb-2">설명</h3>
+              <p className="text-sm whitespace-pre-wrap">{task.description}</p>
+            </div>
+          )}
+
+          {/* 개별 할당: 요청자 내용을 같은 카드 안에 이어서 표시 */}
+          {subtasks.length === 0 && (
+            <div className="mt-4 pt-4 border-t border-border/50">
+              <div className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <h3 className="text-lg font-semibold">{task.assigned_by_name || task.assigned_by_email} 내용</h3>
+                {canEditTask && !isEditingRequesterContent && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setEditingRequesterTitle(task?.title ?? "")
+                      setEditingRequesterFileKeys(resolvedFileKeys.map((f) => f.s3Key))
+                      setIsEditingRequesterContent(true)
+                    }}
+                  >
+                    수정
+                  </Button>
+                )}
+              </div>
+              <div className="pt-0 pb-3">
+                {canEditTask && isEditingRequesterContent ? (
+                  <>
+                    <div className="space-y-3 mb-4">
+                      <div className="grid gap-2">
+                        <Label className="text-xs">업무 제목</Label>
+                        <Input
+                          value={editingRequesterTitle}
+                          onChange={(e) => setEditingRequesterTitle(e.target.value)}
+                          placeholder="업무 제목"
+                          className="max-w-md"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label className="text-xs">마감일</Label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="w-fit font-normal"
+                              disabled={task.status === "completed"}
+                            >
+                              <CalendarIcon className="mr-2 h-4 w-4" />
+                              {selectedDueDate ? format(selectedDueDate, "yyyy-MM-dd", { locale: ko }) : "선택"}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                              mode="single"
+                              selected={selectedDueDate || undefined}
+                              onSelect={(d) => setSelectedDueDate(d ?? null)}
+                              locale={ko}
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                      <div className="grid gap-2">
+                        <Label className="text-xs">첨부파일 (요청자)</Label>
+                        <div className="flex flex-col gap-2">
+                          {editingRequesterFileKeys.map((key, idx) => (
+                            <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
+                              <button
+                                type="button"
+                                className="text-blue-600 hover:underline truncate max-w-[180px]"
+                                onClick={() => handleDownload(key, extractFileName(key, "파일"))}
+                              >
+                                {extractFileName(key, "파일")}
+                              </button>
+                              <button
+                                type="button"
+                                aria-label="첨부 제거"
+                                className="p-0.5 text-muted-foreground hover:text-destructive"
+                                onClick={() => setEditingRequesterFileKeys((prev) => prev.filter((_, i) => i !== idx))}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="w-fit"
+                            disabled={isUploadingRequesterFile}
+                            onClick={() => requesterFileInputRef.current?.click()}
+                          >
+                            {isUploadingRequesterFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                            파일 추가
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                    <div
+                      className="border rounded-md overflow-hidden bg-background flex flex-col"
+                      style={{
+                        height: "350px",
+                        minHeight: "350px",
+                        maxHeight: "350px",
+                      }}
+                    >
+                      <div className="flex items-center gap-1 p-2 flex-wrap shrink-0 border-b">
+                        <Button
+                          type="button"
+                          variant={requesterEditorState.bold ? "secondary" : "ghost"}
+                          size="sm"
+                          className={`h-8 w-8 p-0 ${requesterEditorState.bold ? "bg-primary/10" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault()
+                            const editor = document.getElementById("requester-content-editor")
+                            if (editor) {
+                              editor.focus()
+                              document.execCommand("bold", false)
+                              updateRequesterEditorState()
+                            }
+                          }}
+                          title="굵게 (Ctrl+B)"
+                        >
+                          <Bold className={`h-4 w-4 ${requesterEditorState.bold ? "text-primary" : ""}`} />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={requesterEditorState.italic ? "secondary" : "ghost"}
+                          size="sm"
+                          className={`h-8 w-8 p-0 ${requesterEditorState.italic ? "bg-primary/10" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault()
+                            const editor = document.getElementById("requester-content-editor")
+                            if (editor) {
+                              editor.focus()
+                              document.execCommand("italic", false)
+                              updateRequesterEditorState()
+                            }
+                          }}
+                          title="기울임 (Ctrl+I)"
+                        >
+                          <Italic className={`h-4 w-4 ${requesterEditorState.italic ? "text-primary" : ""}`} />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={requesterEditorState.underline ? "secondary" : "ghost"}
+                          size="sm"
+                          className={`h-8 w-8 p-0 ${requesterEditorState.underline ? "bg-primary/10" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault()
+                            const editor = document.getElementById("requester-content-editor")
+                            if (editor) {
+                              editor.focus()
+                              document.execCommand("underline", false)
+                              updateRequesterEditorState()
+                            }
+                          }}
+                          title="밑줄"
+                        >
+                          <Underline className={`h-4 w-4 ${requesterEditorState.underline ? "text-primary" : ""}`} />
+                        </Button>
+                        <div className="w-px h-6 bg-border mx-1" />
+                        <div className="relative">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              setRequesterTableGridHover(
+                                requesterTableGridHover.show
+                                  ? { row: 0, col: 0, show: false }
+                                  : { row: 0, col: 0, show: true }
+                              )
+                            }}
+                            title="테이블"
+                          >
+                            <TableIcon className="h-4 w-4" />
+                          </Button>
+                          {requesterTableGridHover.show && (
+                            <div
+                              className="absolute top-full left-0 mt-2 bg-background border rounded-lg shadow-xl p-4 z-50 min-w-[280px]"
+                              onMouseLeave={() => setRequesterTableGridHover({ row: 0, col: 0, show: false })}
+                            >
+                              <div className="grid grid-cols-10 gap-1 mb-3">
+                                {Array.from({ length: 100 }).map((_, idx) => {
+                                  const row = Math.floor(idx / 10) + 1
+                                  const col = (idx % 10) + 1
+                                  const isSelected =
+                                    row <= requesterTableGridHover.row && col <= requesterTableGridHover.col
+                                  return (
+                                    <div
+                                      key={idx}
+                                      className={`w-5 h-5 border border-border rounded-sm transition-colors ${
+                                        isSelected ? "bg-primary border-primary" : "bg-muted hover:bg-muted/80"
+                                      }`}
+                                      onMouseEnter={() => setRequesterTableGridHover({ row, col, show: true })}
+                                      onClick={() => {
+                                        createRequesterTable(row, col)
+                                        setRequesterTableGridHover({ row: 0, col: 0, show: false })
+                                      }}
+                                    />
+                                  )
+                                })}
+                              </div>
+                              <div className="text-sm text-center font-medium text-foreground border-t pt-2">
+                                {requesterTableGridHover.row > 0 && requesterTableGridHover.col > 0
+                                  ? `${requesterTableGridHover.row} x ${requesterTableGridHover.col} 테이블`
+                                  : "테이블 크기 선택"}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <div className="w-px h-6 bg-border mx-1" />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            const editor = document.getElementById("requester-content-editor") as HTMLElement
+                            if (editor) {
+                              editor.focus()
+                              const hr = document.createElement("hr")
+                              hr.style.border = "none"
+                              hr.style.borderTop = "2px solid #6b7280"
+                              hr.style.margin = "10px 0"
+                              const selection = window.getSelection()
+                              if (selection && selection.rangeCount > 0) {
+                                const range = selection.getRangeAt(0)
+                                range.deleteContents()
+                                range.insertNode(hr)
+                                range.setStartAfter(hr)
+                                range.collapse(true)
+                                selection.removeAllRanges()
+                                selection.addRange(range)
+                              }
+                            }
+                          }}
+                          title="구분선"
+                        >
+                          <Minus className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div
+                        id="requester-content-editor"
+                        contentEditable
+                        suppressContentEditableWarning
+                        data-placeholder="내용을 입력하세요."
+                        onInput={() => {
+                          updateRequesterEditorState()
+                          const editor = document.getElementById("requester-content-editor")
+                          if (editor) {
+                            editor.querySelectorAll("table[data-resizable='true']").forEach((table) => {
+                              addResizeHandlersToRequesterTable(table as HTMLTableElement)
+                            })
+                          }
+                        }}
+                        onBlur={updateRequesterEditorState}
+                        onMouseUp={updateRequesterEditorState}
+                        onKeyUp={updateRequesterEditorState}
+                        className="text-sm p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 custom-scrollbar focus:outline-none focus:ring-0 resize-none w-full min-w-0"
+                        style={{
+                          minHeight: "280px",
+                          whiteSpace: "pre-wrap",
+                        }}
+                      />
+                    </div>
+                    <div className="flex gap-2 mt-3 justify-end">
+                      <Button size="sm" onClick={handleSaveRequesterContent} disabled={isSavingRequesterContent}>
+                        {isSavingRequesterContent ? <Loader2 className="h-4 w-4 animate-spin" /> : "저장"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setEditingRequesterTitle("")
+                          setEditingRequesterFileKeys([])
+                          setSelectedDueDate(parseDateOnly(task?.due_date) ?? null)
+                          editingSubtitleRef.current = null
+                          setIsEditingRequesterContent(false)
+                        }}
+                        disabled={isSavingRequesterContent}
+                      >
+                        취소
+                      </Button>
+                    </div>
+                  </>
+                ) : task.content ? (
+                  <div
+                    className="border rounded-md overflow-hidden bg-background"
+                    style={{
+                      height: "300px",
+                      minHeight: "300px",
+                      maxHeight: "300px",
+                      display: "flex",
+                      flexDirection: "column",
+                    }}
+                  >
+                    <div
+                      id="worklist-content-display"
+                      className="text-sm bg-muted/50 p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 dark:prose-invert custom-scrollbar"
+                      dangerouslySetInnerHTML={{ __html: sanitizeHtml(task.content) }}
+                      style={{
+                        userSelect: "none",
+                        cursor: "default",
+                        whiteSpace: "pre-wrap",
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div
+                    className="border rounded-md bg-muted/30 p-4 text-center text-muted-foreground"
+                    style={{
+                      height: "300px",
+                      minHeight: "300px",
+                      maxHeight: "300px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    내용이 없습니다
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
-
-      {task.description && (
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>설명</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm whitespace-pre-wrap">{task.description}</p>
-          </CardContent>
-        </Card>
-      )}
 
       {/* 세부업무 첨부파일 업로드용 hidden input */}
       {editingSubtaskId && (
@@ -1292,332 +1623,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         />
       )}
 
-      {/* 개별 할당: subtasks가 없을 때 */}
+      {/* 개별 할당: subtasks가 없을 때 — 담당자 내용 카드만 (요청자 내용은 상단 카드에 통합됨) */}
       {subtasks.length === 0 && (
         <div className="space-y-6 mb-6">
-          {/* 요청자 내용 - 항상 표시 (요청자/admin일 때 수정 가능) */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-lg">{task.assigned_by_name || task.assigned_by_email} 내용</CardTitle>
-              {canEditTask && !isEditingRequesterContent && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setEditingRequesterTitle(task?.title ?? "")
-                    setEditingRequesterFileKeys(resolvedFileKeys.map((f) => f.s3Key))
-                    setIsEditingRequesterContent(true)
-                  }}
-                >
-                  수정
-                </Button>
-              )}
-            </CardHeader>
-            <CardContent>
-              {canEditTask && isEditingRequesterContent ? (
-                <>
-                  {/* 제목 · 마감일 · 첨부파일 (개별 할당 시 요청자 수정) */}
-                  <div className="space-y-3 mb-4">
-                    <div className="grid gap-2">
-                      <Label className="text-xs">업무 제목</Label>
-                      <Input
-                        value={editingRequesterTitle}
-                        onChange={(e) => setEditingRequesterTitle(e.target.value)}
-                        placeholder="업무 제목"
-                        className="max-w-md"
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label className="text-xs">마감일</Label>
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="w-fit font-normal"
-                            disabled={task.status === "completed"}
-                          >
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {selectedDueDate ? format(selectedDueDate, "yyyy-MM-dd", { locale: ko }) : "선택"}
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                          <Calendar
-                            mode="single"
-                            selected={selectedDueDate || undefined}
-                            onSelect={(d) => setSelectedDueDate(d ?? null)}
-                            locale={ko}
-                          />
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-                    <div className="grid gap-2">
-                      <Label className="text-xs">첨부파일 (요청자)</Label>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {editingRequesterFileKeys.map((key, idx) => (
-                          <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
-                            <button
-                              type="button"
-                              className="text-blue-600 hover:underline truncate max-w-[180px]"
-                              onClick={() => handleDownload(key, extractFileName(key, "파일"))}
-                            >
-                              {extractFileName(key, "파일")}
-                            </button>
-                            <button
-                              type="button"
-                              aria-label="첨부 제거"
-                              className="p-0.5 text-muted-foreground hover:text-destructive"
-                              onClick={() => setEditingRequesterFileKeys((prev) => prev.filter((_, i) => i !== idx))}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        ))}
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={isUploadingRequesterFile}
-                          onClick={() => requesterFileInputRef.current?.click()}
-                        >
-                          {isUploadingRequesterFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
-                          파일 추가
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                  <div
-                    className="border rounded-md overflow-hidden bg-background flex flex-col"
-                    style={{
-                      height: "350px",
-                      minHeight: "350px",
-                      maxHeight: "350px",
-                    }}
-                  >
-                    <div className="flex items-center gap-1 p-2 flex-wrap shrink-0 border-b">
-                      <Button
-                        type="button"
-                        variant={requesterEditorState.bold ? "secondary" : "ghost"}
-                        size="sm"
-                        className={`h-8 w-8 p-0 ${requesterEditorState.bold ? "bg-primary/10" : ""}`}
-                        onClick={(e) => {
-                          e.preventDefault()
-                          const editor = document.getElementById("requester-content-editor")
-                          if (editor) {
-                            editor.focus()
-                            document.execCommand("bold", false)
-                            updateRequesterEditorState()
-                          }
-                        }}
-                        title="굵게 (Ctrl+B)"
-                      >
-                        <Bold className={`h-4 w-4 ${requesterEditorState.bold ? "text-primary" : ""}`} />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant={requesterEditorState.italic ? "secondary" : "ghost"}
-                        size="sm"
-                        className={`h-8 w-8 p-0 ${requesterEditorState.italic ? "bg-primary/10" : ""}`}
-                        onClick={(e) => {
-                          e.preventDefault()
-                          const editor = document.getElementById("requester-content-editor")
-                          if (editor) {
-                            editor.focus()
-                            document.execCommand("italic", false)
-                            updateRequesterEditorState()
-                          }
-                        }}
-                        title="기울임 (Ctrl+I)"
-                      >
-                        <Italic className={`h-4 w-4 ${requesterEditorState.italic ? "text-primary" : ""}`} />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant={requesterEditorState.underline ? "secondary" : "ghost"}
-                        size="sm"
-                        className={`h-8 w-8 p-0 ${requesterEditorState.underline ? "bg-primary/10" : ""}`}
-                        onClick={(e) => {
-                          e.preventDefault()
-                          const editor = document.getElementById("requester-content-editor")
-                          if (editor) {
-                            editor.focus()
-                            document.execCommand("underline", false)
-                            updateRequesterEditorState()
-                          }
-                        }}
-                        title="밑줄"
-                      >
-                        <Underline className={`h-4 w-4 ${requesterEditorState.underline ? "text-primary" : ""}`} />
-                      </Button>
-                      <div className="w-px h-6 bg-border mx-1" />
-                      <div className="relative">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={(e) => {
-                            e.preventDefault()
-                            setRequesterTableGridHover(
-                              requesterTableGridHover.show
-                                ? { row: 0, col: 0, show: false }
-                                : { row: 0, col: 0, show: true }
-                            )
-                          }}
-                          title="테이블"
-                        >
-                          <TableIcon className="h-4 w-4" />
-                        </Button>
-                        {requesterTableGridHover.show && (
-                          <div
-                            className="absolute top-full left-0 mt-2 bg-background border rounded-lg shadow-xl p-4 z-50 min-w-[280px]"
-                            onMouseLeave={() => setRequesterTableGridHover({ row: 0, col: 0, show: false })}
-                          >
-                            <div className="grid grid-cols-10 gap-1 mb-3">
-                              {Array.from({ length: 100 }).map((_, idx) => {
-                                const row = Math.floor(idx / 10) + 1
-                                const col = (idx % 10) + 1
-                                const isSelected =
-                                  row <= requesterTableGridHover.row && col <= requesterTableGridHover.col
-                                return (
-                                  <div
-                                    key={idx}
-                                    className={`w-5 h-5 border border-border rounded-sm transition-colors ${
-                                      isSelected ? "bg-primary border-primary" : "bg-muted hover:bg-muted/80"
-                                    }`}
-                                    onMouseEnter={() => setRequesterTableGridHover({ row, col, show: true })}
-                                    onClick={() => {
-                                      createRequesterTable(row, col)
-                                      setRequesterTableGridHover({ row: 0, col: 0, show: false })
-                                    }}
-                                  />
-                                )
-                              })}
-                            </div>
-                            <div className="text-sm text-center font-medium text-foreground border-t pt-2">
-                              {requesterTableGridHover.row > 0 && requesterTableGridHover.col > 0
-                                ? `${requesterTableGridHover.row} x ${requesterTableGridHover.col} 테이블`
-                                : "테이블 크기 선택"}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                      <div className="w-px h-6 bg-border mx-1" />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-8 p-0"
-                        onClick={(e) => {
-                          e.preventDefault()
-                          const editor = document.getElementById("requester-content-editor") as HTMLElement
-                          if (editor) {
-                            editor.focus()
-                            const hr = document.createElement("hr")
-                            hr.style.border = "none"
-                            hr.style.borderTop = "2px solid #6b7280"
-                            hr.style.margin = "10px 0"
-                            const selection = window.getSelection()
-                            if (selection && selection.rangeCount > 0) {
-                              const range = selection.getRangeAt(0)
-                              range.deleteContents()
-                              range.insertNode(hr)
-                              range.setStartAfter(hr)
-                              range.collapse(true)
-                              selection.removeAllRanges()
-                              selection.addRange(range)
-                            }
-                          }
-                        }}
-                        title="구분선"
-                      >
-                        <Minus className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <div
-                      id="requester-content-editor"
-                      contentEditable
-                      suppressContentEditableWarning
-                      data-placeholder="내용을 입력하세요."
-                      onInput={() => {
-                        updateRequesterEditorState()
-                        const editor = document.getElementById("requester-content-editor")
-                        if (editor) {
-                          editor.querySelectorAll("table[data-resizable='true']").forEach((table) => {
-                            addResizeHandlersToRequesterTable(table as HTMLTableElement)
-                          })
-                        }
-                      }}
-                      onBlur={updateRequesterEditorState}
-                      onMouseUp={updateRequesterEditorState}
-                      onKeyUp={updateRequesterEditorState}
-                      className="text-sm p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 custom-scrollbar focus:outline-none focus:ring-0 resize-none w-full min-w-0"
-                      style={{
-                        minHeight: "280px",
-                        whiteSpace: "pre-wrap",
-                      }}
-                    />
-                  </div>
-                  <div className="flex gap-2 mt-3 justify-end">
-                    <Button size="sm" onClick={handleSaveRequesterContent} disabled={isSavingRequesterContent}>
-                      {isSavingRequesterContent ? <Loader2 className="h-4 w-4 animate-spin" /> : "저장"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setEditingRequesterTitle("")
-                        setEditingRequesterFileKeys([])
-                        setSelectedDueDate(parseDateOnly(task?.due_date) ?? null)
-                        editingSubtitleRef.current = null
-                        setIsEditingRequesterContent(false)
-                      }}
-                      disabled={isSavingRequesterContent}
-                    >
-                      취소
-                    </Button>
-                  </div>
-                </>
-              ) : task.content ? (
-                <div
-                  className="border rounded-md overflow-hidden bg-background"
-                  style={{
-                    height: "300px",
-                    minHeight: "300px",
-                    maxHeight: "300px",
-                    display: "flex",
-                    flexDirection: "column",
-                  }}
-                >
-                  <div
-                    id="worklist-content-display"
-                    className="text-sm bg-muted/50 p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 dark:prose-invert custom-scrollbar"
-                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(task.content) }}
-                    style={{
-                      userSelect: "none",
-                      cursor: "default",
-                      whiteSpace: "pre-wrap",
-                    }}
-                  />
-                </div>
-              ) : (
-                <div
-                  className="border rounded-md bg-muted/30 p-4 text-center text-muted-foreground"
-                  style={{
-                    height: "300px",
-                    minHeight: "300px",
-                    maxHeight: "300px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  내용이 없습니다
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
           {/* 담당자 내용 - 항상 표시 */}
           <Card>
             <CardHeader>
@@ -1855,7 +1863,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       <>
                         <div className="grid gap-2 mb-3">
                           <Label className="text-xs">첨부파일 (요청자)</Label>
-                          <div className="flex flex-wrap items-center gap-2">
+                          <div className="flex flex-col gap-2">
                             {editingRequesterFileKeys.map((key, idx) => (
                               <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
                                 <button
@@ -1879,6 +1887,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                               type="button"
                               variant="outline"
                               size="sm"
+                              className="w-fit"
                               disabled={isUploadingRequesterFile}
                               onClick={() => requesterFileInputRef.current?.click()}
                             >
@@ -2167,7 +2176,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                         <>
                           <div className="grid gap-2">
                             <Label className="text-xs">요청자 첨부</Label>
-                            <div className="flex flex-wrap items-center gap-2">
+                            <div className="flex flex-col gap-2">
                               {editingSubtaskFileKeys.map((key, idx) => (
                                 <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
                                   <button
@@ -2191,6 +2200,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                                 type="button"
                                 variant="outline"
                                 size="sm"
+                                className="w-fit"
                                 disabled={isUploadingSubtaskFile}
                                 onClick={() => {
                                   subtaskFileUploadTargetRef.current = "requester"
@@ -2204,7 +2214,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                           </div>
                           <div className="grid gap-2">
                             <Label className="text-xs">담당자 첨부</Label>
-                            <div className="flex flex-wrap items-center gap-2">
+                            <div className="flex flex-col gap-2">
                               {editingSubtaskCommentFileKeys.map((key, idx) => (
                                 <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
                                   <button
@@ -2228,6 +2238,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                                 type="button"
                                 variant="outline"
                                 size="sm"
+                                className="w-fit"
                                 disabled={isUploadingSubtaskFile}
                                 onClick={() => {
                                   subtaskFileUploadTargetRef.current = "assignee"
@@ -2259,58 +2270,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                         </>
                       ) : (
                         <>
-                          {(() => {
-                            const reqFiles = resolvedSubtaskFileKeys.filter(
-                              (f) => f.subtaskId === selectedSubtaskInGroup.id && f.assignedToName === "요청자"
-                            )
-                            const astFiles = resolvedSubtaskFileKeys.filter(
-                              (f) => f.subtaskId === selectedSubtaskInGroup.id && f.assignedToName !== "요청자"
-                            )
-                            if (reqFiles.length === 0 && astFiles.length === 0) {
-                              return (
-                                <p className="text-xs text-muted-foreground">첨부파일이 없습니다. 수정 버튼으로 추가할 수 있습니다.</p>
-                              )
-                            }
-                            return (
-                              <div className="space-y-2">
-                                {reqFiles.length > 0 && (
-                                  <div className="space-y-1">
-                                    <p className="text-xs font-medium text-muted-foreground">요청자 첨부</p>
-                                    <div className="flex flex-wrap gap-1 pl-2">
-                                      {reqFiles.map((f, index) => (
-                                        <FileListItem
-                                          key={`s-req-${selectedSubtaskInGroup.id}-${index}`}
-                                          fileName={f.fileName}
-                                          s3Key={f.s3Key}
-                                          uploadedAt={f.uploadedAt}
-                                          fallbackDate={task.created_at}
-                                          onDownload={handleDownload}
-                                        />
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                                {astFiles.length > 0 && (
-                                  <div className="space-y-1">
-                                    <p className="text-xs font-medium text-muted-foreground">담당자 첨부</p>
-                                    <div className="flex flex-wrap gap-1 pl-2">
-                                      {astFiles.map((f, index) => (
-                                        <FileListItem
-                                          key={`s-ast-${selectedSubtaskInGroup.id}-${index}`}
-                                          fileName={f.fileName}
-                                          s3Key={f.s3Key}
-                                          uploadedAt={f.uploadedAt}
-                                          fallbackDate={task.updated_at}
-                                          assignedToName={f.assignedToName}
-                                          onDownload={handleDownload}
-                                        />
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            )
-                          })()}
                           <Button
                             size="sm"
                             variant="outline"
@@ -2320,7 +2279,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                               setEditingSubtaskCommentFileKeys(normalizeFileKeyArray(selectedSubtaskInGroup.comment_file_keys))
                             }}
                           >
-                            첨부파일 수정
+                            첨부파일
                           </Button>
                         </>
                       )}
@@ -2354,7 +2313,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                         {hasRequester && (
                           <div className="space-y-1.5">
                             <p className="text-xs font-medium text-muted-foreground">{task.assigned_by_name || "요청자"} 첨부 (메인)</p>
-                            <div className="space-y-1 pl-2">
+                            <div className="flex flex-col gap-2 pl-2">
                               {resolvedFileKeys.map((f, index) => (
                                 <FileListItem
                                   key={`g-req-${group.subtitle}-${index}`}
@@ -2362,6 +2321,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                                   s3Key={f.s3Key}
                                   uploadedAt={f.uploadedAt}
                                   fallbackDate={task.created_at}
+                                  assignedToName={task.assigned_by_name || "요청자"}
+                                  assigneeColorClass={getAssigneeColorClass(task.assigned_by_name || "요청자")}
                                   onDownload={handleDownload}
                                 />
                               ))}
@@ -2370,8 +2331,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                         )}
                         {hasGroupRequester && (
                           <div className="space-y-1.5">
-                            <p className="text-xs font-medium text-muted-foreground">세부업무 요청자 첨부</p>
-                            <div className="space-y-1 pl-2">
+                            <p className="text-xs font-medium text-muted-foreground">요청자 첨부</p>
+                            <div className="flex flex-col gap-2 pl-2">
                               {groupRequesterFiles.map((f, index) => (
                                 <FileListItem
                                   key={`g-sreq-${group.subtitle}-${index}`}
@@ -2379,6 +2340,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                                   s3Key={f.s3Key}
                                   uploadedAt={f.uploadedAt}
                                   fallbackDate={task.created_at}
+                                  assignedToName="요청자"
+                                  assigneeColorClass={getAssigneeColorClass("요청자")}
                                   onDownload={handleDownload}
                                 />
                               ))}
@@ -2388,7 +2351,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                         {hasAssignee && (
                           <div className="space-y-1.5">
                             <p className="text-xs font-medium text-muted-foreground">담당자 첨부</p>
-                            <div className="space-y-1 pl-2">
+                            <div className="flex flex-col gap-2 pl-2">
                               {groupAssigneeFiles.map((f, index) => (
                                 <FileListItem
                                   key={`g-ast-${group.subtitle}-${index}`}
@@ -2397,6 +2360,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                                   uploadedAt={f.uploadedAt}
                                   fallbackDate={task.updated_at}
                                   assignedToName={f.assignedToName}
+                                  assigneeColorClass={getAssigneeColorClass(f.assignedToName)}
                                   onDownload={handleDownload}
                                 />
                               ))}
@@ -2621,8 +2585,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         )}
       </div>
 
-      {/* 첨부파일 — 개별 업무일 때만 페이지 하단에 표시 (공동 업무는 그룹 카드 하단에 표시) */}
-      {subtasks.length === 0 && (
+      {/* 첨부파일 — 개별 업무일 때 수정 모드에서만 표시 (수정 버튼 클릭 시) */}
+      {subtasks.length === 0 && isEditingRequesterContent && (
       <Card className="mb-6">
         <CardHeader>
           <CardTitle>첨부파일</CardTitle>
@@ -2642,7 +2606,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             <div className="space-y-2">
               <h4 className="text-sm font-semibold text-foreground/90">요청자 첨부파일</h4>
               {resolvedFileKeys.length > 0 ? (
-                <div className="space-y-2 pl-2">
+                <div className="flex flex-col gap-2 pl-2">
                   {resolvedFileKeys.map((f, index) => (
                     <FileListItem
                       key={`admin-${index}`}
@@ -2650,6 +2614,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       s3Key={f.s3Key}
                       uploadedAt={f.uploadedAt}
                       fallbackDate={task.created_at}
+                      assignedToName={task.assigned_by_name || "요청자"}
+                      assigneeColorClass={getAssigneeColorClass(task.assigned_by_name || "요청자")}
                       onDownload={handleDownload}
                     />
                   ))}
@@ -2662,7 +2628,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             <div className="space-y-2">
               <h4 className="text-sm font-semibold text-foreground/90">담당자 첨부파일</h4>
               {resolvedCommentFileKeys.length > 0 ? (
-                <div className="space-y-2 pl-2">
+                <div className="flex flex-col gap-2 pl-2">
                   {resolvedCommentFileKeys.map((f, index) => (
                     <FileListItem
                       key={`user-${index}`}
@@ -2670,6 +2636,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       s3Key={f.s3Key}
                       uploadedAt={f.uploadedAt}
                       fallbackDate={task.updated_at}
+                      assignedToName={task.assigned_to_name || "담당자"}
+                      assigneeColorClass={getAssigneeColorClass(task.assigned_to_name || "담당자")}
                       onDownload={handleDownload}
                     />
                   ))}

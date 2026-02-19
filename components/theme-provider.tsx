@@ -4,6 +4,19 @@ import * as React from 'react'
 
 type Theme = 'dark' | 'light'
 
+const STORAGE_KEY = 'theme'
+
+function getStoredTheme(): Theme | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored === 'light' || stored === 'dark') return stored
+  } catch {
+    // ignore
+  }
+  return null
+}
+
 const ThemeContext = React.createContext<{
   theme: Theme
   setTheme: (t: Theme | ((prev: Theme) => Theme)) => void
@@ -26,6 +39,13 @@ export function ThemeProvider({
     setMounted(true)
   }, [])
 
+  // 새로고침 시 저장된 테마 복원
+  React.useEffect(() => {
+    if (!mounted) return
+    const stored = getStoredTheme()
+    if (stored) setThemeState(stored)
+  }, [mounted])
+
   React.useEffect(() => {
     if (typeof document === 'undefined' || !mounted) return
     const root = document.documentElement
@@ -37,7 +57,15 @@ export function ThemeProvider({
   }, [theme, mounted, attribute])
 
   const setTheme = React.useCallback((t: Theme | ((prev: Theme) => Theme)) => {
-    setThemeState((prev) => (typeof t === 'function' ? t(prev) : t))
+    setThemeState((prev) => {
+      const next = typeof t === 'function' ? t(prev) : t
+      try {
+        localStorage.setItem(STORAGE_KEY, next)
+      } catch {
+        // ignore
+      }
+      return next
+    })
   }, [])
 
   const value = React.useMemo(

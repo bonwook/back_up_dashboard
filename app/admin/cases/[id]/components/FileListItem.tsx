@@ -6,6 +6,8 @@ interface FileListItemProps {
   uploadedAt?: string | null
   fallbackDate: string
   assignedToName?: string
+  /** 담당자 구분용 괄호 색상 (Tailwind 클래스, 예: text-blue-600) */
+  assigneeColorClass?: string
   onDownload: (s3Key: string, fileName: string) => Promise<void>
 }
 
@@ -19,6 +21,7 @@ export function FileListItem({
   uploadedAt,
   fallbackDate,
   assignedToName,
+  assigneeColorClass,
   onDownload,
 }: FileListItemProps) {
   const expiry = calculateFileExpiry(uploadedAt || fallbackDate)
@@ -43,7 +46,7 @@ export function FileListItem({
       </button>
       
       {assignedToName && (
-        <span className="text-xs text-muted-foreground shrink-0">
+        <span className={assigneeColorClass ? `text-xs font-medium shrink-0 ${assigneeColorClass}` : "text-xs text-muted-foreground shrink-0"}>
           ({assignedToName})
         </span>
       )}
