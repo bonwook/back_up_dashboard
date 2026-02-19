@@ -80,11 +80,11 @@ export function TaskBlock({
                 </>
               )}
             </div>
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-1 overflow-hidden">
               <h3 className="font-medium text-sm truncate">
                 {task.title}
-                {task.subtitle && task.is_subtask && (
-                  <span className="text-muted-foreground ml-1.5">({task.subtitle})</span>
+                {task.is_subtask && task.subtitle && (
+                  <span className="text-muted-foreground font-normal ml-1.5">({task.subtitle})</span>
                 )}
               </h3>
             </div>

@@ -94,6 +94,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [isUploadingRequesterFile, setIsUploadingRequesterFile] = useState(false)
   const requesterFileInputRef = useRef<HTMLInputElement>(null)
   const didSetInitialRequesterContent = useRef(false)
+  /** subtask별 첨부파일 수정 (한 번에 하나의 subtask만 편집) */
+  const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null)
+  const [editingSubtaskFileKeys, setEditingSubtaskFileKeys] = useState<string[]>([])
+  const [editingSubtaskCommentFileKeys, setEditingSubtaskCommentFileKeys] = useState<string[]>([])
+  const [isUploadingSubtaskFile, setIsUploadingSubtaskFile] = useState(false)
+  const [isSavingSubtaskFiles, setIsSavingSubtaskFiles] = useState(false)
+  const subtaskFileUploadTargetRef = useRef<'requester' | 'assignee'>(null)
+  const subtaskFileInputRef = useRef<HTMLInputElement>(null)
   /** 공동 수정 시 에디터에 마지막으로 로드한 소스(부제) 추적 — 부제 전환 시 에디터 내용 갱신용 */
   const lastRequesterContentSourceRef = useRef<{ taskId: string; subtitle: string | null } | null>(null)
   /** 공동: 수정 버튼 클릭 시점에 편집 대상 부제를 동기 저장 — 상태 배칭 전에도 올바른 부제 매핑 보장 */
@@ -425,18 +433,31 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     [taskId, task?.is_multi_assign, reloadTask, loadSubtasks, toast, router]
   )
 
-  // subtask 첨부파일 resolve (task_file_attachments의 uploaded_at 우선 사용)
+  // subtask 첨부파일 resolve (task_file_attachments의 uploaded_at 우선 사용) — 요청자(file_keys) + 담당자(comment_file_keys)
   useEffect(() => {
     const run = async () => {
       const subtaskFileKeys: SubtaskFileKeyItem[] = []
       const subtaskUploadedAt = new Map<string, string | null>() // "subtaskId:key" -> uploaded_at
       
       subtasks.forEach((subtask) => {
+        const fileKeys = normalizeFileKeyArray(subtask.file_keys)
         const commentKeys = normalizeFileKeyArray(subtask.comment_file_keys)
+        ;(subtask.file_keys || []).forEach((f: unknown) => {
+          const o = f as { key?: string; uploaded_at?: string | null }
+          const k = typeof o === "object" && o?.key != null ? o.key : String(f)
+          if (k) subtaskUploadedAt.set(`${subtask.id}:${k}`, o.uploaded_at ?? null)
+        })
         ;(subtask.comment_file_keys || []).forEach((f: unknown) => {
           const o = f as { key?: string; uploaded_at?: string | null }
           const k = typeof o === "object" && o?.key != null ? o.key : String(f)
           if (k) subtaskUploadedAt.set(`${subtask.id}:${k}`, o.uploaded_at ?? null)
+        })
+        fileKeys.forEach((key) => {
+          subtaskFileKeys.push({
+            key,
+            subtaskId: subtask.id,
+            assignedToName: "요청자"
+          })
         })
         if (commentKeys.length > 0) {
           commentKeys.forEach((key) => {
@@ -627,6 +648,18 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           toast({ title: "저장 실패", description: "선택된 부제를 찾을 수 없습니다.", variant: "destructive" })
           return
         }
+        // 공동 할당: 메인 task에 첨부파일 반영 후, 각 subtask에 content 저장
+        const mainPayload: Record<string, unknown> = { file_keys: editingRequesterFileKeys }
+        const mainRes = await fetch(`/api/tasks/${taskId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(mainPayload),
+        })
+        if (!mainRes.ok) {
+          const err = await mainRes.json().catch(() => ({}))
+          throw new Error(err.error || "첨부파일 저장 실패")
+        }
         for (const st of group.tasks) {
           const res = await fetch(`/api/tasks/${st.id}`, {
             method: "PATCH",
@@ -748,6 +781,40 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       setIsPostingComment(false)
     }
   }, [taskId, newComment, loadComments, toast])
+
+  const handleSaveSubtaskFiles = useCallback(async () => {
+    if (!editingSubtaskId) return
+    setIsSavingSubtaskFiles(true)
+    try {
+      const res = await fetch(`/api/tasks/${editingSubtaskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          file_keys: editingSubtaskFileKeys,
+          comment_file_keys: editingSubtaskCommentFileKeys,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error || "첨부파일 저장 실패")
+      }
+      toast({ title: "저장됨", description: "세부업무 첨부파일이 저장되었습니다." })
+      setEditingSubtaskId(null)
+      setEditingSubtaskFileKeys([])
+      setEditingSubtaskCommentFileKeys([])
+      await loadSubtasks()
+      await reloadTask()
+    } catch (e: any) {
+      toast({
+        title: "저장 실패",
+        description: e?.message ?? "첨부파일 저장 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSavingSubtaskFiles(false)
+    }
+  }, [editingSubtaskId, editingSubtaskFileKeys, editingSubtaskCommentFileKeys, loadSubtasks, reloadTask, toast])
 
   const handleFinalizeTask = useCallback(async () => {
     if (!taskId || !task) return
@@ -1125,6 +1192,106 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         </Card>
       )}
 
+      {/* 세부업무 첨부파일 업로드용 hidden input */}
+      {editingSubtaskId && (
+        <input
+          ref={subtaskFileInputRef}
+          type="file"
+          className="hidden"
+          multiple
+          onChange={async (e) => {
+            const files = e.target.files
+            if (!files?.length) return
+            const target = subtaskFileUploadTargetRef.current
+            if (!target) return
+            setIsUploadingSubtaskFile(true)
+            const addedPaths: string[] = []
+            try {
+              for (let i = 0; i < files.length; i++) {
+                const formData = new FormData()
+                formData.append("file", files[i])
+                formData.append("fileType", "other")
+                formData.append("path", `temp/attachment/${files[i].name}`)
+                const res = await fetch("/api/storage/upload", {
+                  method: "POST",
+                  credentials: "include",
+                  body: formData,
+                })
+                const data = await res.json().catch(() => ({}))
+                if (!res.ok) {
+                  throw new Error(data.error || "업로드 실패")
+                }
+                const path = data.path ?? data.s3_key
+                if (path) addedPaths.push(path)
+              }
+              if (addedPaths.length > 0) {
+                if (target === "requester") {
+                  setEditingSubtaskFileKeys((prev) => [...prev, ...addedPaths])
+                } else {
+                  setEditingSubtaskCommentFileKeys((prev) => [...prev, ...addedPaths])
+                }
+              }
+            } catch (err: any) {
+              toast({
+                title: "첨부 업로드 실패",
+                description: err?.message ?? "파일 업로드 중 오류가 발생했습니다.",
+                variant: "destructive",
+              })
+            } finally {
+              setIsUploadingSubtaskFile(false)
+              e.target.value = ""
+            }
+          }}
+        />
+      )}
+
+      {/* 요청자 첨부파일 업로드용 공용 hidden input (개별/공동 수정 시 하나만 사용) */}
+      {isEditingRequesterContent && (
+        <input
+          ref={requesterFileInputRef}
+          type="file"
+          className="hidden"
+          multiple
+          onChange={async (e) => {
+            const files = e.target.files
+            if (!files?.length) return
+            setIsUploadingRequesterFile(true)
+            const addedPaths: string[] = []
+            try {
+              for (let i = 0; i < files.length; i++) {
+                const formData = new FormData()
+                formData.append("file", files[i])
+                formData.append("fileType", "other")
+                formData.append("path", `temp/attachment/${files[i].name}`)
+                const res = await fetch("/api/storage/upload", {
+                  method: "POST",
+                  credentials: "include",
+                  body: formData,
+                })
+                const data = await res.json().catch(() => ({}))
+                if (!res.ok) {
+                  throw new Error(data.error || "업로드 실패")
+                }
+                const path = data.path ?? data.s3_key
+                if (path) addedPaths.push(path)
+              }
+              if (addedPaths.length > 0) {
+                setEditingRequesterFileKeys((prev) => [...prev, ...addedPaths])
+              }
+            } catch (err: any) {
+              toast({
+                title: "첨부 업로드 실패",
+                description: err?.message ?? "파일 업로드 중 오류가 발생했습니다.",
+                variant: "destructive",
+              })
+            } finally {
+              setIsUploadingRequesterFile(false)
+              e.target.value = ""
+            }
+          }}
+        />
+      )}
+
       {/* 개별 할당: subtasks가 없을 때 */}
       {subtasks.length === 0 && (
         <div className="space-y-6 mb-6">
@@ -1206,49 +1373,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                             </button>
                           </div>
                         ))}
-                        <input
-                          ref={requesterFileInputRef}
-                          type="file"
-                          className="hidden"
-                          multiple
-                          onChange={async (e) => {
-                            const files = e.target.files
-                            if (!files?.length) return
-                            setIsUploadingRequesterFile(true)
-                            const addedPaths: string[] = []
-                            try {
-                              for (let i = 0; i < files.length; i++) {
-                                const formData = new FormData()
-                                formData.append("file", files[i])
-                                formData.append("fileType", "other")
-                                formData.append("path", `temp/attachment/${files[i].name}`)
-                                const res = await fetch("/api/storage/upload", {
-                                  method: "POST",
-                                  credentials: "include",
-                                  body: formData,
-                                })
-                                const data = await res.json().catch(() => ({}))
-                                if (!res.ok) {
-                                  throw new Error(data.error || "업로드 실패")
-                                }
-                                const path = data.path ?? data.s3_key
-                                if (path) addedPaths.push(path)
-                              }
-                              if (addedPaths.length > 0) {
-                                setEditingRequesterFileKeys((prev) => [...prev, ...addedPaths])
-                              }
-                            } catch (err: any) {
-                              toast({
-                                title: "첨부 업로드 실패",
-                                description: err?.message ?? "파일 업로드 중 오류가 발생했습니다.",
-                                variant: "destructive",
-                              })
-                            } finally {
-                              setIsUploadingRequesterFile(false)
-                              e.target.value = ""
-                            }
-                          }}
-                        />
                         <Button
                           type="button"
                           variant="outline"
@@ -1716,6 +1840,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       onClick={() => {
                         editingSubtitleRef.current = group.subtitle
                         setSelectedSubtitle(group.subtitle)
+                        setEditingRequesterFileKeys(resolvedFileKeys.map((f) => f.s3Key))
                         setIsEditingRequesterContent(true)
                       }}
                     >
@@ -1728,6 +1853,40 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                     <p className="text-[11px] font-medium text-muted-foreground mb-1">요청자 내용</p>
                     {canEditTask && isEditingRequesterContent && selectedSubtitle === group.subtitle ? (
                       <>
+                        <div className="grid gap-2 mb-3">
+                          <Label className="text-xs">첨부파일 (요청자)</Label>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {editingRequesterFileKeys.map((key, idx) => (
+                              <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
+                                <button
+                                  type="button"
+                                  className="text-blue-600 hover:underline truncate max-w-[180px]"
+                                  onClick={() => handleDownload(key, extractFileName(key, "파일"))}
+                                >
+                                  {extractFileName(key, "파일")}
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label="첨부 제거"
+                                  className="p-0.5 text-muted-foreground hover:text-destructive"
+                                  onClick={() => setEditingRequesterFileKeys((prev) => prev.filter((_, i) => i !== idx))}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            ))}
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={isUploadingRequesterFile}
+                              onClick={() => requesterFileInputRef.current?.click()}
+                            >
+                              {isUploadingRequesterFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                              파일 추가
+                            </Button>
+                          </div>
+                        </div>
                         <div
                           className="border rounded-md overflow-hidden bg-background flex flex-col"
                           style={{
@@ -1995,13 +2154,191 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       </div>
                     </div>
                   </div>
+                  {/* 선택한 세부업무 첨부파일 — subtask별 첨부 표시 및 수정 */}
+                  {selectedSubtaskInGroup && canEditTask && (
+                    <div className="space-y-3 pt-4 mt-4 border-t">
+                      <h4 className="text-sm font-semibold text-foreground/90">
+                        선택한 세부업무 첨부파일
+                        {selectedSubtaskInGroup.assigned_to_name || selectedSubtaskInGroup.assigned_to_email
+                          ? ` (${selectedSubtaskInGroup.assigned_to_name || selectedSubtaskInGroup.assigned_to_email})`
+                          : ""}
+                      </h4>
+                      {editingSubtaskId === selectedSubtaskInGroup.id ? (
+                        <>
+                          <div className="grid gap-2">
+                            <Label className="text-xs">요청자 첨부</Label>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {editingSubtaskFileKeys.map((key, idx) => (
+                                <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
+                                  <button
+                                    type="button"
+                                    className="text-blue-600 hover:underline truncate max-w-[180px]"
+                                    onClick={() => handleDownload(key, extractFileName(key, "파일"))}
+                                  >
+                                    {extractFileName(key, "파일")}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    aria-label="첨부 제거"
+                                    className="p-0.5 text-muted-foreground hover:text-destructive"
+                                    onClick={() => setEditingSubtaskFileKeys((prev) => prev.filter((_, i) => i !== idx))}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              ))}
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={isUploadingSubtaskFile}
+                                onClick={() => {
+                                  subtaskFileUploadTargetRef.current = "requester"
+                                  subtaskFileInputRef.current?.click()
+                                }}
+                              >
+                                {isUploadingSubtaskFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                                파일 추가
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="grid gap-2">
+                            <Label className="text-xs">담당자 첨부</Label>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {editingSubtaskCommentFileKeys.map((key, idx) => (
+                                <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
+                                  <button
+                                    type="button"
+                                    className="text-blue-600 hover:underline truncate max-w-[180px]"
+                                    onClick={() => handleDownload(key, extractFileName(key, "파일"))}
+                                  >
+                                    {extractFileName(key, "파일")}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    aria-label="첨부 제거"
+                                    className="p-0.5 text-muted-foreground hover:text-destructive"
+                                    onClick={() => setEditingSubtaskCommentFileKeys((prev) => prev.filter((_, i) => i !== idx))}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              ))}
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={isUploadingSubtaskFile}
+                                onClick={() => {
+                                  subtaskFileUploadTargetRef.current = "assignee"
+                                  subtaskFileInputRef.current?.click()
+                                }}
+                              >
+                                {isUploadingSubtaskFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                                파일 추가
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button size="sm" onClick={handleSaveSubtaskFiles} disabled={isSavingSubtaskFiles}>
+                              {isSavingSubtaskFiles ? <Loader2 className="h-4 w-4 animate-spin" /> : "저장"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setEditingSubtaskId(null)
+                                setEditingSubtaskFileKeys([])
+                                setEditingSubtaskCommentFileKeys([])
+                              }}
+                              disabled={isSavingSubtaskFiles}
+                            >
+                              취소
+                            </Button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          {(() => {
+                            const reqFiles = resolvedSubtaskFileKeys.filter(
+                              (f) => f.subtaskId === selectedSubtaskInGroup.id && f.assignedToName === "요청자"
+                            )
+                            const astFiles = resolvedSubtaskFileKeys.filter(
+                              (f) => f.subtaskId === selectedSubtaskInGroup.id && f.assignedToName !== "요청자"
+                            )
+                            if (reqFiles.length === 0 && astFiles.length === 0) {
+                              return (
+                                <p className="text-xs text-muted-foreground">첨부파일이 없습니다. 수정 버튼으로 추가할 수 있습니다.</p>
+                              )
+                            }
+                            return (
+                              <div className="space-y-2">
+                                {reqFiles.length > 0 && (
+                                  <div className="space-y-1">
+                                    <p className="text-xs font-medium text-muted-foreground">요청자 첨부</p>
+                                    <div className="flex flex-wrap gap-1 pl-2">
+                                      {reqFiles.map((f, index) => (
+                                        <FileListItem
+                                          key={`s-req-${selectedSubtaskInGroup.id}-${index}`}
+                                          fileName={f.fileName}
+                                          s3Key={f.s3Key}
+                                          uploadedAt={f.uploadedAt}
+                                          fallbackDate={task.created_at}
+                                          onDownload={handleDownload}
+                                        />
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                {astFiles.length > 0 && (
+                                  <div className="space-y-1">
+                                    <p className="text-xs font-medium text-muted-foreground">담당자 첨부</p>
+                                    <div className="flex flex-wrap gap-1 pl-2">
+                                      {astFiles.map((f, index) => (
+                                        <FileListItem
+                                          key={`s-ast-${selectedSubtaskInGroup.id}-${index}`}
+                                          fileName={f.fileName}
+                                          s3Key={f.s3Key}
+                                          uploadedAt={f.uploadedAt}
+                                          fallbackDate={task.updated_at}
+                                          assignedToName={f.assignedToName}
+                                          onDownload={handleDownload}
+                                        />
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })()}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setEditingSubtaskId(selectedSubtaskInGroup.id)
+                              setEditingSubtaskFileKeys(normalizeFileKeyArray(selectedSubtaskInGroup.file_keys))
+                              setEditingSubtaskCommentFileKeys(normalizeFileKeyArray(selectedSubtaskInGroup.comment_file_keys))
+                            }}
+                          >
+                            첨부파일 수정
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  )}
                   {/* 그룹별 첨부파일 — 해당 그룹의 요청자 + 담당자 첨부만 */}
                   {(() => {
                     const groupSubtaskIds = new Set(group.tasks.map((t) => t.id))
-                    const groupAssigneeFiles = resolvedSubtaskFileKeys.filter((f) => groupSubtaskIds.has(f.subtaskId))
+                    const groupRequesterFiles = resolvedSubtaskFileKeys.filter(
+                      (f) => groupSubtaskIds.has(f.subtaskId) && f.assignedToName === "요청자"
+                    )
+                    const groupAssigneeFiles = resolvedSubtaskFileKeys.filter(
+                      (f) => groupSubtaskIds.has(f.subtaskId) && f.assignedToName !== "요청자"
+                    )
                     const hasRequester = resolvedFileKeys.length > 0
+                    const hasGroupRequester = groupRequesterFiles.length > 0
                     const hasAssignee = groupAssigneeFiles.length > 0
-                    if (!hasRequester && !hasAssignee) return null
+                    if (!hasRequester && !hasGroupRequester && !hasAssignee) return null
                     return (
                       <div className="space-y-3 pt-4 mt-4 border-t">
                         <h4 className="text-sm font-semibold text-foreground/90">첨부파일</h4>
@@ -2016,11 +2353,28 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                         )}
                         {hasRequester && (
                           <div className="space-y-1.5">
-                            <p className="text-xs font-medium text-muted-foreground">{task.assigned_by_name || "요청자"} 첨부</p>
+                            <p className="text-xs font-medium text-muted-foreground">{task.assigned_by_name || "요청자"} 첨부 (메인)</p>
                             <div className="space-y-1 pl-2">
                               {resolvedFileKeys.map((f, index) => (
                                 <FileListItem
                                   key={`g-req-${group.subtitle}-${index}`}
+                                  fileName={f.fileName}
+                                  s3Key={f.s3Key}
+                                  uploadedAt={f.uploadedAt}
+                                  fallbackDate={task.created_at}
+                                  onDownload={handleDownload}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {hasGroupRequester && (
+                          <div className="space-y-1.5">
+                            <p className="text-xs font-medium text-muted-foreground">세부업무 요청자 첨부</p>
+                            <div className="space-y-1 pl-2">
+                              {groupRequesterFiles.map((f, index) => (
+                                <FileListItem
+                                  key={`g-sreq-${group.subtitle}-${index}`}
                                   fileName={f.fileName}
                                   s3Key={f.s3Key}
                                   uploadedAt={f.uploadedAt}

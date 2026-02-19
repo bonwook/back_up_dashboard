@@ -575,11 +575,11 @@ export default function ClientProgressPage() {
                   >
                     <CardContent className="p-2">
                       <div className="space-y-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <h4 className="font-semibold text-xs truncate" title={task.title}>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <h4 className="font-semibold text-xs truncate min-w-0" title={task.title + (task.is_subtask && task.subtitle ? ` (${task.subtitle})` : '')}>
                             {task.title}
-                            {task.subtitle && task.is_subtask && (
-                              <span className="text-muted-foreground ml-1.5">({task.subtitle})</span>
+                            {task.is_subtask && task.subtitle && (
+                              <span className="text-muted-foreground font-normal ml-1.5">({task.subtitle})</span>
                             )}
                           </h4>
                           <Badge className={`${getPriorityColor(task.priority)} text-[9px] px-1.5 py-0.5 font-medium shrink-0`} variant="outline">
@@ -719,6 +719,21 @@ export default function ClientProgressPage() {
                       disabled={isWorkAreaReadOnly || !workTaskId}
                       readOnly={isWorkAreaReadOnly || !workTaskId}
                     />
+                    {workTaskId && (() => {
+                      const currentTask = tasks.find((t) => t.id === workTaskId)
+                      return currentTask?.is_subtask && currentTask?.subtitle ? (
+                        <>
+                          <Label htmlFor="work-subtitle" className="text-base font-semibold">부제 *</Label>
+                          <Input
+                            id="work-subtitle"
+                            value={currentTask.subtitle}
+                            readOnly
+                            disabled
+                            className="text-base h-12 w-full max-w-full min-w-0 bg-muted/50 text-muted-foreground"
+                          />
+                        </>
+                      ) : null
+                    })()}
                   </div>
                   <div></div>
                 </div>

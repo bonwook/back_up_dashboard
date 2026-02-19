@@ -19,6 +19,9 @@ function generateId() {
   return `nii-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
+/** 파일 id별 마스크 캐시 (같은 파일 다시 선택 시 복원) */
+const maskCache = new Map<string, Uint8Array>()
+
 export default function ClientMaskingPage() {
   const [files, setFiles] = useState<NiiFileItem[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -52,14 +55,25 @@ export default function ClientMaskingPage() {
         }
         const { header: h, imageBuffer: img, data: raw, wasGzipped: gz } = await parseNifti(data)
         const layout = getSliceLayout(h)
-        const mask = new Uint8Array(layout.totalVoxels)
+        const totalVoxels = layout.totalVoxels
+        const existingId = options?.existingId
+        let mask: Uint8Array
+        if (existingId != null) {
+          const cached = maskCache.get(existingId)
+          if (cached && cached.length === totalVoxels) {
+            mask = new Uint8Array(cached)
+          } else {
+            mask = new Uint8Array(totalVoxels)
+          }
+        } else {
+          mask = new Uint8Array(totalVoxels)
+        }
         setHeader(h)
         setImageBuffer(img)
         setRawData(raw)
         setMask3D(mask)
         setWasGzipped(gz)
         setDownloadAsGzip(gz)
-        const existingId = options?.existingId
         if (existingId != null) {
           setSelectedId(existingId)
           toast({ title: "선택됨", description: `${name}을(를) 표시합니다.` })
@@ -116,20 +130,28 @@ export default function ClientMaskingPage() {
 
   const handleMaskChange = useCallback(
     (axis: "axial" | "coronal" | "sagittal", sliceIndex: number, mask: Uint8Array) => {
-      if (!header || !mask3D) return
-      setSliceIn3DMask(mask3D, header, axis, sliceIndex, mask)
-      setMask3D(new Uint8Array(mask3D))
+      if (!header) return
+      const layout = getSliceLayout(header)
+      const totalVoxels = layout.totalVoxels
+      const nextMask =
+        mask3D && mask3D.length === totalVoxels
+          ? new Uint8Array(mask3D)
+          : new Uint8Array(totalVoxels)
+      setSliceIn3DMask(nextMask, header, axis, sliceIndex, mask)
+      setMask3D(nextMask)
+      if (selectedId) maskCache.set(selectedId, nextMask)
     },
-    [header, mask3D]
+    [header, mask3D, selectedId]
   )
 
   const handleCompleteRequest = useCallback(() => {
     if (!selectedId) return
+    if (mask3D) maskCache.set(selectedId, mask3D)
     setFiles((prev) =>
       prev.map((f) => (f.id === selectedId ? { ...f, completed: true } : f))
     )
     toast({ title: "완료", description: "파일 블록이 완료 처리되었습니다." })
-  }, [selectedId, toast])
+  }, [selectedId, mask3D, toast])
 
   const handleDownloadRequest = useCallback(
     (phaseIndex?: number) => {
