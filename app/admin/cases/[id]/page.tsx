@@ -120,7 +120,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [editingGroupData, setEditingGroupData] = useState<Record<string, { comment: string; file_keys: string[]; comment_file_keys: string[] }>>({})
   const [isSavingGroupEdit, setIsSavingGroupEdit] = useState(false)
   const [isUploadingGroupEditFile, setIsUploadingGroupEditFile] = useState(false)
-  /** 그룹 수정 모드에서 파일 추가 대상: 해당 subtask의 요청자 첨부만 (담당자 첨부는 수정 UI에서 제외) */
+  /** 그룹 수정 모드에서 파일 추가 대상: 해당 subtask의 요청자 첨부만 (담당자 첨부는 수정 불가) */
   const groupEditFileTargetRef = useRef<{ type: "requester"; subtaskId: string } | null>(null)
   const groupEditFileInputRef = useRef<HTMLInputElement>(null)
   /** 그룹 수정 시 분담내용 에디터 초기값 설정 여부 (한 번만 설정해 커서 유지) */
@@ -143,6 +143,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const lastRequesterContentSourceRef = useRef<{ taskId: string; subtitle: string | null } | null>(null)
   /** 공동: 수정 버튼 클릭 시점에 편집 대상 부제를 동기 저장 — 상태 배칭 전에도 올바른 부제 매핑 보장 */
   const editingSubtitleRef = useRef<string | null>(null)
+  /** 공동: 상단 요청자 내용에서 보여줄 그룹 부제 (null이면 첫 그룹) */
+  const [requesterContentGroupSubtitle, setRequesterContentGroupSubtitle] = useState<string | null>(null)
   /** 공동: 요청자 내용 카드에서 "담당업무 표시" 선택 시 true → 내가 작성한 분담내용 표시 */
   const [showMyAssignment, setShowMyAssignment] = useState(false)
   const [isEditingMyComment, setIsEditingMyComment] = useState(false)
@@ -166,6 +168,20 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     createTable: createRequesterTable,
     addResizeHandlersToTable: addResizeHandlersToRequesterTable,
   } = useContentEditor({ editorId: "requester-content-editor", onContentChange: () => {} })
+
+  // 그룹 수정(분담내용) 편집용 서식 툴바 (굵게/기울임/밑줄/테이블/구분선)
+  const groupEditEditorId =
+    editingGroupSubtitle && Object.keys(editingGroupData).length > 0
+      ? `group-edit-comment-${Object.keys(editingGroupData)[0]}`
+      : "group-edit-comment-placeholder"
+  const {
+    editorState: groupEditEditorState,
+    updateEditorState: updateGroupEditEditorState,
+    tableGridHover: groupEditTableGridHover,
+    setTableGridHover: setGroupEditTableGridHover,
+    createTable: createGroupEditTable,
+    addResizeHandlersToTable: addResizeHandlersToGroupEditTable,
+  } = useContentEditor({ editorId: groupEditEditorId, onContentChange: () => {} })
 
   useEffect(() => {
     params.then((p) => {
@@ -637,6 +653,13 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       tasks,
     }))
   }, [subtasks])
+
+  // 공동: 상단 요청자 내용 그룹 선택이 유효하도록 (그룹 목록 변경 시 첫 그룹으로 보정)
+  useEffect(() => {
+    if (groupedSubtasks.length === 0) return
+    const exists = groupedSubtasks.some((g) => g.subtitle === requesterContentGroupSubtitle)
+    if (!requesterContentGroupSubtitle || !exists) setRequesterContentGroupSubtitle(groupedSubtasks[0].subtitle)
+  }, [groupedSubtasks, requesterContentGroupSubtitle])
 
   /** 공동: 현재 로그인 사용자에게 할당된 subtask 목록 (담당업무 표시용) */
   const mySubtasks = useMemo(
@@ -1688,25 +1711,40 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             </div>
           )}
 
-          {/* 공동 할당: 첫 그룹 요청자 내용을 같은 카드 안에 이어서 표시 (제목+본문 하나로) */}
-          {subtasks.length > 0 && !showMyAssignment && groupedSubtasks[0] && (() => {
-            const firstGroup = groupedSubtasks[0]
-            const firstGroupContent = firstGroup.tasks[0]?.content ?? ""
+          {/* 공동 할당: 요청자 내용 (그룹별 탭 선택, 상단에만 표시 — 카드 UI는 분담내용+첨부만 통일) */}
+          {subtasks.length > 0 && !showMyAssignment && groupedSubtasks.length > 0 && (() => {
+            const effectiveRequesterSubtitle = requesterContentGroupSubtitle ?? groupedSubtasks[0].subtitle
+            const selectedRequesterGroup = groupedSubtasks.find((g) => g.subtitle === effectiveRequesterSubtitle) ?? groupedSubtasks[0]
+            const selectedGroupContent = selectedRequesterGroup.tasks[0]?.content ?? ""
             return (
               <div className="mt-4 pt-4 border-t border-border/50">
-                <div className="flex flex-row items-center justify-between pb-2">
-                  <h3 className="text-lg font-semibold">{firstGroup.subtitle}</h3>
+                <div className="flex flex-row items-center justify-between gap-2 pb-2 flex-wrap">
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {groupedSubtasks.map((g) => (
+                      <Button
+                        key={g.subtitle}
+                        type="button"
+                        size="sm"
+                        variant={effectiveRequesterSubtitle === g.subtitle ? "secondary" : "ghost"}
+                        className="h-8 text-xs"
+                        onClick={() => setRequesterContentGroupSubtitle(g.subtitle)}
+                      >
+                        {g.subtitle}
+                      </Button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] font-medium text-muted-foreground shrink-0">요청자 내용</p>
                 </div>
                 <div>
                   <div className="flex items-center justify-between gap-2 mb-1">
-                    <p className="text-[11px] font-medium text-muted-foreground">요청자 내용</p>
+                    <p className="text-[11px] font-medium text-muted-foreground">{selectedRequesterGroup.subtitle} · 요청자 내용</p>
                     {showRequesterContentEditButton && !isEditingRequesterContent && (
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={() => {
-                          editingSubtitleRef.current = firstGroup.subtitle
-                          setSelectedSubtitle(firstGroup.subtitle)
+                          editingSubtitleRef.current = selectedRequesterGroup.subtitle
+                          setSelectedSubtitle(selectedRequesterGroup.subtitle)
                           if (subtasks.length === 0) setEditingRequesterFileKeys(resolvedFileKeys.map((f) => f.s3Key))
                           setIsEditingRequesterContent(true)
                         }}
@@ -1715,7 +1753,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       </Button>
                     )}
                   </div>
-                  {showRequesterContentEditButton && isEditingRequesterContent && selectedSubtitle === firstGroup.subtitle ? (
+                  {showRequesterContentEditButton && isEditingRequesterContent && selectedSubtitle === selectedRequesterGroup.subtitle ? (
                     <>
                       {subtasks.length === 0 && (
                         <div className="grid gap-2 mb-3">
@@ -1772,8 +1810,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                     </>
                   ) : (
                     <div className="border rounded-md overflow-hidden bg-muted/30 p-4" style={{ minHeight: "300px" }}>
-                      {firstGroupContent ? (
-                        <div className="text-base p-3 prose prose-base max-w-none dark:prose-invert" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }} dangerouslySetInnerHTML={{ __html: sanitizeHtml(firstGroupContent) }} />
+                      {selectedGroupContent ? (
+                        <div className="text-base p-3 prose prose-base max-w-none dark:prose-invert" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }} dangerouslySetInnerHTML={{ __html: sanitizeHtml(selectedGroupContent) }} />
                       ) : (
                         <span className="text-muted-foreground">내용이 없습니다</span>
                       )}
@@ -1797,8 +1835,10 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           onChange={async (e) => {
             const fileList = e.target.files
             const target = groupEditFileTargetRef.current
-            e.target.value = ""
-            if (!fileList?.length || !target || target.type !== "requester") return
+            if (!fileList?.length || !target || target.type !== "requester") {
+              e.target.value = ""
+              return
+            }
             const subtaskId = target.subtaskId
             setIsUploadingGroupEditFile(true)
             const addedPaths: string[] = []
@@ -1815,9 +1855,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 })
                 const data = await res.json().catch(() => ({}))
                 if (!res.ok) throw new Error((data as { error?: string }).error || "업로드 실패")
-                const path = (data as { path?: string; s3_key?: string; files?: Array<{ path?: string }> }).path
-                  ?? (data as { path?: string; s3_key?: string }).s3_key
-                  ?? (data as { files?: Array<{ path?: string }> }).files?.[0]?.path
+                const path = (data as { path?: string; s3_key?: string }).path ?? (data as { path?: string; s3_key?: string }).s3_key
                 if (path) addedPaths.push(path)
               }
               if (addedPaths.length > 0) {
@@ -1834,6 +1872,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               toast({ title: "첨부 업로드 실패", description: message, variant: "destructive" })
             } finally {
               setIsUploadingGroupEditFile(false)
+              e.target.value = ""
             }
           }}
         />
@@ -2240,29 +2279,31 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       ) : (
         /* 요청자 내용 보기: 그룹별 요청자 내용 + 분담내용 카드 (첫 그룹 요청자 내용은 상단 카드에 통합됨) */
         <>
-          {groupedSubtasks.map((group, groupIndex) => {
+          {groupedSubtasks.map((group) => {
             const selectedSubtaskInGroup = group.tasks.find((t) => t.id === selectedSubtaskIdBySubtitle[group.subtitle]) ?? null
             const groupRequesterContent = group.tasks[0]?.content ?? ""
-            const isFirstGroup = groupIndex === 0
             return (
               <Card key={group.subtitle}>
                 <CardHeader className="flex flex-row items-center justify-between gap-2">
                   <CardTitle className="text-lg">{group.subtitle}</CardTitle>
                   <div className="flex items-center gap-2 shrink-0">
-                    {canEditTask && editingGroupSubtitle !== group.subtitle && (
+                    {canEditTask && editingGroupSubtitle !== group.subtitle && !selectedSubtaskInGroup && (
+                      <span className="text-xs text-muted-foreground">담당자를 선택한 뒤 수정할 수 있습니다</span>
+                    )}
+                    {canEditTask && selectedSubtaskInGroup && editingGroupSubtitle !== group.subtitle && (
                       <Button
                         size="sm"
                         variant="outline"
                         className="h-7 text-xs"
                         onClick={() => {
-                          const initial: Record<string, { comment: string; file_keys: string[]; comment_file_keys: string[] }> = {}
-                          group.tasks.forEach((t) => {
-                            initial[t.id] = {
+                          const t = selectedSubtaskInGroup
+                          const initial: Record<string, { comment: string; file_keys: string[]; comment_file_keys: string[] }> = {
+                            [t.id]: {
                               comment: t.comment ?? "",
                               file_keys: normalizeFileKeyArray(t.file_keys ?? []),
                               comment_file_keys: normalizeFileKeyArray(t.comment_file_keys ?? []),
-                            }
-                          })
+                            },
+                          }
                           setEditingGroupData(initial)
                           setEditingGroupSubtitle(group.subtitle)
                         }}
@@ -2273,7 +2314,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {!isFirstGroup && (
+                  {false && (
                   <div>
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <p className="text-[11px] font-medium text-muted-foreground">요청자 내용</p>
@@ -2536,53 +2577,237 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   </div>
                   )}
                   {editingGroupSubtitle === group.subtitle ? (
-                    <div className="space-y-4">
-                      <p className="text-[11px] font-medium text-muted-foreground">분담내용 · 요청자 첨부 수정</p>
-                      {group.tasks.map((subtask) => {
-                        const data = editingGroupData[subtask.id] ?? { comment: "", file_keys: [], comment_file_keys: [] }
+                    <>
+                      <div>
+                        <p className="text-[11px] font-medium text-muted-foreground mb-1">분담내용</p>
+                        <div className="border rounded-md overflow-hidden" style={{ height: "520px", display: "flex", gap: "8px" }}>
+                          <div className="flex-1 overflow-hidden flex flex-col min-w-0 bg-background">
+                            {(() => {
+                              const editSubtask = group.tasks.find((t) => t.id in editingGroupData)
+                              if (!editSubtask) return null
+                              const editorId = `group-edit-comment-${editSubtask.id}`
+                              return (
+                                <>
+                                  <div className="flex items-center gap-1 p-2 flex-wrap shrink-0 border-b bg-muted/30">
+                                    <Button
+                                      type="button"
+                                      variant={groupEditEditorState.bold ? "secondary" : "ghost"}
+                                      size="sm"
+                                      className={`h-8 w-8 p-0 ${groupEditEditorState.bold ? "bg-primary/10" : ""}`}
+                                      onClick={(e) => {
+                                        e.preventDefault()
+                                        const editor = document.getElementById(editorId)
+                                        if (editor) {
+                                          editor.focus()
+                                          document.execCommand("bold", false)
+                                          updateGroupEditEditorState()
+                                        }
+                                      }}
+                                      title="굵게 (Ctrl+B)"
+                                    >
+                                      <Bold className={`h-4 w-4 ${groupEditEditorState.bold ? "text-primary" : ""}`} />
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant={groupEditEditorState.italic ? "secondary" : "ghost"}
+                                      size="sm"
+                                      className={`h-8 w-8 p-0 ${groupEditEditorState.italic ? "bg-primary/10" : ""}`}
+                                      onClick={(e) => {
+                                        e.preventDefault()
+                                        const editor = document.getElementById(editorId)
+                                        if (editor) {
+                                          editor.focus()
+                                          document.execCommand("italic", false)
+                                          updateGroupEditEditorState()
+                                        }
+                                      }}
+                                      title="기울임 (Ctrl+I)"
+                                    >
+                                      <Italic className={`h-4 w-4 ${groupEditEditorState.italic ? "text-primary" : ""}`} />
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant={groupEditEditorState.underline ? "secondary" : "ghost"}
+                                      size="sm"
+                                      className={`h-8 w-8 p-0 ${groupEditEditorState.underline ? "bg-primary/10" : ""}`}
+                                      onClick={(e) => {
+                                        e.preventDefault()
+                                        const editor = document.getElementById(editorId)
+                                        if (editor) {
+                                          editor.focus()
+                                          document.execCommand("underline", false)
+                                          updateGroupEditEditorState()
+                                        }
+                                      }}
+                                      title="밑줄"
+                                    >
+                                      <Underline className={`h-4 w-4 ${groupEditEditorState.underline ? "text-primary" : ""}`} />
+                                    </Button>
+                                    <div className="w-px h-6 bg-border mx-1" />
+                                    <div className="relative">
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-8 w-8 p-0"
+                                        onClick={(e) => {
+                                          e.preventDefault()
+                                          setGroupEditTableGridHover(
+                                            groupEditTableGridHover.show
+                                              ? { row: 0, col: 0, show: false }
+                                              : { row: 0, col: 0, show: true }
+                                          )
+                                        }}
+                                        title="테이블"
+                                      >
+                                        <TableIcon className="h-4 w-4" />
+                                      </Button>
+                                      {groupEditTableGridHover.show && (
+                                        <div
+                                          className="absolute top-full left-0 mt-2 bg-background border rounded-lg shadow-xl p-4 z-50 min-w-[280px]"
+                                          onMouseLeave={() => setGroupEditTableGridHover({ row: 0, col: 0, show: false })}
+                                        >
+                                          <div className="grid grid-cols-10 gap-1 mb-3">
+                                            {Array.from({ length: 100 }).map((_, idx) => {
+                                              const row = Math.floor(idx / 10) + 1
+                                              const col = (idx % 10) + 1
+                                              const isSelected =
+                                                row <= groupEditTableGridHover.row && col <= groupEditTableGridHover.col
+                                              return (
+                                                <div
+                                                  key={idx}
+                                                  className={`w-5 h-5 border border-border rounded-sm transition-colors ${
+                                                    isSelected ? "bg-primary border-primary" : "bg-muted hover:bg-muted/80"
+                                                  }`}
+                                                  onMouseEnter={() => setGroupEditTableGridHover({ row, col, show: true })}
+                                                  onClick={() => {
+                                                    createGroupEditTable(row, col)
+                                                    setGroupEditTableGridHover({ row: 0, col: 0, show: false })
+                                                  }}
+                                                />
+                                              )
+                                            })}
+                                          </div>
+                                          <div className="text-sm text-center font-medium text-foreground border-t pt-2">
+                                            {groupEditTableGridHover.row > 0 && groupEditTableGridHover.col > 0
+                                              ? `${groupEditTableGridHover.row} x ${groupEditTableGridHover.col} 테이블`
+                                              : "테이블 크기 선택"}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="w-px h-6 bg-border mx-1" />
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 w-8 p-0"
+                                      onClick={(e) => {
+                                        e.preventDefault()
+                                        const editor = document.getElementById(editorId) as HTMLElement
+                                        if (editor) {
+                                          editor.focus()
+                                          const hr = document.createElement("hr")
+                                          hr.style.border = "none"
+                                          hr.style.borderTop = "2px solid #6b7280"
+                                          hr.style.margin = "10px 0"
+                                          const selection = window.getSelection()
+                                          if (selection && selection.rangeCount > 0) {
+                                            const range = selection.getRangeAt(0)
+                                            range.deleteContents()
+                                            range.insertNode(hr)
+                                            range.setStartAfter(hr)
+                                            range.collapse(true)
+                                            selection.removeAllRanges()
+                                            selection.addRange(range)
+                                          }
+                                        }
+                                      }}
+                                      title="구분선"
+                                    >
+                                      <Minus className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                  <div
+                                    id={editorId}
+                                    contentEditable
+                                    suppressContentEditableWarning
+                                    className="text-base p-4 prose prose-base max-w-none dark:prose-invert flex-1 overflow-y-auto custom-scrollbar focus:outline-none focus:ring-0 rounded min-h-0"
+                                    style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "break-word" }}
+                                    onInput={() => {
+                                      const el = document.getElementById(editorId) as HTMLElement | null
+                                      if (!el) return
+                                      const raw = el.innerHTML ?? ""
+                                      setEditingGroupData((prev) => ({ ...prev, [editSubtask.id]: { ...(prev[editSubtask.id] ?? { comment: "", file_keys: [], comment_file_keys: [] }), comment: raw } }))
+                                      el.querySelectorAll("table[data-resizable='true']").forEach((table) => {
+                                        addResizeHandlersToGroupEditTable(table as HTMLTableElement)
+                                      })
+                                    }}
+                                    onBlur={updateGroupEditEditorState}
+                                    onMouseUp={updateGroupEditEditorState}
+                                    onKeyUp={updateGroupEditEditorState}
+                                  />
+                                </>
+                              )
+                            })()}
+                          </div>
+                          <div className="w-[240px] bg-muted/30 overflow-y-auto custom-scrollbar p-3 space-y-3">
+                            {isLoadingSubtasks ? (
+                              <div className="flex items-center justify-center py-8">
+                                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                              </div>
+                            ) : (
+                              group.tasks.map((subtask) => (
+                                <StaffSessionBlock
+                                  key={subtask.id}
+                                  subtask={subtask}
+                                  isSelected={group.tasks.some((t) => t.id in editingGroupData && t.id === subtask.id)}
+                                  isCompleting={isCompletingSubtask}
+                                  onSelect={() => {}}
+                                  onComplete={completeSubtask}
+                                  canCompleteSubtask={canEditTask}
+                                  canRevertAwaitingToPending={canEditTask}
+                                  onRevertAwaitingToPending={handleRevertSubtaskToPending}
+                                  isReverting={revertingSubtaskId === subtask.id}
+                                  hasAttachment={subtaskIdsWithResolvedFiles.has(subtask.id)}
+                                  isMyBlock={subtask.assigned_to === me?.id}
+                                />
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {(() => {
+                        const editSubtask = group.tasks.find((t) => t.id in editingGroupData)
+                        if (!editSubtask) return null
+                        const data = editingGroupData[editSubtask.id] ?? { comment: "", file_keys: [], comment_file_keys: [] }
                         const requesterKeys = data.file_keys ?? []
                         return (
-                          <div key={subtask.id} className="border rounded-md p-3 space-y-3">
-                            <p className="text-xs font-medium text-foreground">{subtask.assigned_to_name || subtask.assigned_to_email} 분담내용</p>
-                            <div
-                              id={`group-edit-comment-${subtask.id}`}
-                              contentEditable
-                              suppressContentEditableWarning
-                              className="text-sm p-3 min-h-[80px] rounded border bg-background prose prose-sm max-w-none focus:outline-none focus:ring-2"
-                              style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
-                              onInput={() => {
-                                const el = document.getElementById(`group-edit-comment-${subtask.id}`) as HTMLElement | null
-                                if (!el) return
-                                const raw = el.innerHTML ?? ""
-                                setEditingGroupData((prev) => ({ ...prev, [subtask.id]: { ...(prev[subtask.id] ?? { comment: "", file_keys: [], comment_file_keys: [] }), comment: raw } }))
-                              }}
-                            />
-                            <div className="space-y-1.5 pt-1 border-t border-border/50">
-                              <p className="text-xs font-medium text-muted-foreground">요청자 첨부</p>
-                              <div className="flex flex-col gap-1 pl-2">
-                                <Button size="sm" variant="outline" className="w-fit" disabled={isUploadingGroupEditFile} onClick={() => { groupEditFileTargetRef.current = { type: "requester", subtaskId: subtask.id }; groupEditFileInputRef.current?.click() }}>
-                                  {isUploadingGroupEditFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
-                                  파일 추가
-                                </Button>
-                                {requesterKeys.map((key, idx) => (
-                                  <div key={key} className="flex items-center gap-1.5 rounded border px-2 py-1.5 text-sm">
-                                    <span className="text-foreground truncate max-w-[280px]" title={extractFileName(key, "파일")}>{extractFileName(key, "파일")}</span>
-                                    <button type="button" className="text-blue-600 hover:underline shrink-0 text-xs" onClick={() => handleDownload(key, extractFileName(key, "파일"))}>다운로드</button>
-                                    <button type="button" aria-label="제거" className="p-0.5 text-muted-foreground hover:text-destructive shrink-0" onClick={() => setEditingGroupData((prev) => ({ ...prev, [subtask.id]: { ...(prev[subtask.id] ?? { comment: "", file_keys: [], comment_file_keys: [] }), file_keys: (prev[subtask.id]?.file_keys ?? []).filter((_, i) => i !== idx) } }))}><Trash2 className="h-3.5 w-3.5" /></button>
-                                  </div>
-                                ))}
-                              </div>
+                          <div className="space-y-2 pt-4 border-t">
+                            <p className="text-xs font-medium text-muted-foreground">첨부파일 (요청자)</p>
+                            <div className="flex flex-col gap-1.5 pl-0">
+                              <Button size="sm" variant="outline" className="w-fit" disabled={isUploadingGroupEditFile} onClick={() => { groupEditFileTargetRef.current = { type: "requester", subtaskId: editSubtask.id }; groupEditFileInputRef.current?.click() }}>
+                                {isUploadingGroupEditFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                                파일 추가
+                              </Button>
+                              {requesterKeys.map((key, idx) => (
+                                <div key={key} className="flex items-center gap-1.5 rounded border px-2 py-1.5 text-sm w-fit">
+                                  <span className="text-foreground truncate max-w-[280px]" title={extractFileName(key, "파일")}>{extractFileName(key, "파일")}</span>
+                                  <button type="button" className="text-blue-600 hover:underline shrink-0 text-xs" onClick={() => handleDownload(key, extractFileName(key, "파일"))}>다운로드</button>
+                                  <button type="button" aria-label="제거" className="p-0.5 text-muted-foreground hover:text-destructive shrink-0" onClick={() => setEditingGroupData((prev) => ({ ...prev, [editSubtask.id]: { ...(prev[editSubtask.id] ?? { comment: "", file_keys: [], comment_file_keys: [] }), file_keys: (prev[editSubtask.id]?.file_keys ?? []).filter((_, i) => i !== idx) } }))}><Trash2 className="h-3.5 w-3.5" /></button>
+                                </div>
+                              ))}
+                            </div>
+                            <div className="flex gap-2 justify-end pt-2">
+                              <Button size="sm" onClick={() => handleSaveGroupEdit(group)} disabled={isSavingGroupEdit}>
+                                {isSavingGroupEdit ? <Loader2 className="h-4 w-4 animate-spin" /> : "저장"}
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => { setEditingGroupSubtitle(null); setEditingGroupData({}) }} disabled={isSavingGroupEdit}>취소</Button>
                             </div>
                           </div>
                         )
-                      })}
-                      <div className="flex gap-2 justify-end pt-2">
-                        <Button size="sm" onClick={() => handleSaveGroupEdit(group)} disabled={isSavingGroupEdit}>
-                          {isSavingGroupEdit ? <Loader2 className="h-4 w-4 animate-spin" /> : "저장"}
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => { setEditingGroupSubtitle(null); setEditingGroupData({}) }} disabled={isSavingGroupEdit}>취소</Button>
-                      </div>
-                    </div>
+                      })()}
+                    </>
                   ) : (
                     <>
                   <div>
