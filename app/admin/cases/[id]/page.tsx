@@ -990,9 +990,11 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
 
   // 수정 권한: 요청자(assigned_by) 또는 admin (admin = staff 동일 취급)
   const canEditTask = userRole === "admin" || userRole === "staff" || me?.id === task.assigned_by
-  // 공동 업무: 서브태스크에 본인이 있을 때만 수정/첨부 버튼 노출
+  // 공동 업무: 서브태스크에 본인이 있을 때만 수정/첨부 버튼 노출 (파일 추가 등)
   const hasMeInSubtasks = subtasks.length > 0 && subtasks.some((s) => s.assigned_to === me?.id)
   const showRequesterEditAndAttach = subtasks.length === 0 ? canEditTask : (canEditTask && hasMeInSubtasks)
+  // 요청자 내용 수정: 요청자(assigned_by)는 main task에 관여하므로 개별/공동 모두 수정 가능. admin/staff도 수정 가능.
+  const showRequesterContentEditButton = canEditTask
   // 담당자(admin = staff)만 상태 변경 가능, 요청자(assigned_by)는 상태 선택 블록 미노출
   const canChangeStatus =
     (userRole === "staff" || userRole === "admin") && me?.id !== task.assigned_by
@@ -1284,12 +1286,12 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             </div>
           )}
 
-          {/* 개별 할당: 요청자 내용을 같은 카드 안에 이어서 표시 */}
+          {/* 개별 할당: 요청자 내용을 같은 카드 안에 이어서 표시 (요청자 = main task 관여 → 수정 가능) */}
           {subtasks.length === 0 && (
             <div className="mt-4 pt-4 border-t border-border/50">
               <div className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <h3 className="text-lg font-semibold">{task.assigned_by_name || task.assigned_by_email} 내용</h3>
-                {showRequesterEditAndAttach && !isEditingRequesterContent && (
+                {showRequesterContentEditButton && !isEditingRequesterContent && (
                     <Button
                     variant="outline"
                     size="sm"
@@ -1304,7 +1306,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 )}
               </div>
               <div className="pt-0 pb-3">
-                {showRequesterEditAndAttach && isEditingRequesterContent ? (
+                {showRequesterContentEditButton && isEditingRequesterContent ? (
                   <>
                     <div className="border rounded-md bg-background flex flex-col min-h-[320px]">
                       <div className="flex items-center gap-1 p-2 flex-wrap shrink-0 border-b">
@@ -1616,24 +1618,26 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               <div className="mt-4 pt-4 border-t border-border/50">
                 <div className="flex flex-row items-center justify-between pb-2">
                   <h3 className="text-lg font-semibold">{firstGroup.subtitle}</h3>
-                  {showRequesterEditAndAttach && !isEditingRequesterContent && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        editingSubtitleRef.current = firstGroup.subtitle
-                        setSelectedSubtitle(firstGroup.subtitle)
-                        if (subtasks.length === 0) setEditingRequesterFileKeys(resolvedFileKeys.map((f) => f.s3Key))
-                        setIsEditingRequesterContent(true)
-                      }}
-                    >
-                      수정
-                    </Button>
-                  )}
                 </div>
                 <div>
-                  <p className="text-[11px] font-medium text-muted-foreground mb-1">요청자 내용</p>
-                  {showRequesterEditAndAttach && isEditingRequesterContent && selectedSubtitle === firstGroup.subtitle ? (
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <p className="text-[11px] font-medium text-muted-foreground">요청자 내용</p>
+                    {showRequesterContentEditButton && !isEditingRequesterContent && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          editingSubtitleRef.current = firstGroup.subtitle
+                          setSelectedSubtitle(firstGroup.subtitle)
+                          if (subtasks.length === 0) setEditingRequesterFileKeys(resolvedFileKeys.map((f) => f.s3Key))
+                          setIsEditingRequesterContent(true)
+                        }}
+                      >
+                        수정
+                      </Button>
+                    )}
+                  </div>
+                  {showRequesterContentEditButton && isEditingRequesterContent && selectedSubtitle === firstGroup.subtitle ? (
                     <>
                       {subtasks.length === 0 && (
                         <div className="grid gap-2 mb-3">
@@ -2114,20 +2118,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 <CardHeader className="flex flex-row items-center justify-between gap-2">
                   <CardTitle className="text-lg">{group.subtitle}</CardTitle>
                   <div className="flex items-center gap-2 shrink-0">
-                    {showRequesterEditAndAttach && !isEditingRequesterContent && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          editingSubtitleRef.current = group.subtitle
-                          setSelectedSubtitle(group.subtitle)
-                          if (subtasks.length === 0) setEditingRequesterFileKeys(resolvedFileKeys.map((f) => f.s3Key))
-                          setIsEditingRequesterContent(true)
-                        }}
-                      >
-                        수정
-                      </Button>
-                    )}
                     {canEditTask && (
                       <Button
                         size="sm"
@@ -2148,8 +2138,24 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 <CardContent className="space-y-4">
                   {!isFirstGroup && (
                   <div>
-                    <p className="text-[11px] font-medium text-muted-foreground mb-1">요청자 내용</p>
-                    {showRequesterEditAndAttach && isEditingRequesterContent && selectedSubtitle === group.subtitle ? (
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <p className="text-[11px] font-medium text-muted-foreground">요청자 내용</p>
+                      {showRequesterContentEditButton && !isEditingRequesterContent && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            editingSubtitleRef.current = group.subtitle
+                            setSelectedSubtitle(group.subtitle)
+                            if (subtasks.length === 0) setEditingRequesterFileKeys(resolvedFileKeys.map((f) => f.s3Key))
+                            setIsEditingRequesterContent(true)
+                          }}
+                        >
+                          수정
+                        </Button>
+                      )}
+                    </div>
+                    {showRequesterContentEditButton && isEditingRequesterContent && selectedSubtitle === group.subtitle ? (
                       <>
                         {subtasks.length === 0 && (
                           <div className="grid gap-2 mb-3">
