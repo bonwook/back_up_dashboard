@@ -24,6 +24,17 @@ export interface Task {
   completed_at: string | null
 }
 
+/** S3 출처 업무일 때 API에서 함께 오는 버킷 정보 */
+export interface S3UpdateInfo {
+  id?: string | number
+  file_name: string
+  bucket_name?: string | null
+  s3_key: string
+  file_size?: number | null
+  upload_time?: string | null
+  created_at?: string
+}
+
 export type TaskStatus = 'pending' | 'in_progress' | 'on_hold' | 'awaiting_completion' | 'completed'
 
 export interface ResolvedFileKey {

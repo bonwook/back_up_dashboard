@@ -21,7 +21,7 @@ import { ko } from "date-fns/locale"
 import { uploadWithProgress } from "@/lib/utils/upload-with-progress"
 import { downloadWithProgress } from "@/lib/utils/download-with-progress"
 import { calculateFileExpiry, formatDateShort, parseDateOnly } from "@/lib/utils/dateHelpers"
-import { Task, TaskStatus, ResolvedFileKey } from "./types"
+import { Task, TaskStatus, ResolvedFileKey, S3UpdateInfo } from "./types"
 import { TaskBlock } from "./components/TaskBoard/TaskBlock"
 import { TaskCommentSection, TaskDetailDialog, normalizeFileKeys } from "@/components/task"
 import { useWorkEditor } from "./hooks/useWorkEditor"
@@ -54,6 +54,7 @@ export default function ClientProgressPage() {
   const [workUploadProgress, setWorkUploadProgress] = useState(0)
   const [isWorkAreaDragOver, setIsWorkAreaDragOver] = useState(false)
   const [isWorkAreaReadOnly, setIsWorkAreaReadOnly] = useState(false)
+  const [workTaskS3Update, setWorkTaskS3Update] = useState<S3UpdateInfo | null>(null)
   
   // 댓글 에디터 상태
   const [workCommentContent, setWorkCommentContent] = useState("")
@@ -103,9 +104,30 @@ export default function ClientProgressPage() {
 
   // 참조자(shared_with) 기능 미사용: profiles 목록 로드 제거
 
+  // 작업공간에 올린 task가 S3 출처일 때 버킷 정보 로드 (task 블록 안 S3 카드 표시용)
+  useEffect(() => {
+    if (!workTaskId) {
+      setWorkTaskS3Update(null)
+      return
+    }
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/tasks/${workTaskId}`, { credentials: "include" })
+        if (!res.ok) return
+        const data = await res.json()
+        const s3 = data.s3Update ?? null
+        setWorkTaskS3Update(s3)
+      } catch {
+        setWorkTaskS3Update(null)
+      }
+    }
+    load()
+  }, [workTaskId])
+
   const clearWorkArea = useCallback((taskId?: string) => {
     // 작업공간 상태 초기화
     setWorkTaskId(null)
+    setWorkTaskS3Update(null)
     setIsWorkAreaReadOnly(false)
     setWorkForm({ title: "", content: "", priority: "medium" })
     setWorkAttachedFiles([])
@@ -704,6 +726,42 @@ export default function ClientProgressPage() {
                       </div>
                     )
                   })()}
+                  {/* S3 출처 업무일 때 버킷 정보 카드 (task 블록 안) */}
+                  {workTaskS3Update && (
+                    <Card className="bg-muted/30">
+                      <CardHeader className="py-3 px-4">
+                        <CardTitle className="text-base">버킷 정보</CardTitle>
+                      </CardHeader>
+                      <CardContent className="py-0 px-4 pb-4 space-y-1.5 text-sm">
+                        <div>
+                          <span className="text-xs font-medium text-muted-foreground">파일명</span>
+                          <p className="font-medium break-all">{workTaskS3Update.file_name}</p>
+                        </div>
+                        {workTaskS3Update.bucket_name && (
+                          <div>
+                            <span className="text-xs font-medium text-muted-foreground">버킷/경로</span>
+                            <p className="break-all text-muted-foreground">{workTaskS3Update.bucket_name}</p>
+                          </div>
+                        )}
+                        <div>
+                          <span className="text-xs font-medium text-muted-foreground">S3 객체 키</span>
+                          <p className="break-all text-muted-foreground truncate max-w-full" title={workTaskS3Update.s3_key}>{workTaskS3Update.s3_key}</p>
+                        </div>
+                        {(workTaskS3Update.file_size != null && workTaskS3Update.file_size > 0) && (
+                          <div>
+                            <span className="text-xs font-medium text-muted-foreground">파일 크기</span>
+                            <p>{(() => {
+                              const b = workTaskS3Update.file_size!
+                              const k = 1024
+                              const sizes = ["B", "KB", "MB", "GB"]
+                              const i = Math.min(Math.floor(Math.log(b) / Math.log(k)), sizes.length - 1)
+                              return `${Number((b / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`
+                            })()}</p>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
                 {/* 제목을 comment와 동일한 너비로 설정 */}
                 <div className="grid grid-cols-2 gap-4 min-w-0 max-w-full">
                   <div className="space-y-2 min-w-0 max-w-full">

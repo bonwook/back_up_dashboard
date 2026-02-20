@@ -4,8 +4,10 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Loader2, Download } from "lucide-react"
+import { ArrowLeft, Loader2, Download, RefreshCw } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Checkbox } from "@/components/ui/checkbox"
 import { TaskRegistrationForm } from "@/app/admin/analytics/components/TaskRegistrationForm"
 
 interface S3Update {
@@ -39,8 +41,28 @@ export default function S3UpdateDetailPage({
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
   const [downloadExpiresAt, setDownloadExpiresAt] = useState<number | null>(null)
   const [id, setId] = useState<string | null>(null)
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set())
+  const [isRefreshingFileList, setIsRefreshingFileList] = useState(false)
   const router = useRouter()
   const { toast } = useToast()
+
+  const refreshFileList = async () => {
+    if (!id) return
+    setIsRefreshingFileList(true)
+    try {
+      const res = await fetch(`/api/s3-updates/${id}`, { credentials: "include" })
+      if (!res.ok) throw new Error("Failed to load")
+      const data = await res.json()
+      const loaded = data.s3Update as S3Update
+      setS3Update(loaded)
+      if (loaded?.s3_key) setSelectedFiles(new Set([loaded.s3_key]))
+      toast({ title: "파일 목록을 새로고침했습니다." })
+    } catch {
+      toast({ title: "새로고침에 실패했습니다.", variant: "destructive" })
+    } finally {
+      setIsRefreshingFileList(false)
+    }
+  }
 
   useEffect(() => {
     params.then((p) => setId(p.id))
@@ -60,7 +82,9 @@ export default function S3UpdateDetailPage({
           throw new Error("Failed to load")
         }
         const data = await res.json()
-        setS3Update(data.s3Update)
+        const loaded = data.s3Update as S3Update
+        setS3Update(loaded)
+        if (loaded?.s3_key) setSelectedFiles(new Set([loaded.s3_key]))
       } catch {
         router.push("/admin/cases")
       } finally {
@@ -169,9 +193,62 @@ export default function S3UpdateDetailPage({
               toast({ title: "업무가 등록되었습니다." })
               router.replace(`/admin/cases/${taskId}`)
             }}
-            selectedFiles={new Set()}
-            setSelectedFiles={() => {}}
-          />
+            selectedFiles={selectedFiles}
+            setSelectedFiles={setSelectedFiles}
+          >
+            <div className="flex flex-col flex-1 overflow-hidden gap-2">
+              <div className="flex items-center justify-end gap-2 shrink-0">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={refreshFileList}
+                  disabled={isRefreshingFileList}
+                >
+                  <RefreshCw className={`h-3 w-3 sm:h-4 sm:w-4 ${isRefreshingFileList ? "animate-spin" : ""}`} />
+                  <span className="hidden sm:inline ml-2">새로고침</span>
+                </Button>
+              </div>
+              <div className="overflow-x-auto overflow-y-auto border rounded-md flex-1 min-h-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12 bg-background">
+                        <Checkbox checked={selectedFiles.has(s3Update.s3_key)} disabled />
+                      </TableHead>
+                      <TableHead className="w-[40%] bg-background">파일명</TableHead>
+                      <TableHead className="w-[15%] bg-background">타입</TableHead>
+                      <TableHead className="w-[15%] bg-background">크기</TableHead>
+                      <TableHead className="w-[15%] bg-background">업로드일</TableHead>
+                      <TableHead className="w-[15%] bg-background">작업</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow className="hover:bg-muted/50">
+                      <TableCell>
+                        <Checkbox checked={selectedFiles.has(s3Update.s3_key)} disabled />
+                      </TableCell>
+                      <TableCell className="font-medium break-all">{s3Update.file_name}</TableCell>
+                      <TableCell className="text-muted-foreground">-</TableCell>
+                      <TableCell>{formatBytes(s3Update.file_size)}</TableCell>
+                      <TableCell>
+                        {displayDate
+                          ? new Date(displayDate).toLocaleString("ko-KR", {
+                              month: "2-digit",
+                              day: "2-digit",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                          : "-"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">-</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          </TaskRegistrationForm>
         </CardContent>
       </Card>
     </div>
