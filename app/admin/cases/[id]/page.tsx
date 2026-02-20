@@ -114,6 +114,17 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [isUploadingSharedAttach, setIsUploadingSharedAttach] = useState(false)
   /** 첨부하기 클릭 시 대상 그룹 (해당 그룹의 모든 서브태스크에 파일 추가) */
   const sharedAttachGroupRef = useRef<{ subtitle: string; tasks: Subtask[] } | null>(null)
+  /** 서브 그룹 수정 모드: 편집 중인 그룹 부제 (해당 그룹에서 담당자별 내용·파일 추가/삭제) */
+  const [editingGroupSubtitle, setEditingGroupSubtitle] = useState<string | null>(null)
+  /** 그룹 수정 시 subtask별 편집 중인 값 (comment, file_keys, comment_file_keys) */
+  const [editingGroupData, setEditingGroupData] = useState<Record<string, { comment: string; file_keys: string[]; comment_file_keys: string[] }>>({})
+  const [isSavingGroupEdit, setIsSavingGroupEdit] = useState(false)
+  const [isUploadingGroupEditFile, setIsUploadingGroupEditFile] = useState(false)
+  /** 그룹 수정 모드에서 파일 추가 대상: 해당 subtask의 요청자 첨부만 (담당자 첨부는 수정 UI에서 제외) */
+  const groupEditFileTargetRef = useRef<{ type: "requester"; subtaskId: string } | null>(null)
+  const groupEditFileInputRef = useRef<HTMLInputElement>(null)
+  /** 그룹 수정 시 분담내용 에디터 초기값 설정 여부 (한 번만 설정해 커서 유지) */
+  const didSetGroupEditCommentRef = useRef<Set<string>>(new Set())
   /** 그룹별 방금 첨부한 키 목록 — 요청자 첨부에 New 뱃지 표시용 */
   const [newAttachedKeysPerGroup, setNewAttachedKeysPerGroup] = useState<Record<string, string[]>>({})
   /** 그룹별 NEW 뱃지 표시 종료 시각(ms) — 등록 후 +2일까지만 표시, localStorage에 보존 */
@@ -908,6 +919,73 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       setIsSavingSubtaskFiles(false)
     }
   }, [editingSubtaskId, editingSubtaskFileKeys, editingSubtaskCommentFileKeys, loadSubtasks, reloadTask, toast])
+
+  /** 그룹 수정 저장: 해당 그룹의 모든 서브태스크에 comment, file_keys, comment_file_keys PATCH */
+  const handleSaveGroupEdit = useCallback(
+    async (group: { subtitle: string; tasks: Subtask[] }) => {
+      setIsSavingGroupEdit(true)
+      try {
+        for (const st of group.tasks) {
+          const data = editingGroupData[st.id]
+          if (!data) continue
+          const el = document.getElementById(`group-edit-comment-${st.id}`) as HTMLElement | null
+          const rawComment = el?.innerHTML ?? data.comment ?? ""
+          const comment = sanitizeHtml((rawComment ?? "").trim() ? rawComment : "")
+          const res = await fetch(`/api/tasks/${st.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({
+              comment,
+              file_keys: data.file_keys,
+              comment_file_keys: data.comment_file_keys,
+              is_subtask: true,
+            }),
+          })
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}))
+            throw new Error(err.error || "저장 실패")
+          }
+        }
+        toast({ title: "저장됨", description: "분담내용 및 첨부파일이 저장되었습니다." })
+        setEditingGroupSubtitle(null)
+        setEditingGroupData({})
+        await loadSubtasks()
+        await reloadTask()
+      } catch (e: any) {
+        toast({
+          title: "저장 실패",
+          description: e?.message ?? "저장 중 오류가 발생했습니다.",
+          variant: "destructive",
+        })
+      } finally {
+        setIsSavingGroupEdit(false)
+      }
+    },
+    [editingGroupData, loadSubtasks, reloadTask, toast]
+  )
+
+  // 그룹 수정 모드 진입 시 분담내용 contentEditable 초기값 한 번만 설정 (커서 유지)
+  useEffect(() => {
+    if (!editingGroupSubtitle) {
+      didSetGroupEditCommentRef.current = new Set()
+      return
+    }
+    const group = groupedSubtasks.find((g) => g.subtitle === editingGroupSubtitle)
+    if (!group) return
+    const t = setTimeout(() => {
+      group.tasks.forEach((st) => {
+        if (didSetGroupEditCommentRef.current.has(st.id)) return
+        const el = document.getElementById(`group-edit-comment-${st.id}`) as HTMLElement | null
+        if (!el) return
+        const data = editingGroupData[st.id]
+        const raw = data?.comment ?? ""
+        el.innerHTML = raw ? sanitizeHtml(raw) : ""
+        didSetGroupEditCommentRef.current.add(st.id)
+      })
+    }, 0)
+    return () => clearTimeout(t)
+  }, [editingGroupSubtitle, groupedSubtasks, editingGroupData])
 
   const handleFinalizeTask = useCallback(async () => {
     if (!taskId || !task) return
@@ -1708,6 +1786,59 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         </CardContent>
       </Card>
 
+      {/* 그룹 수정 모드: 담당자별·요청자 첨부 파일 추가용 hidden input */}
+      {editingGroupSubtitle && (
+        <input
+          ref={groupEditFileInputRef}
+          type="file"
+          className="hidden"
+          multiple
+          accept="*/*"
+          onChange={async (e) => {
+            const fileList = e.target.files
+            const target = groupEditFileTargetRef.current
+            e.target.value = ""
+            if (!fileList?.length || !target || target.type !== "requester") return
+            const subtaskId = target.subtaskId
+            setIsUploadingGroupEditFile(true)
+            const addedPaths: string[] = []
+            try {
+              for (let i = 0; i < fileList.length; i++) {
+                const formData = new FormData()
+                formData.append("file", fileList[i])
+                formData.append("fileType", "other")
+                formData.append("path", `temp/attachment/${fileList[i].name}`)
+                const res = await fetch("/api/storage/upload", {
+                  method: "POST",
+                  credentials: "include",
+                  body: formData,
+                })
+                const data = await res.json().catch(() => ({}))
+                if (!res.ok) throw new Error((data as { error?: string }).error || "업로드 실패")
+                const path = (data as { path?: string; s3_key?: string; files?: Array<{ path?: string }> }).path
+                  ?? (data as { path?: string; s3_key?: string }).s3_key
+                  ?? (data as { files?: Array<{ path?: string }> }).files?.[0]?.path
+                if (path) addedPaths.push(path)
+              }
+              if (addedPaths.length > 0) {
+                setEditingGroupData((prev) => ({
+                  ...prev,
+                  [subtaskId]: {
+                    ...(prev[subtaskId] ?? { comment: "", file_keys: [], comment_file_keys: [] }),
+                    file_keys: [...(prev[subtaskId]?.file_keys ?? []), ...addedPaths],
+                  },
+                }))
+              }
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : "파일 업로드 중 오류가 발생했습니다."
+              toast({ title: "첨부 업로드 실패", description: message, variant: "destructive" })
+            } finally {
+              setIsUploadingGroupEditFile(false)
+            }
+          }}
+        />
+      )}
+
       {/* 공동 업무: 첨부하기 클릭 시 파일 선택 → 해당 서브그룹의 모든 서브태스크 요청자 첨부(file_keys)에 추가 */}
       {subtasks.length > 0 && canEditTask && (
         <input
@@ -2118,19 +2249,25 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 <CardHeader className="flex flex-row items-center justify-between gap-2">
                   <CardTitle className="text-lg">{group.subtitle}</CardTitle>
                   <div className="flex items-center gap-2 shrink-0">
-                    {canEditTask && (
+                    {canEditTask && editingGroupSubtitle !== group.subtitle && (
                       <Button
                         size="sm"
                         variant="outline"
                         className="h-7 text-xs"
-                        disabled={isUploadingSharedAttach}
                         onClick={() => {
-                          sharedAttachGroupRef.current = { subtitle: group.subtitle, tasks: group.tasks }
-                          sharedAttachInputRef.current?.click()
+                          const initial: Record<string, { comment: string; file_keys: string[]; comment_file_keys: string[] }> = {}
+                          group.tasks.forEach((t) => {
+                            initial[t.id] = {
+                              comment: t.comment ?? "",
+                              file_keys: normalizeFileKeyArray(t.file_keys ?? []),
+                              comment_file_keys: normalizeFileKeyArray(t.comment_file_keys ?? []),
+                            }
+                          })
+                          setEditingGroupData(initial)
+                          setEditingGroupSubtitle(group.subtitle)
                         }}
                       >
-                        {isUploadingSharedAttach ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Paperclip className="h-3 w-3 mr-1" />}
-                        파일 추가
+                        수정
                       </Button>
                     )}
                   </div>
@@ -2398,6 +2535,56 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                     )}
                   </div>
                   )}
+                  {editingGroupSubtitle === group.subtitle ? (
+                    <div className="space-y-4">
+                      <p className="text-[11px] font-medium text-muted-foreground">분담내용 · 요청자 첨부 수정</p>
+                      {group.tasks.map((subtask) => {
+                        const data = editingGroupData[subtask.id] ?? { comment: "", file_keys: [], comment_file_keys: [] }
+                        const requesterKeys = data.file_keys ?? []
+                        return (
+                          <div key={subtask.id} className="border rounded-md p-3 space-y-3">
+                            <p className="text-xs font-medium text-foreground">{subtask.assigned_to_name || subtask.assigned_to_email} 분담내용</p>
+                            <div
+                              id={`group-edit-comment-${subtask.id}`}
+                              contentEditable
+                              suppressContentEditableWarning
+                              className="text-sm p-3 min-h-[80px] rounded border bg-background prose prose-sm max-w-none focus:outline-none focus:ring-2"
+                              style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+                              onInput={() => {
+                                const el = document.getElementById(`group-edit-comment-${subtask.id}`) as HTMLElement | null
+                                if (!el) return
+                                const raw = el.innerHTML ?? ""
+                                setEditingGroupData((prev) => ({ ...prev, [subtask.id]: { ...(prev[subtask.id] ?? { comment: "", file_keys: [], comment_file_keys: [] }), comment: raw } }))
+                              }}
+                            />
+                            <div className="space-y-1.5 pt-1 border-t border-border/50">
+                              <p className="text-xs font-medium text-muted-foreground">요청자 첨부</p>
+                              <div className="flex flex-col gap-1 pl-2">
+                                <Button size="sm" variant="outline" className="w-fit" disabled={isUploadingGroupEditFile} onClick={() => { groupEditFileTargetRef.current = { type: "requester", subtaskId: subtask.id }; groupEditFileInputRef.current?.click() }}>
+                                  {isUploadingGroupEditFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                                  파일 추가
+                                </Button>
+                                {requesterKeys.map((key, idx) => (
+                                  <div key={key} className="flex items-center gap-1.5 rounded border px-2 py-1.5 text-sm">
+                                    <span className="text-foreground truncate max-w-[280px]" title={extractFileName(key, "파일")}>{extractFileName(key, "파일")}</span>
+                                    <button type="button" className="text-blue-600 hover:underline shrink-0 text-xs" onClick={() => handleDownload(key, extractFileName(key, "파일"))}>다운로드</button>
+                                    <button type="button" aria-label="제거" className="p-0.5 text-muted-foreground hover:text-destructive shrink-0" onClick={() => setEditingGroupData((prev) => ({ ...prev, [subtask.id]: { ...(prev[subtask.id] ?? { comment: "", file_keys: [], comment_file_keys: [] }), file_keys: (prev[subtask.id]?.file_keys ?? []).filter((_, i) => i !== idx) } }))}><Trash2 className="h-3.5 w-3.5" /></button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                      <div className="flex gap-2 justify-end pt-2">
+                        <Button size="sm" onClick={() => handleSaveGroupEdit(group)} disabled={isSavingGroupEdit}>
+                          {isSavingGroupEdit ? <Loader2 className="h-4 w-4 animate-spin" /> : "저장"}
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => { setEditingGroupSubtitle(null); setEditingGroupData({}) }} disabled={isSavingGroupEdit}>취소</Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
                   <div>
                     <p className="text-[11px] font-medium text-muted-foreground mb-1">분담내용</p>
                     <div className="border rounded-md overflow-hidden" style={{ height: "520px", display: "flex", gap: "8px" }}>
@@ -2564,6 +2751,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       </div>
                     )
                   })()}
+                    </>
+                  )}
                 </CardContent>
               </Card>
             )
