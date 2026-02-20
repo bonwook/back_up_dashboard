@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Activity, FileText, Clock, TrendingUp, AlertCircle, CheckCircle2, Loader2, RefreshCw } from "lucide-react"
+import { Activity, Clock, AlertCircle, CheckCircle2, Loader2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -10,11 +10,11 @@ import { AdminCalendar } from "@/components/admin-calendar"
 
 interface DashboardStats {
   totalTasks: number
-  pendingTasks: number
-  inProgressTasks: number
   completedTasks: number
-  onHoldTasks: number
-  awaitingCompletionTasks: number
+  urgentPriorityTasks: number
+  highPriorityTasks: number
+  mediumPriorityTasks: number
+  lowPriorityTasks: number
   totalClients: number
   totalReports: number
   totalStaff: number
@@ -120,64 +120,64 @@ export default function AdminOverviewPage() {
 
       {stats && (
         <>
-          {/* 1줄: 대기 / 작업 / 보류 / 완료대기 */}
+          {/* 1줄: 우선순위별 (긴급 / 높음 / 보통 / 낮음) */}
           <div className="mb-8 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <Card className="border-l-4 border-l-blue-500">
+            <Card className="border-l-4 border-l-red-500">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">대기</CardTitle>
-                <Clock className="h-5 w-5 text-blue-500" />
+                <CardTitle className="text-sm font-medium text-muted-foreground">긴급</CardTitle>
+                <AlertCircle className="h-5 w-5 text-red-500" />
               </CardHeader>
               <CardContent>
                 <Link
-                  href="/admin/cases?tab=worklist&status=pending"
-                  className="inline-block text-3xl font-bold text-blue-500 hover:underline underline-offset-4"
+                  href="/admin/cases?tab=worklist&priority=urgent"
+                  className="inline-block text-3xl font-bold text-red-500 hover:underline underline-offset-4"
                 >
-                  {stats.pendingTasks || 0}
-                </Link>
-              </CardContent>
-            </Card>
-
-            <Card className="border-l-4 border-l-yellow-500">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">작업</CardTitle>
-                <Activity className="h-5 w-5 text-yellow-500" />
-              </CardHeader>
-              <CardContent>
-                <Link
-                  href="/admin/cases?tab=worklist&status=in_progress"
-                  className="inline-block text-3xl font-bold text-yellow-500 hover:underline underline-offset-4"
-                >
-                  {stats.inProgressTasks || 0}
+                  {stats.urgentPriorityTasks || 0}
                 </Link>
               </CardContent>
             </Card>
 
             <Card className="border-l-4 border-l-orange-500">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">보류</CardTitle>
-                <AlertCircle className="h-5 w-5 text-orange-500" />
+                <CardTitle className="text-sm font-medium text-muted-foreground">높음</CardTitle>
+                <Activity className="h-5 w-5 text-orange-500" />
               </CardHeader>
               <CardContent>
                 <Link
-                  href="/admin/cases?tab=worklist&status=on_hold"
+                  href="/admin/cases?tab=worklist&priority=high"
                   className="inline-block text-3xl font-bold text-orange-500 hover:underline underline-offset-4"
                 >
-                  {stats.onHoldTasks || 0}
+                  {stats.highPriorityTasks || 0}
                 </Link>
               </CardContent>
             </Card>
 
-            <Card className="border-l-4 border-l-purple-500">
+            <Card className="border-l-4 border-l-yellow-500">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">완료대기</CardTitle>
-                <CheckCircle2 className="h-5 w-5 text-purple-500" />
+                <CardTitle className="text-sm font-medium text-muted-foreground">보통</CardTitle>
+                <Clock className="h-5 w-5 text-yellow-500" />
               </CardHeader>
               <CardContent>
                 <Link
-                  href="/admin/cases?tab=worklist&status=awaiting_completion"
-                  className="inline-block text-3xl font-bold text-purple-500 hover:underline underline-offset-4"
+                  href="/admin/cases?tab=worklist&priority=medium"
+                  className="inline-block text-3xl font-bold text-yellow-500 hover:underline underline-offset-4"
                 >
-                  {stats.awaitingCompletionTasks || 0}
+                  {stats.mediumPriorityTasks || 0}
+                </Link>
+              </CardContent>
+            </Card>
+
+            <Card className="border-l-4 border-l-blue-500">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">낮음</CardTitle>
+                <CheckCircle2 className="h-5 w-5 text-blue-500" />
+              </CardHeader>
+              <CardContent>
+                <Link
+                  href="/admin/cases?tab=worklist&priority=low"
+                  className="inline-block text-3xl font-bold text-blue-500 hover:underline underline-offset-4"
+                >
+                  {stats.lowPriorityTasks || 0}
                 </Link>
               </CardContent>
             </Card>

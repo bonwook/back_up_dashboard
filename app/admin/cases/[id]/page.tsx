@@ -5,14 +5,14 @@ import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Loader2, Download, Calendar as CalendarIcon, FileText, X, Send, Bold, Italic, Underline, Minus, Grid3x3 as TableIcon, Paperclip, Trash2 } from "lucide-react"
+import { ArrowLeft, Loader2, Download, Calendar as CalendarIcon, FileText, X, Send, Bold, Italic, Underline, Minus, Grid3x3 as TableIcon, Paperclip, Trash2, Sparkles } from "lucide-react"
 import Link from "next/link"
 import { SafeHtml } from "@/components/safe-html"
 import { cn } from "@/lib/utils"
 import { sanitizeHtml } from "@/lib/utils/sanitize"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
-import { format, addDays } from "date-fns"
+import { format } from "date-fns"
 import { ko } from "date-fns/locale"
 import { useToast } from "@/hooks/use-toast"
 import { Textarea } from "@/components/ui/textarea"
@@ -108,8 +108,25 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [editingSubtaskCommentFileKeys, setEditingSubtaskCommentFileKeys] = useState<string[]>([])
   const [isUploadingSubtaskFile, setIsUploadingSubtaskFile] = useState(false)
   const [isSavingSubtaskFiles, setIsSavingSubtaskFiles] = useState(false)
-  const subtaskFileUploadTargetRef = useRef<'requester' | 'assignee'>(null)
+  const subtaskFileUploadTargetRef = useRef<'requester' | null>(null)
   const subtaskFileInputRef = useRef<HTMLInputElement>(null)
+  /** 공동 업무 '첨부하기' 클릭 시 파일 선택 후 즉시 업로드·저장용 hidden input */
+  const sharedAttachInputRef = useRef<HTMLInputElement>(null)
+  const [isUploadingSharedAttach, setIsUploadingSharedAttach] = useState(false)
+  /** 첨부하기 클릭 시 대상 그룹 (해당 그룹의 모든 서브태스크에 파일 추가) */
+  const sharedAttachGroupRef = useRef<{ subtitle: string; tasks: Subtask[] } | null>(null)
+  /** 그룹별 방금 첨부한 키 목록 — 요청자 첨부에 New 뱃지 표시용 */
+  const [newAttachedKeysPerGroup, setNewAttachedKeysPerGroup] = useState<Record<string, string[]>>({})
+  /** 그룹별 NEW 뱃지 표시 종료 시각(ms) — 등록 후 +2일까지만 표시, localStorage에 보존 */
+  const [newBadgeUntilBySubtitle, setNewBadgeUntilBySubtitle] = useState<Record<string, number>>({})
+  const NEW_BADGE_DAYS = 2
+  const NEW_BADGE_MS = NEW_BADGE_DAYS * 24 * 60 * 60 * 1000
+  /** 완료대기 → 대기 되돌리기 진행 중인 서브태스크 id */
+  const [revertingSubtaskId, setRevertingSubtaskId] = useState<string | null>(null)
+  const taskRef = useRef<Task | null>(null)
+  useEffect(() => {
+    taskRef.current = task
+  }, [task])
   /** 공동 수정 시 에디터에 마지막으로 로드한 소스(부제) 추적 — 부제 전환 시 에디터 내용 갱신용 */
   const lastRequesterContentSourceRef = useRef<{ taskId: string; subtitle: string | null } | null>(null)
   /** 공동: 수정 버튼 클릭 시점에 편집 대상 부제를 동기 저장 — 상태 배칭 전에도 올바른 부제 매핑 보장 */
@@ -143,6 +160,24 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       setTaskId(p.id)
     })
   }, [params])
+
+  // NEW 뱃지(2일): taskId 변경 시 localStorage에서 복원, 만료된 항목 제거
+  useEffect(() => {
+    if (!taskId) return
+    try {
+      const raw = localStorage.getItem(`task_new_badge_${taskId}`)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as Record<string, number>
+      const now = Date.now()
+      const filtered: Record<string, number> = {}
+      for (const [subtitle, until] of Object.entries(parsed)) {
+        if (until > now) filtered[subtitle] = until
+      }
+      if (Object.keys(filtered).length > 0) setNewBadgeUntilBySubtitle((prev) => ({ ...prev, ...filtered }))
+    } catch {
+      // ignore
+    }
+  }, [taskId])
 
   // 현재 사용자 역할 로드 (staff/admin만 완료 처리 버튼 노출)
   useEffect(() => {
@@ -419,6 +454,43 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     [taskId, task?.is_multi_assign, reloadTask, loadSubtasks, toast, router]
   )
 
+  /** 완료대기 상태인 서브태스크를 대기로 되돌리기 (관리자/요청자만, 완료대기일 때만) */
+  const handleRevertSubtaskToPending = useCallback(
+    async (subtaskId: string) => {
+      if (!confirm("대기 상태로 되돌리시겠습니까? 담당자 업무가 다시 대기 목록에 올라갑니다.")) return
+      setRevertingSubtaskId(subtaskId)
+      try {
+        const res = await fetch(`/api/tasks/${subtaskId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ status: "pending" }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.error || "상태 업데이트 실패")
+        }
+        await loadSubtasks()
+        await reloadTask()
+        if (taskId) {
+          window.dispatchEvent(new CustomEvent("task-content-updated", { detail: { taskId } }))
+        }
+        toast({ title: "담당자 업무가 대기 상태로 되돌아갔습니다." })
+        router.refresh()
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : "상태를 변경하는 중 오류가 발생했습니다."
+        toast({
+          title: "되돌리기 실패",
+          description: message,
+          variant: "destructive",
+        })
+      } finally {
+        setRevertingSubtaskId(null)
+      }
+    },
+    [taskId, loadSubtasks, reloadTask, toast, router]
+  )
+
   // subtask 첨부파일 resolve (task_file_attachments의 uploaded_at 우선 사용) — 요청자(file_keys) + 담당자(comment_file_keys)
   useEffect(() => {
     const run = async () => {
@@ -634,8 +706,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           toast({ title: "저장 실패", description: "선택된 부제를 찾을 수 없습니다.", variant: "destructive" })
           return
         }
-        // 공동 할당: 메인 task에 첨부파일 반영 후, 각 subtask에 content 저장
-        const mainPayload: Record<string, unknown> = { file_keys: editingRequesterFileKeys }
+        // 공동 할당: 요청자 수정은 내용만 반영, 메인 task의 기존 첨부파일 유지
+        const mainPayload: Record<string, unknown> = { file_keys: task?.file_keys ?? [] }
         const mainRes = await fetch(`/api/tasks/${taskId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -660,8 +732,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         }
       } else {
         const payload: Record<string, unknown> = { content }
-        payload.title = editingRequesterTitle
-        payload.due_date = selectedDueDate ? format(selectedDueDate, "yyyy-MM-dd") : null
+        payload.title = task?.title ?? ""
+        payload.due_date = task?.due_date ? format(parseDateOnly(task.due_date)!, "yyyy-MM-dd") : null
         payload.file_keys = editingRequesterFileKeys
         const res = await fetch(`/api/tasks/${taskId}`, {
           method: "PATCH",
@@ -861,6 +933,12 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     })
   }
 
+  /** 그룹별 NEW 뱃지 표시 여부 — 등록 후 2일 이내만 true (훅 순서 유지를 위해 early return 이전에 선언) */
+  const showNewForGroup = useCallback(
+    (subtitle: string) => Date.now() < (newBadgeUntilBySubtitle[subtitle] ?? 0),
+    [newBadgeUntilBySubtitle]
+  )
+
   if (isLoading) {
     return (
       <div className="mx-auto max-w-7xl p-6">
@@ -877,6 +955,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
 
   // 수정 권한: 요청자(assigned_by) 또는 admin (admin = staff 동일 취급)
   const canEditTask = userRole === "admin" || userRole === "staff" || me?.id === task.assigned_by
+  // 공동 업무: 서브태스크에 본인이 있을 때만 수정/첨부 버튼 노출
+  const hasMeInSubtasks = subtasks.length > 0 && subtasks.some((s) => s.assigned_to === me?.id)
+  const showRequesterEditAndAttach = subtasks.length === 0 ? canEditTask : (canEditTask && hasMeInSubtasks)
   // 담당자(admin = staff)만 상태 변경 가능, 요청자(assigned_by)는 상태 선택 블록 미노출
   const canChangeStatus =
     (userRole === "staff" || userRole === "admin") && me?.id !== task.assigned_by
@@ -1173,8 +1254,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             <div className="mt-4 pt-4 border-t border-border/50">
               <div className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <h3 className="text-lg font-semibold">{task.assigned_by_name || task.assigned_by_email} 내용</h3>
-                {canEditTask && !isEditingRequesterContent && (
-                  <Button
+                {showRequesterEditAndAttach && !isEditingRequesterContent && (
+                    <Button
                     variant="outline"
                     size="sm"
                     onClick={() => {
@@ -1188,86 +1269,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 )}
               </div>
               <div className="pt-0 pb-3">
-                {canEditTask && isEditingRequesterContent ? (
+                {showRequesterEditAndAttach && isEditingRequesterContent ? (
                   <>
-                    <div className="space-y-3 mb-4">
-                      <div className="grid gap-2">
-                        <Label className="text-xs">업무 제목</Label>
-                        <Input
-                          value={editingRequesterTitle}
-                          onChange={(e) => setEditingRequesterTitle(e.target.value)}
-                          placeholder="업무 제목"
-                          className="max-w-md"
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label className="text-xs">마감일</Label>
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-fit font-normal"
-                              disabled={task.status === "completed"}
-                            >
-                              <CalendarIcon className="mr-2 h-4 w-4" />
-                              {selectedDueDate ? format(selectedDueDate, "yyyy-MM-dd", { locale: ko }) : "선택"}
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0" align="start">
-                            <Calendar
-                              mode="single"
-                              selected={selectedDueDate || undefined}
-                              onSelect={(d) => setSelectedDueDate(d ?? null)}
-                              locale={ko}
-                            />
-                          </PopoverContent>
-                        </Popover>
-                      </div>
-                      <div className="grid gap-2">
-                        <Label className="text-xs">첨부파일 (요청자)</Label>
-                        <div className="flex flex-col gap-2">
-                          {editingRequesterFileKeys.map((key, idx) => (
-                            <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
-                              <button
-                                type="button"
-                                className="text-blue-600 hover:underline truncate max-w-[180px]"
-                                onClick={() => handleDownload(key, extractFileName(key, "파일"))}
-                              >
-                                {extractFileName(key, "파일")}
-                              </button>
-                              <button
-                                type="button"
-                                aria-label="첨부 제거"
-                                className="p-0.5 text-muted-foreground hover:text-destructive"
-                                onClick={() => setEditingRequesterFileKeys((prev) => prev.filter((_, i) => i !== idx))}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          ))}
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="w-fit"
-                            disabled={isUploadingRequesterFile}
-                            onClick={() => requesterFileInputRef.current?.click()}
-                          >
-                            {isUploadingRequesterFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
-                            파일 추가
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                    <div
-                      className="border rounded-md overflow-hidden bg-background flex flex-col"
-                      style={{
-                        height: "350px",
-                        minHeight: "350px",
-                        maxHeight: "350px",
-                      }}
-                    >
+                    <div className="border rounded-md bg-background flex flex-col min-h-[320px]">
                       <div className="flex items-center gap-1 p-2 flex-wrap shrink-0 border-b">
                         <Button
                           type="button"
@@ -1425,12 +1429,88 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                         onBlur={updateRequesterEditorState}
                         onMouseUp={updateRequesterEditorState}
                         onKeyUp={updateRequesterEditorState}
-                        className="text-sm p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 custom-scrollbar focus:outline-none focus:ring-0 resize-none w-full min-w-0"
+                        className="text-sm p-3 wrap-break-word word-break break-all overflow-x-auto overflow-y-auto prose prose-sm max-w-none flex-1 min-h-0 custom-scrollbar focus:outline-none focus:ring-0 resize-none w-full min-w-0"
                         style={{
-                          minHeight: "280px",
+                          minHeight: "200px",
                           whiteSpace: "pre-wrap",
                         }}
                       />
+                    </div>
+                    <div className="mt-3 flex flex-col gap-2">
+                      <input
+                        ref={requesterFileInputRef}
+                        type="file"
+                        className="hidden"
+                        multiple
+                        accept="*/*"
+                        onChange={async (e) => {
+                          const files = e.target.files
+                          if (!files?.length) return
+                          setIsUploadingRequesterFile(true)
+                          const addedPaths: string[] = []
+                          try {
+                            for (let i = 0; i < files.length; i++) {
+                              const formData = new FormData()
+                              formData.append("file", files[i])
+                              formData.append("fileType", "other")
+                              formData.append("path", `temp/attachment/${files[i].name}`)
+                              const res = await fetch("/api/storage/upload", {
+                                method: "POST",
+                                credentials: "include",
+                                body: formData,
+                              })
+                              const data = await res.json().catch(() => ({}))
+                              if (!res.ok) {
+                                throw new Error(data.error || "업로드 실패")
+                              }
+                              const path = data.path ?? data.s3_key
+                              if (path) addedPaths.push(path)
+                            }
+                            if (addedPaths.length > 0) {
+                              setEditingRequesterFileKeys((prev) => [...prev, ...addedPaths])
+                            }
+                          } catch (err: any) {
+                            toast({
+                              title: "첨부 업로드 실패",
+                              description: err?.message ?? "파일 업로드 중 오류가 발생했습니다.",
+                              variant: "destructive",
+                            })
+                          } finally {
+                            setIsUploadingRequesterFile(false)
+                            e.target.value = ""
+                          }
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="w-fit"
+                        disabled={isUploadingRequesterFile}
+                        onClick={() => requesterFileInputRef.current?.click()}
+                      >
+                        {isUploadingRequesterFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                        파일 추가
+                      </Button>
+                      {editingRequesterFileKeys.map((key, idx) => (
+                        <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
+                          <button
+                            type="button"
+                            className="text-blue-600 hover:underline truncate max-w-[180px]"
+                            onClick={() => handleDownload(key, extractFileName(key, "파일"))}
+                          >
+                            {extractFileName(key, "파일")}
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="첨부 제거"
+                            className="p-0.5 text-muted-foreground hover:text-destructive"
+                            onClick={() => setEditingRequesterFileKeys((prev) => prev.filter((_, i) => i !== idx))}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
                     </div>
                     <div className="flex gap-2 mt-3 justify-end">
                       <Button size="sm" onClick={handleSaveRequesterContent} disabled={isSavingRequesterContent}>
@@ -1501,14 +1581,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               <div className="mt-4 pt-4 border-t border-border/50">
                 <div className="flex flex-row items-center justify-between pb-2">
                   <h3 className="text-lg font-semibold">{firstGroup.subtitle}</h3>
-                  {canEditTask && !isEditingRequesterContent && (
+                  {showRequesterEditAndAttach && !isEditingRequesterContent && (
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={() => {
                         editingSubtitleRef.current = firstGroup.subtitle
                         setSelectedSubtitle(firstGroup.subtitle)
-                        setEditingRequesterFileKeys(resolvedFileKeys.map((f) => f.s3Key))
+                        if (subtasks.length === 0) setEditingRequesterFileKeys(resolvedFileKeys.map((f) => f.s3Key))
                         setIsEditingRequesterContent(true)
                       }}
                     >
@@ -1518,23 +1598,25 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 </div>
                 <div>
                   <p className="text-[11px] font-medium text-muted-foreground mb-1">요청자 내용</p>
-                  {canEditTask && isEditingRequesterContent && selectedSubtitle === firstGroup.subtitle ? (
+                  {showRequesterEditAndAttach && isEditingRequesterContent && selectedSubtitle === firstGroup.subtitle ? (
                     <>
-                      <div className="grid gap-2 mb-3">
-                        <Label className="text-xs">첨부파일 (요청자)</Label>
-                        <div className="flex flex-col gap-2">
-                          {editingRequesterFileKeys.map((key, idx) => (
-                            <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
-                              <button type="button" className="text-blue-600 hover:underline truncate max-w-[180px]" onClick={() => handleDownload(key, extractFileName(key, "파일"))}>{extractFileName(key, "파일")}</button>
-                              <button type="button" aria-label="첨부 제거" className="p-0.5 text-muted-foreground hover:text-destructive" onClick={() => setEditingRequesterFileKeys((prev) => prev.filter((_, i) => i !== idx))}><Trash2 className="h-3.5 w-3.5" /></button>
-                            </div>
-                          ))}
-                          <Button type="button" variant="outline" size="sm" className="w-fit" disabled={isUploadingRequesterFile} onClick={() => requesterFileInputRef.current?.click()}>
-                            {isUploadingRequesterFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
-                            파일 추가
-                          </Button>
+                      {subtasks.length === 0 && (
+                        <div className="grid gap-2 mb-3">
+                          <Label className="text-xs">첨부파일 (요청자)</Label>
+                          <div className="flex flex-col gap-2">
+                            {editingRequesterFileKeys.map((key, idx) => (
+                              <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
+                                <button type="button" className="text-blue-600 hover:underline truncate max-w-[180px]" onClick={() => handleDownload(key, extractFileName(key, "파일"))}>{extractFileName(key, "파일")}</button>
+                                <button type="button" aria-label="첨부 제거" className="p-0.5 text-muted-foreground hover:text-destructive" onClick={() => setEditingRequesterFileKeys((prev) => prev.filter((_, i) => i !== idx))}><Trash2 className="h-3.5 w-3.5" /></button>
+                              </div>
+                            ))}
+                            <Button type="button" variant="outline" size="sm" className="w-fit" disabled={isUploadingRequesterFile} onClick={() => requesterFileInputRef.current?.click()}>
+                              {isUploadingRequesterFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                              파일 추가
+                            </Button>
+                          </div>
                         </div>
-                      </div>
+                      )}
                       <div className="border rounded-md overflow-hidden bg-background flex flex-col" style={{ height: "400px", minHeight: "400px", maxHeight: "400px" }}>
                         <div className="flex items-center gap-1 p-2 flex-wrap shrink-0 border-b">
                           <Button type="button" variant={requesterEditorState.bold ? "secondary" : "ghost"} size="sm" className={`h-8 w-8 p-0 ${requesterEditorState.bold ? "bg-primary/10" : ""}`} onClick={(e) => { e.preventDefault(); const editor = document.getElementById("requester-content-editor"); if (editor) { editor.focus(); document.execCommand("bold", false); updateRequesterEditorState() } }} title="굵게"><Bold className={`h-4 w-4 ${requesterEditorState.bold ? "text-primary" : ""}`} /></Button>
@@ -1587,6 +1669,85 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         </CardContent>
       </Card>
 
+      {/* 공동 업무: 첨부하기 클릭 시 파일 선택 → 해당 서브그룹의 모든 서브태스크 요청자 첨부(file_keys)에 추가 */}
+      {subtasks.length > 0 && canEditTask && (
+        <input
+          ref={sharedAttachInputRef}
+          type="file"
+          className="hidden"
+          multiple
+          accept="*/*"
+          onChange={async (e) => {
+            const fileList = e.target.files
+            e.target.value = ""
+            if (!fileList?.length) return
+            const group = sharedAttachGroupRef.current
+            if (!group?.tasks?.length) return
+            if (!window.confirm(`선택한 ${fileList.length}개 파일을 "${group.subtitle}" 그룹에 첨부할까요?`)) return
+            setIsUploadingSharedAttach(true)
+            const addedPaths: string[] = []
+            try {
+              for (let i = 0; i < fileList.length; i++) {
+                const formData = new FormData()
+                formData.append("file", fileList[i])
+                formData.append("fileType", "other")
+                formData.append("path", `temp/attachment/${fileList[i].name}`)
+                const res = await fetch("/api/storage/upload", {
+                  method: "POST",
+                  credentials: "include",
+                  body: formData,
+                })
+                const data = await res.json().catch(() => ({}))
+                if (!res.ok) throw new Error(data.error || "업로드 실패")
+                const path = data.path ?? data.s3_key
+                if (path) addedPaths.push(path)
+              }
+              if (addedPaths.length > 0) {
+                for (const subtask of group.tasks) {
+                  const currentKeys = normalizeFileKeyArray(subtask.file_keys ?? [])
+                  const newFileKeys = [...currentKeys, ...addedPaths]
+                  const patchRes = await fetch(`/api/tasks/${subtask.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "include",
+                    body: JSON.stringify({ file_keys: newFileKeys }),
+                  })
+                  if (!patchRes.ok) {
+                    const err = await patchRes.json().catch(() => ({}))
+                    throw new Error(err.error || "첨부파일 저장 실패")
+                  }
+                }
+                setNewAttachedKeysPerGroup((prev) => ({
+                  ...prev,
+                  [group.subtitle]: [...(prev[group.subtitle] || []), ...addedPaths],
+                }))
+                const until = Date.now() + NEW_BADGE_MS
+                setNewBadgeUntilBySubtitle((prev) => ({ ...prev, [group.subtitle]: until }))
+                try {
+                  const key = `task_new_badge_${taskId}`
+                  const raw = localStorage.getItem(key)
+                  const prev = raw ? (JSON.parse(raw) as Record<string, number>) : {}
+                  localStorage.setItem(key, JSON.stringify({ ...prev, [group.subtitle]: until }))
+                } catch {
+                  // ignore
+                }
+                toast({ title: "저장됨", description: "해당 서브그룹 요청자 첨부파일이 저장되었습니다." })
+                await loadSubtasks()
+                await reloadTask()
+              }
+            } catch (err: any) {
+              toast({
+                title: "첨부 실패",
+                description: err?.message ?? "파일 업로드 또는 저장 중 오류가 발생했습니다.",
+                variant: "destructive",
+              })
+            } finally {
+              setIsUploadingSharedAttach(false)
+            }
+          }}
+        />
+      )}
+
       {/* 세부업무 첨부파일 업로드용 hidden input */}
       {editingSubtaskId && (
         <input
@@ -1619,12 +1780,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 const path = data.path ?? data.s3_key
                 if (path) addedPaths.push(path)
               }
-              if (addedPaths.length > 0) {
-                if (target === "requester") {
-                  setEditingSubtaskFileKeys((prev) => [...prev, ...addedPaths])
-                } else {
-                  setEditingSubtaskCommentFileKeys((prev) => [...prev, ...addedPaths])
-                }
+              if (addedPaths.length > 0 && target === "requester") {
+                setEditingSubtaskFileKeys((prev) => [...prev, ...addedPaths])
               }
             } catch (err: any) {
               toast({
@@ -1640,8 +1797,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         />
       )}
 
-      {/* 요청자 첨부파일 업로드용 공용 hidden input (개별/공동 수정 시 하나만 사용) */}
-      {isEditingRequesterContent && (
+      {/* 요청자 첨부파일 업로드용 hidden input (공동 수정 시만 — 개별은 위 그리드 안 input 사용) */}
+      {isEditingRequesterContent && subtasks.length > 0 && (
         <input
           ref={requesterFileInputRef}
           type="file"
@@ -1746,11 +1903,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-lg">내 담당업무</CardTitle>
-                  {mySubtaskForComment && !isEditingMyComment && (
-                    <Button variant="outline" size="sm" onClick={() => setIsEditingMyComment(true)}>
-                      수정
-                    </Button>
-                  )}
                 </CardHeader>
                 <CardContent>
                   {(() => {
@@ -1873,7 +2025,24 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   ) : (
                     groupedSubtasks.map((group) => (
                       <div key={group.subtitle} className="border-2 border-muted rounded-lg p-2 bg-background/50 space-y-1.5">
-                        <div className="text-[11px] font-semibold text-foreground/80 mb-1 px-1">{group.subtitle}</div>
+                        <div className="flex items-center justify-between gap-1 mb-1 px-1 min-h-[20px]">
+                          <div className="text-[11px] font-semibold text-foreground/80 truncate min-w-0">{group.subtitle}</div>
+                          {canEditTask && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-6 px-1.5 text-[10px] shrink-0 flex items-center gap-0.5"
+                              disabled={isUploadingSharedAttach}
+                              onClick={() => {
+                                sharedAttachGroupRef.current = { subtitle: group.subtitle, tasks: group.tasks }
+                                sharedAttachInputRef.current?.click()
+                              }}
+                            >
+                              {isUploadingSharedAttach ? <Loader2 className="h-3 w-3 animate-spin" /> : <Paperclip className="h-3 w-3" />}
+                              파일 추가
+                            </Button>
+                          )}
+                        </div>
                         {group.tasks.map((subtask) => (
                           <StaffSessionBlock
                             key={subtask.id}
@@ -1883,6 +2052,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                             onSelect={() => setSelectedSubtask(selectedSubtask?.id === subtask.id ? null : subtask)}
                             onComplete={completeSubtask}
                             canCompleteSubtask={canEditTask}
+                            canRevertAwaitingToPending={canEditTask}
+                            onRevertAwaitingToPending={handleRevertSubtaskToPending}
+                            isReverting={revertingSubtaskId === subtask.id}
                             hasAttachment={subtaskIdsWithResolvedFiles.has(subtask.id)}
                             isMyBlock={subtask.assigned_to === me?.id}
                           />
@@ -1904,64 +2076,83 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             const isFirstGroup = groupIndex === 0
             return (
               <Card key={group.subtitle}>
-                <CardHeader className="flex flex-row items-center justify-between">
+                <CardHeader className="flex flex-row items-center justify-between gap-2">
                   <CardTitle className="text-lg">{group.subtitle}</CardTitle>
-                  {canEditTask && !isEditingRequesterContent && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        editingSubtitleRef.current = group.subtitle
-                        setSelectedSubtitle(group.subtitle)
-                        setEditingRequesterFileKeys(resolvedFileKeys.map((f) => f.s3Key))
-                        setIsEditingRequesterContent(true)
-                      }}
-                    >
-                      수정
-                    </Button>
-                  )}
+                  <div className="flex items-center gap-2 shrink-0">
+                    {showRequesterEditAndAttach && !isEditingRequesterContent && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          editingSubtitleRef.current = group.subtitle
+                          setSelectedSubtitle(group.subtitle)
+                          if (subtasks.length === 0) setEditingRequesterFileKeys(resolvedFileKeys.map((f) => f.s3Key))
+                          setIsEditingRequesterContent(true)
+                        }}
+                      >
+                        수정
+                      </Button>
+                    )}
+                    {canEditTask && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        disabled={isUploadingSharedAttach}
+                        onClick={() => {
+                          sharedAttachGroupRef.current = { subtitle: group.subtitle, tasks: group.tasks }
+                          sharedAttachInputRef.current?.click()
+                        }}
+                      >
+                        {isUploadingSharedAttach ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Paperclip className="h-3 w-3 mr-1" />}
+                        파일 추가
+                      </Button>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {!isFirstGroup && (
                   <div>
                     <p className="text-[11px] font-medium text-muted-foreground mb-1">요청자 내용</p>
-                    {canEditTask && isEditingRequesterContent && selectedSubtitle === group.subtitle ? (
+                    {showRequesterEditAndAttach && isEditingRequesterContent && selectedSubtitle === group.subtitle ? (
                       <>
-                        <div className="grid gap-2 mb-3">
-                          <Label className="text-xs">첨부파일 (요청자)</Label>
-                          <div className="flex flex-col gap-2">
-                            {editingRequesterFileKeys.map((key, idx) => (
-                              <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
-                                <button
-                                  type="button"
-                                  className="text-blue-600 hover:underline truncate max-w-[180px]"
-                                  onClick={() => handleDownload(key, extractFileName(key, "파일"))}
-                                >
-                                  {extractFileName(key, "파일")}
-                                </button>
-                                <button
-                                  type="button"
-                                  aria-label="첨부 제거"
-                                  className="p-0.5 text-muted-foreground hover:text-destructive"
-                                  onClick={() => setEditingRequesterFileKeys((prev) => prev.filter((_, i) => i !== idx))}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            ))}
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="w-fit"
-                              disabled={isUploadingRequesterFile}
-                              onClick={() => requesterFileInputRef.current?.click()}
-                            >
-                              {isUploadingRequesterFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
-                              파일 추가
-                            </Button>
+                        {subtasks.length === 0 && (
+                          <div className="grid gap-2 mb-3">
+                            <Label className="text-xs">첨부파일 (요청자)</Label>
+                            <div className="flex flex-col gap-2">
+                              {editingRequesterFileKeys.map((key, idx) => (
+                                <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
+                                  <button
+                                    type="button"
+                                    className="text-blue-600 hover:underline truncate max-w-[180px]"
+                                    onClick={() => handleDownload(key, extractFileName(key, "파일"))}
+                                  >
+                                    {extractFileName(key, "파일")}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    aria-label="첨부 제거"
+                                    className="p-0.5 text-muted-foreground hover:text-destructive"
+                                    onClick={() => setEditingRequesterFileKeys((prev) => prev.filter((_, i) => i !== idx))}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              ))}
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="w-fit"
+                                disabled={isUploadingRequesterFile}
+                                onClick={() => requesterFileInputRef.current?.click()}
+                              >
+                                {isUploadingRequesterFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                                파일 추가
+                              </Button>
+                            </div>
                           </div>
-                        </div>
+                        )}
                         <div
                           className="border rounded-md overflow-hidden bg-background flex flex-col"
                           style={{
@@ -2222,6 +2413,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                               }
                               onComplete={completeSubtask}
                               canCompleteSubtask={canEditTask}
+                              canRevertAwaitingToPending={canEditTask}
+                              onRevertAwaitingToPending={handleRevertSubtaskToPending}
+                              isReverting={revertingSubtaskId === subtask.id}
                               hasAttachment={subtaskIdsWithResolvedFiles.has(subtask.id)}
                               isMyBlock={subtask.assigned_to === me?.id}
                             />
@@ -2230,128 +2424,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       </div>
                     </div>
                   </div>
-                  {/* 선택한 세부업무 첨부파일 — subtask별 첨부 표시 및 수정 */}
-                  {selectedSubtaskInGroup && canEditTask && (
-                    <div className="space-y-3 pt-4 mt-4 border-t">
-                      <h4 className="text-sm font-semibold text-foreground/90">
-                        선택한 세부업무 첨부파일
-                        {selectedSubtaskInGroup.assigned_to_name || selectedSubtaskInGroup.assigned_to_email
-                          ? ` (${selectedSubtaskInGroup.assigned_to_name || selectedSubtaskInGroup.assigned_to_email})`
-                          : ""}
-                      </h4>
-                      {editingSubtaskId === selectedSubtaskInGroup.id ? (
-                        <>
-                          <div className="grid gap-2">
-                            <Label className="text-xs">요청자 첨부</Label>
-                            <div className="flex flex-col gap-2">
-                              {editingSubtaskFileKeys.map((key, idx) => (
-                                <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
-                                  <button
-                                    type="button"
-                                    className="text-blue-600 hover:underline truncate max-w-[180px]"
-                                    onClick={() => handleDownload(key, extractFileName(key, "파일"))}
-                                  >
-                                    {extractFileName(key, "파일")}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    aria-label="첨부 제거"
-                                    className="p-0.5 text-muted-foreground hover:text-destructive"
-                                    onClick={() => setEditingSubtaskFileKeys((prev) => prev.filter((_, i) => i !== idx))}
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                </div>
-                              ))}
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="w-fit"
-                                disabled={isUploadingSubtaskFile}
-                                onClick={() => {
-                                  subtaskFileUploadTargetRef.current = "requester"
-                                  subtaskFileInputRef.current?.click()
-                                }}
-                              >
-                                {isUploadingSubtaskFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
-                                파일 추가
-                              </Button>
-                            </div>
-                          </div>
-                          <div className="grid gap-2">
-                            <Label className="text-xs">담당자 첨부</Label>
-                            <div className="flex flex-col gap-2">
-                              {editingSubtaskCommentFileKeys.map((key, idx) => (
-                                <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
-                                  <button
-                                    type="button"
-                                    className="text-blue-600 hover:underline truncate max-w-[180px]"
-                                    onClick={() => handleDownload(key, extractFileName(key, "파일"))}
-                                  >
-                                    {extractFileName(key, "파일")}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    aria-label="첨부 제거"
-                                    className="p-0.5 text-muted-foreground hover:text-destructive"
-                                    onClick={() => setEditingSubtaskCommentFileKeys((prev) => prev.filter((_, i) => i !== idx))}
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                </div>
-                              ))}
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="w-fit"
-                                disabled={isUploadingSubtaskFile}
-                                onClick={() => {
-                                  subtaskFileUploadTargetRef.current = "assignee"
-                                  subtaskFileInputRef.current?.click()
-                                }}
-                              >
-                                {isUploadingSubtaskFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
-                                파일 추가
-                              </Button>
-                            </div>
-                          </div>
-                          <div className="flex gap-2">
-                            <Button size="sm" onClick={handleSaveSubtaskFiles} disabled={isSavingSubtaskFiles}>
-                              {isSavingSubtaskFiles ? <Loader2 className="h-4 w-4 animate-spin" /> : "저장"}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setEditingSubtaskId(null)
-                                setEditingSubtaskFileKeys([])
-                                setEditingSubtaskCommentFileKeys([])
-                              }}
-                              disabled={isSavingSubtaskFiles}
-                            >
-                              취소
-                            </Button>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setEditingSubtaskId(selectedSubtaskInGroup.id)
-                              setEditingSubtaskFileKeys(normalizeFileKeyArray(selectedSubtaskInGroup.file_keys))
-                              setEditingSubtaskCommentFileKeys(normalizeFileKeyArray(selectedSubtaskInGroup.comment_file_keys))
-                            }}
-                          >
-                            첨부파일
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  )}
                   {/* 그룹별 첨부파일 — 해당 그룹의 요청자 + 담당자 첨부만 */}
                   {(() => {
                     const groupSubtaskIds = new Set(group.tasks.map((t) => t.id))
@@ -2367,7 +2439,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                     if (!hasRequester && !hasGroupRequester && !hasAssignee) return null
                     return (
                       <div className="space-y-3 pt-4 mt-4 border-t">
-                        <h4 className="text-sm font-semibold text-foreground/90">첨부파일</h4>
+                        <div className="flex items-center gap-2">
+                          {showNewForGroup(group.subtitle) && (
+                            <span className="inline-flex items-center gap-0.5 shrink-0 text-amber-600 dark:text-amber-400 text-[10px] font-semibold uppercase tracking-wide">
+                              New
+                            </span>
+                          )}
+                          <h4 className="text-sm font-semibold text-foreground/90">첨부파일</h4>
+                        </div>
                         {isDownloading && (
                           <div className="space-y-1">
                             <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -2401,16 +2480,23 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                             <p className="text-xs font-medium text-muted-foreground">요청자 첨부</p>
                             <div className="flex flex-col gap-2 pl-2">
                               {groupRequesterFiles.map((f, index) => (
-                                <FileListItem
-                                  key={`g-sreq-${group.subtitle}-${index}`}
-                                  fileName={f.fileName}
-                                  s3Key={f.s3Key}
-                                  uploadedAt={f.uploadedAt}
-                                  fallbackDate={task.created_at}
-                                  assignedToName="요청자"
-                                  assigneeColorClass={getAssigneeColorClass("요청자")}
-                                  onDownload={handleDownload}
-                                />
+                                <div key={`g-sreq-${group.subtitle}-${index}`} className="flex items-center gap-1.5">
+                                  <FileListItem
+                                    fileName={f.fileName}
+                                    s3Key={f.s3Key}
+                                    uploadedAt={f.uploadedAt}
+                                    fallbackDate={task.created_at}
+                                    assignedToName="요청자"
+                                    assigneeColorClass={getAssigneeColorClass("요청자")}
+                                    onDownload={handleDownload}
+                                  />
+                                  {showNewForGroup(group.subtitle) && newAttachedKeysPerGroup[group.subtitle]?.includes(f.s3Key) && (
+                                    <span className="inline-flex items-center gap-0.5 shrink-0 text-amber-600 dark:text-amber-400 text-[10px] font-medium animate-pulse">
+                                      <Sparkles className="h-3 w-3" />
+                                      New
+                                    </span>
+                                  )}
+                                </div>
                               ))}
                             </div>
                           </div>
@@ -2652,8 +2738,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         )}
       </div>
 
-      {/* 첨부파일 — 개별 업무일 때 수정 모드에서만 표시 (수정 버튼 클릭 시) */}
-      {subtasks.length === 0 && isEditingRequesterContent && (
+      {/* 첨부파일 — 개별 업무일 때 수정 모드가 아닐 때 하단에 표시 (저장 후 확인용) */}
+      {subtasks.length === 0 && !isEditingRequesterContent && (
       <Card className="mb-6">
         <CardHeader>
           <CardTitle>첨부파일</CardTitle>

@@ -27,11 +27,12 @@ export async function GET(request: NextRequest) {
 
     // task_assignments 테이블 사용 (MySQL COUNT로 계산)
     const totalTasks = await countOne(`SELECT COUNT(*) as cnt FROM task_assignments`)
-    const pendingTasks = await countOne(`SELECT COUNT(*) as cnt FROM task_assignments WHERE status = 'pending'`)
-    const inProgressTasks = await countOne(`SELECT COUNT(*) as cnt FROM task_assignments WHERE status = 'in_progress'`)
     const completedTasks = await countOne(`SELECT COUNT(*) as cnt FROM task_assignments WHERE status = 'completed'`)
-    const onHoldTasks = await countOne(`SELECT COUNT(*) as cnt FROM task_assignments WHERE status = 'on_hold'`)
-    const awaitingCompletionTasks = await countOne(`SELECT COUNT(*) as cnt FROM task_assignments WHERE status = 'awaiting_completion'`)
+    // 우선순위별 건수 (대시보드 4개 카드용)
+    const urgentPriorityTasks = await countOne(`SELECT COUNT(*) as cnt FROM task_assignments WHERE status != 'completed' AND priority = 'urgent'`)
+    const highPriorityTasks = await countOne(`SELECT COUNT(*) as cnt FROM task_assignments WHERE status != 'completed' AND priority = 'high'`)
+    const mediumPriorityTasks = await countOne(`SELECT COUNT(*) as cnt FROM task_assignments WHERE status != 'completed' AND priority = 'medium'`)
+    const lowPriorityTasks = await countOne(`SELECT COUNT(*) as cnt FROM task_assignments WHERE status != 'completed' AND priority = 'low'`)
 
     const totalClients = await countOne(`SELECT COUNT(*) as cnt FROM profiles WHERE role = 'client'`)
 
@@ -60,11 +61,11 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       totalTasks,
-      pendingTasks,
-      inProgressTasks,
       completedTasks,
-      onHoldTasks,
-      awaitingCompletionTasks,
+      urgentPriorityTasks,
+      highPriorityTasks,
+      mediumPriorityTasks,
+      lowPriorityTasks,
       totalClients,
       totalReports,
       totalStaff,

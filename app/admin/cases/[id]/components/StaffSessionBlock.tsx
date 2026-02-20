@@ -18,6 +18,12 @@ interface StaffSessionBlockProps {
   hasAttachment?: boolean
   /** 현재 로그인 사용자 본인 담당 블록이면 true — 분담내용에서 내 블록 강조 */
   isMyBlock?: boolean
+  /** 완료대기 상태일 때 태그 클릭으로 대기로 되돌리기 가능 여부 (관리자/요청자) */
+  canRevertAwaitingToPending?: boolean
+  /** 완료대기 → 대기 되돌리기 실행 콜백 */
+  onRevertAwaitingToPending?: (subtaskId: string) => void
+  /** 되돌리기 요청 진행 중 여부 */
+  isReverting?: boolean
 }
 
 /**
@@ -35,9 +41,13 @@ export function StaffSessionBlock({
   canCompleteSubtask = true,
   hasAttachment = false,
   isMyBlock = false,
+  canRevertAwaitingToPending = false,
+  onRevertAwaitingToPending,
+  isReverting = false,
 }: StaffSessionBlockProps) {
   const isCompleted = subtask.status === "completed"
   const isAwaitingCompletion = subtask.status === "awaiting_completion"
+  const showRevertBadge = isAwaitingCompletion && canRevertAwaitingToPending && onRevertAwaitingToPending
 
   return (
     <div
@@ -70,7 +80,31 @@ export function StaffSessionBlock({
               <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" aria-label="첨부파일 있음" />
             )}
           </span>
-          <span className="shrink-0 flex items-center">{getStatusBadge(subtask.status)}</span>
+          <span className="shrink-0 flex items-center">
+            {showRevertBadge ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onRevertAwaitingToPending!(subtask.id)
+                }}
+                disabled={isReverting}
+                className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium bg-purple-500/10 text-purple-500 border-purple-500/30 hover:bg-purple-500/20 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
+                title="클릭 시 담당자 업무를 대기로 되돌립니다"
+              >
+                {isReverting ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    되돌리는 중
+                  </>
+                ) : (
+                  "완료대기"
+                )}
+              </button>
+            ) : (
+              getStatusBadge(subtask.status)
+            )}
+          </span>
         </div>
         
         {/* 완료 시각 표시 */}

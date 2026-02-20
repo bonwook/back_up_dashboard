@@ -23,7 +23,6 @@ export default function WorklistPage() {
   const [filteredS3Updates, setFilteredS3Updates] = useState<S3UpdateRow[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
-  const [statusFilter, setStatusFilter] = useState<string>("all")
   const [priorityFilter, setPriorityFilter] = useState<string>("all")
   const [assignmentFilter, setAssignmentFilter] = useState<"all" | "requested" | "assigned">("all")
   const [bucketFilter, setBucketFilter] = useState<string>("all")
@@ -49,6 +48,14 @@ export default function WorklistPage() {
     }
     loadMe()
   }, [])
+
+  const handleRefresh = () => {
+    setSearchQuery("")
+    setPriorityFilter("all")
+    setAssignmentFilter("all")
+    setBucketFilter("all")
+    loadTasks()
+  }
 
   const loadTasks = async () => {
     setIsLoading(true)
@@ -76,31 +83,24 @@ export default function WorklistPage() {
   // s3_updates 버킷: bucket_name만 사용
   const getBucketName = useCallback((row: S3UpdateRow) => (row.bucket_name ?? "").trim(), [])
 
-  // task_assignments의 file_keys 경로에서 버킷 추출 (첫 경로 세그먼트 = 버킷)
-  const getBucketFromTask = useCallback((task: Task) => {
-    const keys = task.file_keys
-    if (!keys?.length) return ""
-    const first = (keys[0] ?? "").trim()
-    const segment = first.split("/")[0]
-    return segment || ""
-  }, [])
-
+  // S3 필터 옵션: s3_updates.bucket_name 기준으로만
   const uniqueBuckets = useMemo(() => {
     const fromS3 = s3Updates.map(getBucketName).filter(Boolean)
-    const fromTasks = tasks.map(getBucketFromTask).filter(Boolean)
-    const names = [...new Set([...fromS3, ...fromTasks])] as string[]
+    const names = [...new Set(fromS3)] as string[]
     return names.sort((a, b) => a.localeCompare(b))
-  }, [s3Updates, tasks, getBucketName, getBucketFromTask])
+  }, [s3Updates, getBucketName])
 
-  // task.id -> bucket (file_keys 경로로 판별, S3에서 할당된 업무)
-  const taskIdToBucket = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const task of tasks) {
-      const bucket = getBucketFromTask(task)
-      if (bucket) map.set(task.id, bucket)
+  // 버킷별 task_id 집합 (s3_updates.bucket_name 기준, 필터링용)
+  const taskIdsByBucket = useMemo(() => {
+    const map = new Map<string, Set<string>>()
+    for (const row of s3Updates) {
+      const bucket = getBucketName(row)
+      if (!bucket || !row.task_id) continue
+      if (!map.has(bucket)) map.set(bucket, new Set())
+      map.get(bucket)!.add(String(row.task_id))
     }
     return map
-  }, [tasks, getBucketFromTask])
+  }, [s3Updates, getBucketName])
 
   // S3에서 온 업무인지 (s3_updates.task_id로 연결된 task id 집합)
   const taskIdsFromS3 = useMemo(() => {
@@ -133,14 +133,6 @@ export default function WorklistPage() {
       )
     }
 
-    if (activeTab === "worklist" && statusFilter !== "all") {
-      if (statusFilter === "expired") {
-        filtered = filtered.filter((task) => isTaskExpired(task))
-      } else {
-        filtered = filtered.filter((task) => task.status === statusFilter)
-      }
-    }
-
     if (priorityFilter !== "all") {
       filtered = filtered.filter((task) => task.priority === priorityFilter)
     }
@@ -153,12 +145,13 @@ export default function WorklistPage() {
       }
     }
 
-    // S3 필터: "s3_only" = S3에서 온 태스크만, 특정 버킷 = 해당 버킷 S3만
+    // S3 필터: s3_updates.bucket_name 기준. "s3_only" = S3에서 온 태스크만, 특정 버킷 = 해당 bucket_name으로 연결된 태스크만
     if (bucketFilter === "s3_only") {
       filtered = filtered.filter((task) => taskIdsFromS3.has(task.id))
     } else if (bucketFilter !== "all") {
       const key = bucketFilter.trim()
-      filtered = filtered.filter((task) => taskIdsFromS3.has(task.id) && taskIdToBucket.get(task.id) === key)
+      const taskIdsForBucket = taskIdsByBucket.get(key)
+      filtered = filtered.filter((task) => taskIdsForBucket?.has(task.id))
     }
 
     setFilteredTasks(filtered)
@@ -185,7 +178,7 @@ export default function WorklistPage() {
       }
     }
     setFilteredS3Updates(s3Filtered)
-  }, [tasks, s3Updates, searchQuery, statusFilter, priorityFilter, bucketFilter, activeTab, assignmentFilter, me?.id, getBucketName, taskIdToBucket, taskIdsFromS3])
+  }, [tasks, s3Updates, searchQuery, priorityFilter, bucketFilter, activeTab, assignmentFilter, me?.id, getBucketName, taskIdsByBucket, taskIdsFromS3])
 
   useEffect(() => {
     loadTasks()
@@ -225,16 +218,13 @@ export default function WorklistPage() {
     if (tab === "completed") setActiveTab("completed")
     if (tab === "worklist") setActiveTab("worklist")
 
-    const status = searchParams.get("status")
     const priority = searchParams.get("priority")
     const q = searchParams.get("q")
     const filter = searchParams.get("filter")
 
-    const validStatuses = new Set(["all", "pending", "in_progress", "on_hold", "awaiting_completion", "expired"])
     const validPriorities = new Set(["all", "urgent", "high", "medium", "low"])
     const validFilters = new Set(["all", "requested", "assigned"])
 
-    if (status && validStatuses.has(status)) setStatusFilter(status)
     if (priority && validPriorities.has(priority)) setPriorityFilter(priority)
     if (q !== null) setSearchQuery(q)
     if (filter && validFilters.has(filter)) setAssignmentFilter(filter as "all" | "requested" | "assigned")
@@ -334,23 +324,6 @@ export default function WorklistPage() {
       return title.includes(q) || by.includes(q) || to.includes(q)
     })
   }, [completedReports, searchQuery])
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "completed":
-        return <Badge className="bg-green-500/10 text-green-500">완료</Badge>
-      case "awaiting_completion":
-        return <Badge className="bg-purple-500/10 text-purple-500">완료대기</Badge>
-      case "in_progress":
-        return <Badge className="bg-blue-500/10 text-blue-500">작업중</Badge>
-      case "on_hold":
-        return <Badge className="bg-yellow-500/10 text-yellow-500">보류</Badge>
-      case "pending":
-        return <Badge className="bg-gray-500/10 text-gray-500">대기</Badge>
-      default:
-        return <Badge>{status}</Badge>
-    }
-  }
 
   const getPriorityBadge = (priority: string) => {
     switch (priority) {
@@ -454,19 +427,6 @@ export default function WorklistPage() {
                     담당
                   </Button>
                 </div>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-[120px] h-9">
-                    <SelectValue placeholder="상태" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">상태 전체</SelectItem>
-                    <SelectItem value="pending">대기</SelectItem>
-                    <SelectItem value="in_progress">작업중</SelectItem>
-                    <SelectItem value="on_hold">보류</SelectItem>
-                    <SelectItem value="awaiting_completion">완료대기</SelectItem>
-                    <SelectItem value="expired">마감됨</SelectItem>
-                  </SelectContent>
-                </Select>
                 <Select value={priorityFilter} onValueChange={setPriorityFilter}>
                   <SelectTrigger className="w-[110px] h-9">
                     <SelectValue placeholder="우선순위" />
@@ -491,7 +451,7 @@ export default function WorklistPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                <Button onClick={loadTasks} variant="outline" size="icon" className="h-9 w-9 shrink-0" disabled={isLoading} aria-label="새로고침" title="새로고침">
+                <Button onClick={handleRefresh} variant="outline" size="icon" className="h-9 w-9 shrink-0" disabled={isLoading} aria-label="새로고침" title="새로고침">
                   <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
                 </Button>
               </div>
@@ -517,7 +477,6 @@ export default function WorklistPage() {
                         <TableHead>담당자</TableHead>
                         <TableHead>첨부</TableHead>
                         <TableHead>우선순위</TableHead>
-                        <TableHead>상태</TableHead>
                         <TableHead>생성일</TableHead>
                         <TableHead>마감일</TableHead>
                         <TableHead className="w-[80px]">삭제</TableHead>
@@ -547,9 +506,6 @@ export default function WorklistPage() {
                             </div>
                           </TableCell>
                           <TableCell>-</TableCell>
-                          <TableCell>
-                            <Badge className="bg-amber-500/10 text-amber-600">미할당</Badge>
-                          </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
                             {formatDate(row.upload_time || row.created_at)}
                           </TableCell>
@@ -606,7 +562,6 @@ export default function WorklistPage() {
                               )}
                             </TableCell>
                             <TableCell>{getPriorityBadge(task.priority)}</TableCell>
-                            <TableCell>{getStatusBadge(task.status)}</TableCell>
                             <TableCell className="text-sm text-muted-foreground">{formatDate(task.created_at)}</TableCell>
                             <TableCell className={`text-sm ${expired ? "text-red-600 font-medium" : "text-muted-foreground"}`}>
                               {task.due_date ? formatDate(task.due_date) : "-"}
