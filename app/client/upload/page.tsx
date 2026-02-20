@@ -9,7 +9,6 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
-import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import { Upload, HardDrive } from "lucide-react"
 import { ChartContainer, ChartTooltip } from "@/components/ui/chart"
@@ -36,7 +35,6 @@ export default function ClientUploadPage() {
     nifti: 0,
     other: 0,
   })
-  const router = useRouter()
   const { toast } = useToast()
 
   useEffect(() => {

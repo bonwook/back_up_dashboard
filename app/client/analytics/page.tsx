@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Download, FileSpreadsheet, FileText, FileImage, Eye, RefreshCw, Loader2, ArrowLeft, UserPlus, Archive, Trash2, Upload, Search, Bold, Italic, Underline, List, Heading1, Minus, Grid3x3 as TableIcon } from "lucide-react"
+import { Download, FileSpreadsheet, Eye, RefreshCw, Loader2, ArrowLeft, UserPlus, Archive, Trash2, Upload, Search, Bold, Italic, Underline, Minus, Grid3x3 as TableIcon } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"

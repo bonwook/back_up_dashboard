@@ -1,9 +1,9 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Download, Eye, RefreshCw, Loader2, ArrowLeft, Archive, Trash2, Upload, Search, Calendar as CalendarIcon, FolderOpen, Bold, Italic, Underline, Minus, Grid3x3 as TableIcon, UserPlus, X, Plus } from "lucide-react"
+import { Download, Eye, RefreshCw, Loader2, ArrowLeft, Archive, Trash2, Upload, Search, Calendar as CalendarIcon, Bold, Italic, Underline, Minus, Grid3x3 as TableIcon, UserPlus, X, Plus } from "lucide-react"
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
 import { Badge } from "@/components/ui/badge"
@@ -24,7 +24,6 @@ import { useSearchParams } from "next/navigation"
 import { format } from "date-fns"
 import { ko } from "date-fns/locale"
 import { uploadWithProgress } from "@/lib/utils/upload-with-progress"
-import { Switch } from "@/components/ui/switch"
 import { S3File, ExcelPreview, DicomPreview, TableGridHover, NiftiPreview } from "./types"
 import { useEditor } from "./hooks/useEditor"
 import { useFileManagement } from "./hooks/useFileManagement"
@@ -61,7 +60,6 @@ export default function ClientAnalyticsPage() {
     assigned_to: "", // 개별 업무 담당자 ID (필수)
   })
   const prioritySelectRef = useRef<HTMLButtonElement>(null)
-  const [prioritySelectWidth, setPrioritySelectWidth] = useState<number | null>(null)
   
   // 에디터 state (굵게/기울임/밑줄 툴바 활성 표시용)
   const [editorState, setEditorState] = useState({
@@ -199,14 +197,6 @@ export default function ClientAnalyticsPage() {
     setCompressToZip,
     loadFiles,
   })
-  
-  // 중요도 SelectTrigger 너비 측정
-  useEffect(() => {
-    if (prioritySelectRef.current) {
-      const width = prioritySelectRef.current.offsetWidth
-      setPrioritySelectWidth(width)
-    }
-  }, [assignForm.priority])
   
   // 초기 로드 시 에디터 내용 설정
   useEffect(() => {

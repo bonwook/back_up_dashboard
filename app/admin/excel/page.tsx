@@ -209,12 +209,6 @@ export default function ExcelPage() {
       clearLocalStorage()
     }
 
-    // visibilitychange: 탭 전환 (데이터 유지 - 아무 작업도 하지 않음)
-    const handleVisibilityChange = () => {
-      // 탭이 숨겨지거나 다시 보일 때는 데이터를 유지
-      // 아무 작업도 하지 않음
-    }
-
     // storage 이벤트로 로그아웃 감지 (다른 탭에서 loginTime 삭제 시)
     const handleStorageChange = (e: StorageEvent) => {
       // 사용자별 loginTime 키 패턴 확인
@@ -228,7 +222,6 @@ export default function ExcelPage() {
 
     window.addEventListener('beforeunload', handleBeforeUnload)
     window.addEventListener('unload', handleUnload)
-    document.addEventListener('visibilitychange', handleVisibilityChange)
     window.addEventListener('storage', handleStorageChange)
 
     // 주기적으로 loginTime 확인 (같은 탭에서 로그아웃 감지, 저장소 접근 불가 환경에서는 예외 없음)
@@ -246,7 +239,6 @@ export default function ExcelPage() {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload)
       window.removeEventListener('unload', handleUnload)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('storage', handleStorageChange)
       clearInterval(checkLoginStatus)
       // 컴포넌트 언마운트 시에는 정리하지 않음 (탭 전환일 수 있음)

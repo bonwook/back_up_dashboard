@@ -36,7 +36,6 @@ export default function ClientProgressPage() {
   const [draggedTask, setDraggedTask] = useState<Task | null>(null)
   const [dragOverStatus, setDragOverStatus] = useState<TaskStatus | null>(null)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
-  const [resolvedFileKeys, setResolvedFileKeys] = useState<ResolvedFileKey[]>([])
   const [finalizedTaskIds, setFinalizedTaskIds] = useState<Set<string>>(new Set())
   const [userRole, setUserRole] = useState<string | null>(null)
   const { toast } = useToast()
@@ -121,8 +120,7 @@ export default function ClientProgressPage() {
     // 에디터 DOM 초기화
     const editor = document.getElementById("work-content")
     if (editor) editor.innerHTML = ""
-    const commentEditor = document.getElementById("work-comment-content")
-    const commentEditorEl = document.getElementById('work-comment-content')
+    const commentEditorEl = document.getElementById("work-comment-content")
     if (commentEditorEl) commentEditorEl.innerHTML = ""
 
     // 임시저장 데이터가 있다면 제거(선택, 저장소 접근 불가 시 무시)
@@ -2153,15 +2151,11 @@ export default function ClientProgressPage() {
         task={selectedTask}
         open={!!selectedTask}
         onOpenChange={(open) => {
-          if (!open) {
-            setSelectedTask(null)
-            setResolvedFileKeys([])
-          }
+          if (!open) setSelectedTask(null)
         }}
         onTaskUpdate={() => {
           loadTasks()
           setSelectedTask(null)
-          setResolvedFileKeys([])
         }}
         finalizedTaskIds={finalizedTaskIds}
         setFinalizedTaskIds={setFinalizedTaskIds}
@@ -2239,7 +2233,6 @@ export default function ClientProgressPage() {
             }
           }, 0)
           setSelectedTask(null)
-          setResolvedFileKeys([])
         }}
       />
     </div>

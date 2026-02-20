@@ -22,7 +22,6 @@ import { Progress } from "@/components/ui/progress"
 import { downloadWithProgress } from "@/lib/utils/download-with-progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
-  filterValidFileKeys,
   normalizeFileKeyArray,
   extractFileName,
   resolveFileKeys,
@@ -34,7 +33,7 @@ import {
   type ResolvedSubtaskFile,
 } from "@/lib/utils/fileKeyHelpers"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { getStatusBadge, getStatusColor, getStatusBorderColor, getStatusTextColor, getPriorityBadge } from "@/lib/utils/taskStatusHelpers"
+import { getStatusBadge, getStatusColor, getStatusTextColor, getPriorityBadge } from "@/lib/utils/taskStatusHelpers"
 import { parseDateOnly } from "@/lib/utils/dateHelpers"
 import { FileListItem } from "./components/FileListItem"
 import { StaffSessionBlock } from "./components/StaffSessionBlock"
@@ -123,6 +122,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const NEW_BADGE_MS = NEW_BADGE_DAYS * 24 * 60 * 60 * 1000
   /** 완료대기 → 대기 되돌리기 진행 중인 서브태스크 id */
   const [revertingSubtaskId, setRevertingSubtaskId] = useState<string | null>(null)
+  /** 메인 테스크 완료대기 → 대기 되돌리기 진행 중 */
+  const [revertingMainTaskToPending, setRevertingMainTaskToPending] = useState(false)
   const taskRef = useRef<Task | null>(null)
   useEffect(() => {
     taskRef.current = task
@@ -233,8 +234,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
 
     loadTask()
   }, [taskId, router, toast])
-
-  // S3 다운로드용 presigned URL은 다운로드 버튼 클릭 시에만 발급 (24시간 유효, 한 번만 발급)
 
   // 첨부파일 resolve + 업로더 기준으로 분리(기존 데이터에서 file_keys에 섞여 있는 사용자 파일도 분리)
   useEffect(() => {
@@ -489,6 +488,42 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       }
     },
     [taskId, loadSubtasks, reloadTask, toast, router]
+  )
+
+  /** 완료대기 상태인 메인 테스크를 대기로 되돌리기 (공동 서브태스크와 동일 로직) */
+  const handleRevertMainTaskToPending = useCallback(
+    async () => {
+      if (!taskId) return
+      if (!confirm("대기 상태로 되돌리시겠습니까? 업무가 다시 대기 목록에 올라갑니다.")) return
+      setRevertingMainTaskToPending(true)
+      try {
+        const res = await fetch(`/api/tasks/${taskId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ status: "pending" }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.error || "상태 업데이트 실패")
+        }
+        await reloadTask()
+        if (task?.is_multi_assign) await loadSubtasks()
+        window.dispatchEvent(new CustomEvent("task-content-updated", { detail: { taskId } }))
+        toast({ title: "업무가 대기 상태로 되돌아갔습니다." })
+        router.refresh()
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : "상태를 변경하는 중 오류가 발생했습니다."
+        toast({
+          title: "되돌리기 실패",
+          description: message,
+          variant: "destructive",
+        })
+      } finally {
+        setRevertingMainTaskToPending(false)
+      }
+    },
+    [taskId, task?.is_multi_assign, reloadTask, loadSubtasks, toast, router]
   )
 
   // subtask 첨부파일 resolve (task_file_attachments의 uploaded_at 우선 사용) — 요청자(file_keys) + 담당자(comment_file_keys)
@@ -2804,11 +2839,28 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       </Card>
       )}
 
-      {/* 작업완료 버튼: 담당자(admin = staff 동일)에게 항상 표시 (미완료 작업만) */}
+      {/* 작업완료 버튼: 담당자(admin = staff 동일)에게 항상 표시 (미완료 작업만). 완료대기일 때 옆에 업무 재요청 버튼 */}
       {canEditTask &&
        (userRole === "admin" || userRole === "staff") &&
        task.status !== "completed" && (
-        <div className="mt-10 flex justify-center">
+        <div className="mt-10 flex justify-center gap-3 flex-wrap">
+          {task.status === "awaiting_completion" && (
+            <Button
+              variant="outline"
+              onClick={handleRevertMainTaskToPending}
+              disabled={revertingMainTaskToPending}
+              className="min-w-[140px] cursor-pointer"
+            >
+              {revertingMainTaskToPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  처리 중...
+                </>
+              ) : (
+                "업무 재요청"
+              )}
+            </Button>
+          )}
           <Button onClick={handleFinalizeTask} disabled={isFinalizing} className="min-w-[180px] cursor-pointer">
             {isFinalizing ? (
               <>
