@@ -387,7 +387,15 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       const res = await fetch(`/api/tasks/${taskId}/comments`, { credentials: "include" })
       if (!res.ok) return
       const data = await res.json()
-      setComments(Array.isArray(data.comments) ? data.comments : [])
+      const list = Array.isArray(data.comments) ? data.comments : []
+      const seen = new Set<string>()
+      const deduped = list.filter((c: { id?: string }) => {
+        const id = c?.id
+        if (!id || seen.has(id)) return false
+        seen.add(id)
+        return true
+      })
+      setComments(deduped)
     } catch {
       // ignore
     }
@@ -882,6 +890,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     if (!taskId) return
     const content = newComment.trim()
     if (!content) return
+    if (isPostingComment) return
     setIsPostingComment(true)
     try {
       const res = await fetch(`/api/tasks/${taskId}/comments`, {
@@ -905,7 +914,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     } finally {
       setIsPostingComment(false)
     }
-  }, [taskId, newComment, loadComments, toast])
+  }, [taskId, newComment, loadComments, toast, isPostingComment])
 
   const handleSaveSubtaskFiles = useCallback(async () => {
     if (!editingSubtaskId) return
@@ -1527,7 +1536,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                               if (path) addedPaths.push(path)
                             }
                             if (addedPaths.length > 0) {
-                              setEditingRequesterFileKeys((prev) => [...prev, ...addedPaths])
+                              setEditingRequesterFileKeys((prev) => [...new Set([...prev, ...addedPaths])])
                             }
                           } catch (err: any) {
                             toast({
@@ -1553,7 +1562,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                         파일 추가
                       </Button>
                       {editingRequesterFileKeys.map((key, idx) => (
-                        <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
+                        <div key={`requester-${idx}-${key}`} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
                           <button
                             type="button"
                             className="text-blue-600 hover:underline truncate max-w-[180px]"
@@ -1682,7 +1691,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                           <Label className="text-xs">첨부파일 (요청자)</Label>
                           <div className="flex flex-col gap-2">
                             {editingRequesterFileKeys.map((key, idx) => (
-                              <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
+                              <div key={`requester-${idx}-${key}`} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
                                 <button type="button" className="text-blue-600 hover:underline truncate max-w-[180px]" onClick={() => handleDownload(key, extractFileName(key, "파일"))}>{extractFileName(key, "파일")}</button>
                                 <button type="button" aria-label="첨부 제거" className="p-0.5 text-muted-foreground hover:text-destructive" onClick={() => setEditingRequesterFileKeys((prev) => prev.filter((_, i) => i !== idx))}><Trash2 className="h-3.5 w-3.5" /></button>
                               </div>
@@ -1785,7 +1794,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   ...prev,
                   [subtaskId]: {
                     ...(prev[subtaskId] ?? { comment: "", file_keys: [], comment_file_keys: [] }),
-                    file_keys: [...(prev[subtaskId]?.file_keys ?? []), ...addedPaths],
+                    file_keys: [...new Set([...(prev[subtaskId]?.file_keys ?? []), ...addedPaths])],
                   },
                 }))
               }
@@ -1836,7 +1845,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               if (addedPaths.length > 0) {
                 for (const subtask of group.tasks) {
                   const currentKeys = normalizeFileKeyArray(subtask.file_keys ?? [])
-                  const newFileKeys = [...currentKeys, ...addedPaths]
+                  const newFileKeys = [...new Set([...currentKeys, ...addedPaths])]
                   const patchRes = await fetch(`/api/tasks/${subtask.id}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
@@ -1912,7 +1921,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 if (path) addedPaths.push(path)
               }
               if (addedPaths.length > 0 && target === "requester") {
-                setEditingSubtaskFileKeys((prev) => [...prev, ...addedPaths])
+                setEditingSubtaskFileKeys((prev) => [...new Set([...prev, ...addedPaths])])
               }
             } catch (err: any) {
               toast({
@@ -1959,7 +1968,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 if (path) addedPaths.push(path)
               }
               if (addedPaths.length > 0) {
-                setEditingRequesterFileKeys((prev) => [...prev, ...addedPaths])
+                setEditingRequesterFileKeys((prev) => [...new Set([...prev, ...addedPaths])])
               }
             } catch (err: any) {
               toast({
@@ -2262,7 +2271,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                             <Label className="text-xs">첨부파일 (요청자)</Label>
                             <div className="flex flex-col gap-2">
                               {editingRequesterFileKeys.map((key, idx) => (
-                                <div key={key} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
+                                <div key={`requester-${idx}-${key}`} className="flex items-center gap-1 rounded border px-2 py-1.5 text-sm">
                                   <button
                                     type="button"
                                     className="text-blue-600 hover:underline truncate max-w-[180px]"
@@ -2713,7 +2722,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                                 파일 추가
                               </Button>
                               {requesterKeys.map((key, idx) => (
-                                <div key={key} className="flex items-center gap-1.5 rounded border px-2 py-1.5 text-sm w-fit">
+                                <div key={`${editSubtask.id}-requester-${idx}-${key}`} className="flex items-center gap-1.5 rounded border px-2 py-1.5 text-sm w-fit">
                                   <span className="text-foreground truncate max-w-[280px]" title={extractFileName(key, "파일")}>{extractFileName(key, "파일")}</span>
                                   <button type="button" className="text-blue-600 hover:underline shrink-0 text-xs" onClick={() => handleDownload(key, extractFileName(key, "파일"))}>다운로드</button>
                                   <button type="button" aria-label="제거" className="p-0.5 text-muted-foreground hover:text-destructive shrink-0" onClick={() => setEditingGroupData((prev) => ({ ...prev, [editSubtask.id]: { ...(prev[editSubtask.id] ?? { comment: "", file_keys: [], comment_file_keys: [] }), file_keys: (prev[editSubtask.id]?.file_keys ?? []).filter((_, i) => i !== idx) } }))}><Trash2 className="h-3.5 w-3.5" /></button>
@@ -2799,12 +2808,16 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       </div>
                     </div>
                   </div>
-                  {/* 그룹별 첨부파일 — 해당 그룹의 요청자 + 담당자 첨부만 */}
+                  {/* 그룹별 첨부파일 — 선택한 담당자별 요청자 첨부 + 담당자 첨부 */}
                   {(() => {
                     const groupSubtaskIds = new Set(group.tasks.map((t) => t.id))
-                    const groupRequesterFiles = resolvedSubtaskFileKeys.filter(
-                      (f) => groupSubtaskIds.has(f.subtaskId) && f.assignedToName === "요청자"
-                    )
+                    const selectedIdInGroup = selectedSubtaskIdBySubtitle[group.subtitle] ?? null
+                    // 요청자 첨부: 담당자 선택 시 해당 담당자(subtask) 것만, 미선택 시 그룹 전체
+                    const groupRequesterFiles = resolvedSubtaskFileKeys.filter((f) => {
+                      if (!groupSubtaskIds.has(f.subtaskId) || f.assignedToName !== "요청자") return false
+                      if (selectedIdInGroup) return f.subtaskId === selectedIdInGroup
+                      return true
+                    })
                     const groupAssigneeFiles = resolvedSubtaskFileKeys.filter(
                       (f) => groupSubtaskIds.has(f.subtaskId) && f.assignedToName !== "요청자"
                     )
@@ -3089,7 +3102,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault()
-                  if (newComment.trim()) handlePostComment()
+                  if (newComment.trim() && !isPostingComment) handlePostComment()
                 }
               }}
             />

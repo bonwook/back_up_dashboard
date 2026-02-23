@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Activity, RefreshCw, Search, Paperclip, Trash2, Plus } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
+import { Fragment } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/hooks/use-toast"
 import { isTaskExpired } from "@/lib/utils/taskHelpers"
@@ -64,9 +65,21 @@ export default function WorklistPage() {
         fetch("/api/tasks/all", { credentials: "include" }),
         fetch("/api/s3-updates", { credentials: "include" }),
       ])
-      if (!tasksRes.ok) throw new Error("Failed to load tasks")
-      const tasksData = await tasksRes.json()
-      setTasks(tasksData.tasks || [])
+
+      if (tasksRes.ok) {
+        const tasksData = await tasksRes.json()
+        setTasks(tasksData.tasks || [])
+      } else {
+        setTasks([])
+        const errBody = await tasksRes.json().catch(() => ({}))
+        const message = errBody.error || `작업 목록 조회 실패 (${tasksRes.status})`
+        toast({
+          title: "작업 목록을 불러올 수 없습니다",
+          description: message,
+          variant: "destructive",
+        })
+      }
+
       if (s3Res.ok) {
         const s3Data = await s3Res.json()
         setS3Updates(s3Data.s3Updates || [])
@@ -75,6 +88,13 @@ export default function WorklistPage() {
       }
     } catch (error) {
       console.error("Failed to load tasks:", error)
+      setTasks([])
+      setS3Updates([])
+      toast({
+        title: "로딩 중 오류",
+        description: error instanceof Error ? error.message : "작업 목록을 불러오는 중 오류가 발생했습니다.",
+        variant: "destructive",
+      })
     } finally {
       setIsLoading(false)
     }
@@ -235,6 +255,28 @@ export default function WorklistPage() {
     filterTasks()
   }, [filterTasks])
 
+  // 진행 탭용: S3 행 + 연결된 task(ㄴ) 그룹, 그 외 일반 task 순서로 표시
+  type WorklistEntry = { type: "s3"; s3: S3UpdateRow } | { type: "s3_with_task"; s3: S3UpdateRow; task: Task } | { type: "task"; task: Task }
+  const worklistEntries = useMemo((): WorklistEntry[] => {
+    const taskIdsShownUnderS3 = new Set<string>()
+    const entries: WorklistEntry[] = []
+    for (const s3 of filteredS3Updates) {
+      const task = s3.task_id ? filteredTasks.find((t) => t.id === String(s3.task_id)) : null
+      if (task) {
+        taskIdsShownUnderS3.add(task.id)
+        entries.push({ type: "s3_with_task", s3, task })
+      } else {
+        entries.push({ type: "s3", s3 })
+      }
+    }
+    for (const task of filteredTasks) {
+      if (!taskIdsShownUnderS3.has(task.id)) {
+        entries.push({ type: "task", task })
+      }
+    }
+    return entries
+  }, [filteredS3Updates, filteredTasks])
+
   useEffect(() => {
     if (activeTab !== "completed") return
     const run = async () => {
@@ -383,8 +425,9 @@ export default function WorklistPage() {
             <CardHeader>
               <CardTitle>진행 중인 작업</CardTitle>
               <CardDescription>
-                총 {filteredTasks.length + filteredS3Updates.length}개
-                {filteredS3Updates.length > 0 && ` (S3 미할당 ${filteredS3Updates.length}건)`}
+                총 {worklistEntries.length}개
+                {filteredS3Updates.filter((s) => !s.task_id).length > 0 &&
+                  ` (S3 미할당 ${filteredS3Updates.filter((s) => !s.task_id).length}건)`}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -483,49 +526,144 @@ export default function WorklistPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredS3Updates.map((row) => (
-                        <TableRow
-                          key={`s3-${row.id}`}
-                          className="cursor-pointer hover:bg-accent/50 bg-amber-500/5 border-l-4 border-l-amber-500/50"
-                          onClick={() => router.push(`/admin/cases/s3-update/${row.id}`)}
-                        >
-                          <TableCell className="font-medium">
-                            {row.file_name}
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <span className="inline-block w-2 h-2 rounded-full bg-amber-500/80 shrink-0" aria-label="S3" />
-                          </TableCell>
-                          <TableCell>
-                            <Badge className="bg-amber-500/10 text-amber-600 font-normal">미할당</Badge>
-                          </TableCell>
-                          <TableCell>-</TableCell>
-                          <TableCell>미지정</TableCell>
-                          <TableCell>
-                            <div className="inline-flex items-center px-2 text-muted-foreground" aria-label="첨부 있음">
-                              <Paperclip className="h-4 w-4" />
-                            </div>
-                          </TableCell>
-                          <TableCell>-</TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
-                            {formatDate(row.upload_time || row.created_at)}
-                          </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">-</TableCell>
-                          <TableCell onClick={(e) => e.stopPropagation()}>
-                            {(me?.role === "admin" || me?.role === "staff") && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={(e) => handleDeleteS3Update(String(row.id), e)}
-                                className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                title="S3 업무 삭제"
+                      {worklistEntries.map((entry) => {
+                        if (entry.type === "s3") {
+                          const row = entry.s3
+                          return (
+                            <TableRow
+                              key={`s3-${row.id}`}
+                              className="cursor-pointer hover:bg-accent/50 bg-amber-500/5 border-l-4 border-l-amber-500/50 border-t border-t-amber-500/20"
+                              onClick={() => router.push(`/admin/cases/s3-update/${row.id}`)}
+                            >
+                              <TableCell className="font-medium">{row.file_name}</TableCell>
+                              <TableCell className="text-center">
+                                <span className="inline-block w-2 h-2 rounded-full bg-amber-500/80 shrink-0" aria-label="S3" />
+                              </TableCell>
+                              <TableCell>
+                                <Badge className="bg-amber-500/10 text-amber-600 font-normal">미할당</Badge>
+                              </TableCell>
+                              <TableCell>-</TableCell>
+                              <TableCell>미지정</TableCell>
+                              <TableCell>
+                                <div className="inline-flex items-center px-2 text-muted-foreground" aria-label="첨부 있음">
+                                  <Paperclip className="h-4 w-4" />
+                                </div>
+                              </TableCell>
+                              <TableCell>-</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
+                                {formatDate(row.upload_time || row.created_at)}
+                              </TableCell>
+                              <TableCell className="text-sm text-muted-foreground">-</TableCell>
+                              <TableCell onClick={(e) => e.stopPropagation()}>
+                                {(me?.role === "admin" || me?.role === "staff") && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={(e) => handleDeleteS3Update(String(row.id), e)}
+                                    className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                    title="S3 업무 삭제"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          )
+                        }
+                        if (entry.type === "s3_with_task") {
+                          const { s3: row, task } = entry
+                          const expired = isTaskExpired(task)
+                          return (
+                            <Fragment key={`s3-task-${row.id}-${task.id}`}>
+                              <TableRow
+                                key={`s3-${row.id}`}
+                                className="cursor-pointer hover:bg-accent/50 bg-emerald-500/5 border-l-4 border-l-emerald-500/50 border-t border-t-emerald-500/30"
+                                onClick={() => router.push(`/admin/cases/s3-update/${row.id}`)}
                               >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                      {filteredTasks.map((task) => {
+                                <TableCell className="font-medium">{row.file_name}</TableCell>
+                                <TableCell className="text-center">
+                                  <span className="inline-block w-2 h-2 rounded-full bg-emerald-500/80 shrink-0" aria-label="S3 연결됨" />
+                                </TableCell>
+                                <TableCell>
+                                  <Badge className="bg-emerald-500/15 text-emerald-700 font-normal border border-emerald-500/40">연결된 업무 있음</Badge>
+                                </TableCell>
+                                <TableCell>-</TableCell>
+                                <TableCell>미지정</TableCell>
+                                <TableCell>
+                                  <div className="inline-flex items-center px-2 text-muted-foreground" aria-label="첨부 있음">
+                                    <Paperclip className="h-4 w-4" />
+                                  </div>
+                                </TableCell>
+                                <TableCell>-</TableCell>
+                                <TableCell className="text-sm text-muted-foreground">
+                                  {formatDate(row.upload_time || row.created_at)}
+                                </TableCell>
+                                <TableCell className="text-sm text-muted-foreground">-</TableCell>
+                                <TableCell onClick={(e) => e.stopPropagation()}>
+                                  {(me?.role === "admin" || me?.role === "staff") && (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={(e) => handleDeleteS3Update(String(row.id), e)}
+                                      className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                      title="S3 업무 삭제"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                              <TableRow
+                                key={`task-${task.id}`}
+                                className={`cursor-pointer hover:bg-accent/50 bg-emerald-500/[0.06] border-l-4 border-l-emerald-500/30 ${expired ? "bg-red-500/5" : ""}`}
+                                onClick={() => router.push(`/admin/cases/${task.id}`)}
+                              >
+                                <TableCell className="font-medium pl-10">
+                                  <span className="text-emerald-600/90 font-mono mr-2" aria-hidden>ㄴ</span>
+                                  {task.title}
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <span className="inline-block w-2 h-2 rounded-full bg-emerald-500/80 shrink-0" aria-label="S3 연결" />
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant={task.is_multi_assign ? "secondary" : "outline"} className="font-normal">
+                                    {task.is_multi_assign ? "공동" : "개별"}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>{task.assigned_by_name || task.assigned_by_email || "Unknown"}</TableCell>
+                                <TableCell>{task.assigned_to_name || task.assigned_to_email || "Unknown"}</TableCell>
+                                <TableCell>
+                                  {task.has_any_attachment ?? ((task.file_keys?.length ?? 0) + (task.comment_file_keys?.length ?? 0) > 0) ? (
+                                    <div className="inline-flex items-center px-2 text-muted-foreground" aria-label="첨부파일 있음" title="첨부파일 있음">
+                                      <Paperclip className="h-4 w-4" />
+                                    </div>
+                                  ) : (
+                                    <span className="text-muted-foreground text-sm">&nbsp;</span>
+                                  )}
+                                </TableCell>
+                                <TableCell>{getPriorityBadge(task.priority)}</TableCell>
+                                <TableCell className="text-sm text-muted-foreground">{formatDate(task.created_at)}</TableCell>
+                                <TableCell className={`text-sm ${expired ? "text-red-600 font-medium" : "text-muted-foreground"}`}>
+                                  {task.due_date ? formatDate(task.due_date) : "-"}
+                                </TableCell>
+                                <TableCell onClick={(e) => e.stopPropagation()}>
+                                  {(me?.id === task.assigned_by || me?.role === "admin" || me?.role === "staff") && (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={(e) => handleDeleteTask(task.id, e)}
+                                      className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                      title="작업 삭제"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            </Fragment>
+                          )
+                        }
+                        const task = entry.task
                         const expired = isTaskExpired(task)
                         return (
                           <TableRow
@@ -535,11 +673,7 @@ export default function WorklistPage() {
                           >
                             <TableCell className="font-medium">{task.title}</TableCell>
                             <TableCell className="text-center">
-                              {taskIdsFromS3.has(task.id) ? (
-                                <span className="inline-block w-2 h-2 rounded-full bg-amber-500/80 shrink-0" aria-label="S3" />
-                              ) : (
-                                <span className="text-muted-foreground">-</span>
-                              )}
+                              <span className="text-muted-foreground">-</span>
                             </TableCell>
                             <TableCell>
                               <Badge variant={task.is_multi_assign ? "secondary" : "outline"} className="font-normal">
@@ -550,11 +684,7 @@ export default function WorklistPage() {
                             <TableCell>{task.assigned_to_name || task.assigned_to_email || "Unknown"}</TableCell>
                             <TableCell>
                               {task.has_any_attachment ?? ((task.file_keys?.length ?? 0) + (task.comment_file_keys?.length ?? 0) > 0) ? (
-                                <div
-                                  className="inline-flex items-center px-2 text-muted-foreground"
-                                  aria-label="첨부파일 있음"
-                                  title="첨부파일 있음"
-                                >
+                                <div className="inline-flex items-center px-2 text-muted-foreground" aria-label="첨부파일 있음" title="첨부파일 있음">
                                   <Paperclip className="h-4 w-4" />
                                 </div>
                               ) : (
@@ -566,7 +696,7 @@ export default function WorklistPage() {
                             <TableCell className={`text-sm ${expired ? "text-red-600 font-medium" : "text-muted-foreground"}`}>
                               {task.due_date ? formatDate(task.due_date) : "-"}
                             </TableCell>
-                            <TableCell>
+                            <TableCell onClick={(e) => e.stopPropagation()}>
                               {(me?.id === task.assigned_by || me?.role === "admin" || me?.role === "staff") && (
                                 <Button
                                   variant="ghost"

@@ -946,6 +946,14 @@ export async function DELETE(
       }
     }
     
+    // 5.5. 이 task에 연결된 s3_updates 해제: task_id NULL, status pending (FK ON DELETE SET NULL도 있지만 명시적으로 처리)
+    try {
+      await query("UPDATE s3_updates SET task_id = NULL, status = 'pending' WHERE task_id = ?", [taskId])
+    } catch (error: any) {
+      if (error.code !== 'ER_BAD_FIELD_ERROR') throw error
+      // status 컬럼 없으면 무시
+    }
+    
     // 6. 메인 Task 삭제
     await query("DELETE FROM task_assignments WHERE id = ?", [taskId])
 

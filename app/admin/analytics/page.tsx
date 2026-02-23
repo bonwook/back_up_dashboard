@@ -811,6 +811,7 @@ export default function ClientAnalyticsPage() {
                     value={currentSubtitle}
                     onChange={(e) => setCurrentSubtitle(e.target.value)}
                     placeholder="공동업무의 부제를 입력하세요"
+                    className="focus-visible:ring-0 focus-visible:border-input"
                   />
                     <Label htmlFor="assign-content-multi" className="text-base font-semibold sr-only">공동업무 내용 입력</Label>
                     <div className="border rounded-xl overflow-hidden bg-background" style={{
