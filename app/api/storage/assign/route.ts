@@ -76,7 +76,8 @@ export async function POST(request: NextRequest) {
           const extraKeys = (Array.isArray(fileKeys) ? fileKeys : [])
             .filter((k) => typeof k === "string" && k.trim())
             .filter((k) => k !== s3Key)
-          fileKeysForTask = [s3Key, ...extraKeys]
+          // presigned(s3_update) 파일은 task file_keys/첨부 목록에 넣지 않음 → 버킷 카드 다운로드로만 제공
+          fileKeysForTask = extraKeys
         }
 
         // 해당 S3 건에 이미 연결된 task가 있으면 새로 만들지 않고 그 task 수정

@@ -219,10 +219,13 @@ export async function GET(
             }
           }
         }
+        // s3_update(presigned) 파일은 요청자 첨부 목록에서 제외 → 버킷 카드 다운로드로만 제공
+        const s3Key = s3Update && typeof (s3Update as { s3_key?: string }).s3_key === "string" ? (s3Update as { s3_key: string }).s3_key : null
+        const filteredFileKeys = s3Key ? fileKeysWithDates.filter((f) => f.key !== s3Key) : fileKeysWithDates
         return NextResponse.json({
           task: {
             ...task,
-            file_keys: fileKeysWithDates,
+            file_keys: filteredFileKeys,
             comment_file_keys: commentFileKeysWithDates,
             shared_with: [],
           },
