@@ -5,6 +5,7 @@ import { NoSuchKey } from "@aws-sdk/client-s3"
 import { Readable } from "node:stream"
 import { isValidS3Key } from "@/lib/utils/filename"
 import { s3Client } from "@/lib/aws/s3"
+import { query } from "@/lib/db/mysql"
 
 const BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME!
 
@@ -38,7 +39,44 @@ export async function GET(request: NextRequest) {
       !key.includes("../") &&
       !key.includes("..\\")
 
-    if (!isTempAttachment && !isValidS3Key(key, userId)) {
+    let mayDownload = isTempAttachment || isValidS3Key(key, userId)
+
+    // 본인 키가 아닌 경우: task_file_attachments에 있고, 해당 task에 접근 가능하면 허용 (client 세션에서 요청자 첨부 다운로드)
+    if (!mayDownload) {
+      try {
+        const rows = await query(
+          `SELECT tfa.task_id
+           FROM task_file_attachments tfa
+           INNER JOIN task_assignments ta ON ta.id = tfa.task_id
+           WHERE tfa.s3_key = ?
+           LIMIT 1`,
+          [key]
+        )
+        if (rows && rows.length > 0) {
+          const taskId = (rows[0] as { task_id: string }).task_id
+          const roleRows = await query(`SELECT role FROM profiles WHERE id = ?`, [userId])
+          const role = roleRows?.[0] ? (roleRows[0] as { role: string }).role : null
+          if (role === "admin" || role === "staff") {
+            mayDownload = true
+          } else {
+            const accessRows = await query(
+              `SELECT 1 FROM task_assignments WHERE id = ? AND (assigned_to = ? OR assigned_by = ?)
+               UNION
+               SELECT 1 FROM task_subtasks WHERE task_id = ? AND assigned_to = ?
+               LIMIT 1`,
+              [taskId, userId, userId, taskId, userId]
+            )
+            if (accessRows && accessRows.length > 0) {
+              mayDownload = true
+            }
+          }
+        }
+      } catch {
+        // DB 조회 실패 시 기존 권한만 유지
+      }
+    }
+
+    if (!mayDownload) {
       return NextResponse.json({ error: "권한이 없습니다" }, { status: 403 })
     }
 
