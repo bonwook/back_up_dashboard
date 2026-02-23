@@ -294,7 +294,7 @@ export function SlicePanel({
   }, [])
 
   const handleWheel = useCallback(
-    (e: React.WheelEvent) => {
+    (e: WheelEvent) => {
       if (!interactive) return
       e.preventDefault()
       if (e.ctrlKey || e.metaKey) {
@@ -307,6 +307,13 @@ export function SlicePanel({
     [interactive, onSliceIndexChange]
   )
 
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    el.addEventListener("wheel", handleWheel, { passive: false })
+    return () => el.removeEventListener("wheel", handleWheel)
+  }, [handleWheel])
+
   return (
     <div className={cn("flex flex-1 flex-col min-h-0", className)}>
       <div
@@ -315,7 +322,6 @@ export function SlicePanel({
           "relative flex flex-1 min-h-0 overflow-auto rounded border bg-black flex items-center justify-center",
           focused && "ring-2 ring-primary"
         )}
-        onWheel={handleWheel}
         style={{ cursor: interactive ? (isPanning ? "grabbing" : "crosshair") : "default" }}
         onClick={interactive ? onFocus : undefined}
       >
