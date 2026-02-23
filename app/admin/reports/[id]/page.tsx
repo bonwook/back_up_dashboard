@@ -1,305 +1,186 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import Link from "next/link"
-import { ArrowLeft, FileText, MessageSquare } from "lucide-react"
-import { redirect } from "next/navigation"
-import { SafeHtml } from "@/components/safe-html"
-import { getCurrentUser } from "@/lib/auth"
-import { query, queryOne } from "@/lib/db/mysql"
-import { extractFileName } from "@/lib/utils/fileKeyHelpers"
+"use client"
 
-function parseFileKeys(val: unknown): string[] {
-  if (Array.isArray(val)) return val.filter((k): k is string => typeof k === "string")
-  if (typeof val === "string") {
+import { useState, useCallback, useEffect } from "react"
+import Link from "next/link"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { ReportFormSection } from "../components/ReportFormSection"
+import { ExportSection } from "../components/ExportSection"
+import { reportFormSections, getFieldLabelById } from "../reportFormFields"
+import type { FormValues } from "../types"
+import { FileText, FileDown, ArrowLeft, Loader2, Save } from "lucide-react"
+import { useParams } from "next/navigation"
+import { useToast } from "@/hooks/use-toast"
+
+export default function ReportFormPage() {
+  const params = useParams()
+  const taskId = params.id as string
+  const { toast } = useToast()
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [formValues, setFormValues] = useState<FormValues>({})
+  const [caseId, setCaseId] = useState<string>(taskId)
+  const [taskTitle, setTaskTitle] = useState<string>("")
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  const onSelectChange = useCallback((id: string, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }, [])
+
+  const onValueChange = useCallback((id: string, value: string | number | undefined) => {
+    setFormValues((prev) => ({ ...prev, [id]: value }))
+  }, [])
+
+  const onSelectAllInSection = useCallback((sectionId: string, checked: boolean) => {
+    const section = reportFormSections.find((s) => s.id === sectionId)
+    if (!section) return
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      for (const f of section.fields) {
+        if (checked) next.add(f.id)
+        else next.delete(f.id)
+      }
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      const [reportRes, tasksRes] = await Promise.all([
+        fetch(`/api/reports/info?task_id=${encodeURIComponent(taskId)}`, { credentials: "include" }),
+        fetch("/api/reports", { credentials: "include" }),
+      ])
+      if (cancelled) return
+      if (reportRes.ok) {
+        const infoData = await reportRes.json()
+        if (infoData.row) {
+          setFormValues((infoData.row.form_data as FormValues) || {})
+          setCaseId(infoData.row.case_id || taskId)
+        }
+      }
+      if (tasksRes.ok) {
+        const listData = await tasksRes.json()
+        const task = (listData.reports || []).find((r: any) => r.id === taskId)
+        if (task) setTaskTitle(task.patient_name ?? task.title ?? "")
+      }
+      setLoading(false)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [taskId])
+
+  const handleSave = async () => {
+    setSaving(true)
     try {
-      const arr = JSON.parse(val)
-      return Array.isArray(arr) ? arr.filter((k: unknown): k is string => typeof k === "string") : []
-    } catch {
-      return []
+      const res = await fetch("/api/reports/info", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          task_id: taskId,
+          case_id: caseId,
+          form_data: formValues,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { error?: string }).error || "저장 실패")
+      }
+      toast({ title: "저장됨", description: "리포트가 저장되었습니다." })
+    } catch (e) {
+      toast({
+        title: "저장 실패",
+        description: e instanceof Error ? e.message : "다시 시도해 주세요.",
+        variant: "destructive",
+      })
+    } finally {
+      setSaving(false)
     }
   }
-  return []
-}
 
-export default async function ReportViewPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params
-  const me = await getCurrentUser()
-  if (!me) redirect("/auth/login")
-  if (me.role !== "admin" && me.role !== "staff") redirect("/admin")
-
-  const task = await queryOne<any>(
-    `
-      SELECT
-        ta.id,
-        ta.title,
-        ta.description,
-        ta.content,
-        ta.file_keys,
-        ta.comment_file_keys,
-        ta.completed_at,
-        ta.assigned_by,
-        ta.assigned_to,
-        COALESCE(r.report_html, ta.report_html) as report_html,
-        r.staff_comments,
-        r.client_comments,
-        p_by.full_name as assigned_by_name,
-        p_by.email as assigned_by_email,
-        p_to.full_name as assigned_to_name,
-        p_to.email as assigned_to_email
-      FROM task_assignments ta
-      LEFT JOIN reports r ON r.case_id = ta.id
-      LEFT JOIN profiles p_by ON ta.assigned_by = p_by.id
-      LEFT JOIN profiles p_to ON ta.assigned_to = p_to.id
-      WHERE ta.id = ?
-        AND ta.status = 'completed'
-      LIMIT 1
-    `,
-    [id],
+  const selectedIdsOrdered = reportFormSections.flatMap((s) =>
+    s.fields.filter((f) => selectedIds.has(f.id)).map((f) => f.id)
   )
+  const selectedLabels = selectedIdsOrdered.map(getFieldLabelById)
 
-  if (!task) {
-    redirect("/admin/reports")
-  }
-
-  const subtasks = await query<any>(
-    `
-      SELECT
-        ts.id,
-        ts.subtitle,
-        ts.content,
-        ts.assigned_to,
-        ts.created_at,
-        p.full_name as assigned_to_name,
-        p.email as assigned_to_email
-      FROM task_subtasks ts
-      LEFT JOIN profiles p ON ts.assigned_to = p.id
-      WHERE ts.task_id = ?
-      ORDER BY ts.subtitle ASC, ts.created_at ASC, ts.id ASC
-    `,
-    [id],
-  )
-
-  let comments: Array<{ id: string; content: string; created_at: string; full_name: string | null }> = []
-  try {
-    const rows = await query<any>(
-      `SELECT c.id, c.content, c.created_at, p.full_name
-       FROM task_comments c
-       LEFT JOIN profiles p ON c.user_id = p.id
-       WHERE c.task_id = ?
-       ORDER BY c.created_at ASC`,
-      [id],
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-6xl p-6 flex items-center justify-center min-h-[200px]">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
     )
-    comments = rows || []
-  } catch {
-    // task_comments 테이블 없을 수 있음
   }
-
-  const fileKeys = parseFileKeys(task.file_keys)
-  const commentFileKeys = parseFileKeys(task.comment_file_keys)
-
-  const requesterName = task.assigned_by_name || task.assigned_by_email || "요청자"
-  const isMultiAssign = Array.isArray(subtasks) && subtasks.length > 0
-
-  // 공동업무: 부제(subtitle)별 그룹 → 각 그룹당 요청자 내용 1개 + 담당자들 내용 순서대로
-  type SubtitleGroup = { subtitle: string; requesterBlock: any | null; assigneeBlocks: any[] }
-  const subtitleGroups: SubtitleGroup[] = isMultiAssign
-    ? (() => {
-        const bySubtitle = new Map<string, any[]>()
-        for (const st of subtasks) {
-          const key = st.subtitle ?? ""
-          if (!bySubtitle.has(key)) bySubtitle.set(key, [])
-          bySubtitle.get(key)!.push(st)
-        }
-        const groups: SubtitleGroup[] = []
-        for (const [subtitle, list] of bySubtitle.entries()) {
-          const requesterBlock = list.find((st: any) => st.assigned_to === task.assigned_by) ?? null
-          const assigneeBlocks = list.filter((st: any) => st.assigned_to !== task.assigned_by)
-          groups.push({ subtitle, requesterBlock, assigneeBlocks })
-        }
-        return groups.sort((a, b) => (a.subtitle || "").localeCompare(b.subtitle || ""))
-      })()
-    : []
 
   return (
-    <div className="mx-auto max-w-7xl p-6">
-      <div className="mb-6">
-        <Button variant="ghost" asChild>
+    <div className="mx-auto max-w-6xl p-6">
+      <div className="mb-4 flex items-center justify-between">
+        <Button variant="ghost" size="sm" asChild>
           <Link href="/admin/reports">
             <ArrowLeft className="mr-2 h-4 w-4" />
             목록으로
           </Link>
         </Button>
+        <Button size="sm" onClick={handleSave} disabled={saving}>
+          {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+          저장
+        </Button>
       </div>
 
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle>Report 상세</CardTitle>
-          <CardDescription>
-            업무: {task.title}
-            {task.completed_at && (
-              <span className="ml-2 text-muted-foreground">
-                완료: {new Date(task.completed_at).toLocaleDateString("ko-KR")}
-              </span>
-            )}
-          </CardDescription>
-        </CardHeader>
-      </Card>
+      <div className="mb-4">
+        <h1 className="text-xl font-bold">{taskTitle || "의료 리포트 폼"}</h1>
+        <p className="text-muted-foreground text-sm mt-0.5 flex items-center gap-4">
+          <span>태스크 ID: {taskId}</span>
+          <span className="flex items-center gap-2">
+            그룹 ID (case_id):
+            <Input
+              value={caseId}
+              onChange={(e) => setCaseId(e.target.value)}
+              className="h-8 text-sm w-48"
+              placeholder="같은 케이스면 동일 값"
+            />
+          </span>
+        </p>
+      </div>
 
-      {/* 개인 업무: 요청자 1블록 → 담당자 1블록 */}
-      {!isMultiAssign && (
-        <>
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle className="text-lg">{requesterName} 내용</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {task.description && String(task.description).trim() ? (
-                <div className="text-sm text-muted-foreground whitespace-pre-wrap rounded-md bg-muted/50 p-3">
-                  {String(task.description)}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">내용 없음</p>
-              )}
-            </CardContent>
-          </Card>
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle className="text-lg">담당자 내용</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {task.content && String(task.content).trim() ? (
-                <div className="prose prose-sm max-w-none dark:prose-invert">
-                  <SafeHtml html={String(task.content)} className="prose prose-sm max-w-none dark:prose-invert" />
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">내용 없음</p>
-              )}
-            </CardContent>
-          </Card>
-        </>
-      )}
+      <Tabs defaultValue="form" className="space-y-4">
+        <TabsList className="grid w-full max-w-md grid-cols-2 h-9">
+          <TabsTrigger value="form" className="flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            리포트 폼
+          </TabsTrigger>
+          <TabsTrigger value="export" className="flex items-center gap-2">
+            <FileDown className="h-4 w-4" />
+            내보내기
+          </TabsTrigger>
+        </TabsList>
 
-      {/* 공동업무: 부제별 [요청자 1블록 + 담당자들 순서대로] */}
-      {isMultiAssign &&
-        subtitleGroups.map((group) => (
-          <div key={group.subtitle} className="mb-6 space-y-4">
-            <h3 className="text-base font-semibold text-muted-foreground border-b pb-1">
-              부제: {group.subtitle || "(없음)"}
-            </h3>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">{requesterName} 내용</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {group.requesterBlock?.content && String(group.requesterBlock.content).trim() ? (
-                  <div className="prose prose-sm max-w-none dark:prose-invert">
-                    <SafeHtml
-                      html={String(group.requesterBlock.content)}
-                      className="prose prose-sm max-w-none dark:prose-invert"
-                    />
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">내용 없음</p>
-                )}
-              </CardContent>
-            </Card>
-            {group.assigneeBlocks.map((st: any) => (
-              <Card key={st.id}>
-                <CardHeader>
-                  <CardTitle className="text-lg">
-                    담당자: {st.assigned_to_name || st.assigned_to_email || "담당자"}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {st.content && String(st.content).trim() ? (
-                    <div className="prose prose-sm max-w-none dark:prose-invert">
-                      <SafeHtml html={String(st.content)} className="prose prose-sm max-w-none dark:prose-invert" />
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">내용 없음</p>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        ))}
+        <TabsContent value="form" className="mt-3">
+          <ReportFormSection
+            selectedIds={selectedIds}
+            onSelectChange={onSelectChange}
+            formValues={formValues}
+            onValueChange={onValueChange}
+            onSelectAllInSection={onSelectAllInSection}
+          />
+        </TabsContent>
 
-      {/* 첨부파일 */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <FileText className="h-5 w-5" />
-            첨부파일
-          </CardTitle>
-          <CardDescription>
-            요청자 첨부 {fileKeys.length}개 · 담당자 등록 {commentFileKeys.length}개
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {fileKeys.length === 0 && commentFileKeys.length === 0 ? (
-            <p className="text-sm text-muted-foreground">첨부파일 없음</p>
-          ) : (
-            <ul className="space-y-2">
-              {fileKeys.length > 0 && (
-                <li className="text-sm font-medium text-muted-foreground">요청자 첨부</li>
-              )}
-              {fileKeys.map((key: string, i: number) => (
-                <li key={`f-${i}`}>
-                  <Link
-                    href={`/api/storage/download?key=${encodeURIComponent(key)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-primary hover:underline"
-                  >
-                    {extractFileName(key, `파일 ${i + 1}`)}
-                  </Link>
-                </li>
-              ))}
-              {commentFileKeys.length > 0 && (
-                <li className="text-sm font-medium text-muted-foreground mt-3">담당자 등록</li>
-              )}
-              {commentFileKeys.map((key: string, i: number) => (
-                <li key={`c-${i}`}>
-                  <Link
-                    href={`/api/storage/download?key=${encodeURIComponent(key)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-primary hover:underline"
-                  >
-                    {extractFileName(key, `파일 ${i + 1}`)}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* 댓글 */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <MessageSquare className="h-5 w-5" />
-            댓글
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {comments.length === 0 ? (
-            <p className="text-sm text-muted-foreground">댓글 없음</p>
-          ) : (
-            <ul className="space-y-3">
-              {comments.map((c) => (
-                <li key={c.id} className="border-l-2 border-muted pl-3 py-1">
-                  <p className="text-xs text-muted-foreground">
-                    {c.full_name || "알 수 없음"} · {new Date(c.created_at).toLocaleString("ko-KR")}
-                  </p>
-                  <p className="text-sm whitespace-pre-wrap mt-0.5">{c.content}</p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+        <TabsContent value="export" className="mt-3">
+          <ExportSection
+            selectedIds={selectedIdsOrdered}
+            selectedLabels={selectedLabels}
+            formValues={formValues}
+            importedData={null}
+          />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
