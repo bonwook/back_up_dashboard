@@ -122,15 +122,19 @@ export function AdminNav({ user }: AdminNavProps) {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" asChild>
-            <Link href="https://15.164.184.250/" target="_blank" rel="noopener noreferrer">
-              <Box className="mr-2 h-4 w-4" />
-              Streamliner
-            </Link>
-          </Button>
-          <div className="h-6 w-px bg-border" />
+          {user.role === "admin" && (
+            <>
+              <Button variant="ghost" size="sm" asChild>
+                <Link href="https://15.164.184.250/" target="_blank" rel="noopener noreferrer">
+                  <Box className="mr-2 h-4 w-4" />
+                  Streamliner
+                </Link>
+              </Button>
+              <div className="h-6 w-px bg-border" />
+            </>
+          )}
           <p className="text-sm font-medium whitespace-nowrap max-w-[200px] truncate">
-            환영합니다 {user.full_name || "Staff"}님
+            {user.full_name || "Staff"}님
           </p>
           <Button
             variant="ghost"
