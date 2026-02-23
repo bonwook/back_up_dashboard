@@ -39,6 +39,7 @@ import { calculateFileExpiry, formatDateShort } from "@/lib/utils/dateHelpers"
 import { downloadWithProgress } from "@/lib/utils/download-with-progress"
 import { TaskCommentSection } from "./TaskCommentSection"
 import { DueDateEditor } from "./DueDateEditor"
+import { S3BucketInfoCard } from "@/components/s3-bucket-info-card"
 
 export interface TaskDetailTask {
   id: string
@@ -175,6 +176,16 @@ export function TaskDetailDialog({
   const [downloadingFileName, setDownloadingFileName] = useState("")
   /** 캘린더 등에서 열 때 상세(comment, comment_file_keys 등) 로드용 */
   const [fullTask, setFullTask] = useState<TaskDetailTask | null>(null)
+  /** task에 연결된 s3_update (있으면 버킷 정보 카드 표시) */
+  const [s3Update, setS3Update] = useState<{
+    id: number
+    file_name: string
+    bucket_name?: string | null
+    file_size?: number | null
+    upload_time?: string | null
+    created_at: string
+    s3_key: string
+  } | null>(null)
 
   const mainTaskId = task ? (task.parent_task_id ?? task.task_id ?? task.id) : null
   const displayTask: TaskDetailTask | null = task
@@ -188,6 +199,7 @@ export function TaskDetailDialog({
   useEffect(() => {
     if (!open || !mainTaskId) {
       setFullTask(null)
+      setS3Update(null)
       return
     }
     let cancelled = false
@@ -201,6 +213,8 @@ export function TaskDetailDialog({
           file_keys: normalizeFileKeys(t.file_keys),
           comment_file_keys: normalizeFileKeys(t.comment_file_keys),
         })
+        if (data.s3Update) setS3Update(data.s3Update)
+        else setS3Update(null)
       })
       .catch(() => {})
     return () => {
@@ -487,6 +501,10 @@ export function TaskDetailDialog({
             )}
           </div>
         </DialogHeader>
+
+        {s3Update && (
+          <S3BucketInfoCard s3Update={s3Update} compact />
+        )}
 
         <div className="flex items-center justify-between gap-4 pb-4">
           <div className="flex items-center gap-2 flex-wrap">

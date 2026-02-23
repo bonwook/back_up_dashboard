@@ -24,6 +24,7 @@ import { calculateFileExpiry, formatDateShort, parseDateOnly } from "@/lib/utils
 import { Task, TaskStatus, ResolvedFileKey, S3UpdateInfo } from "./types"
 import { TaskBlock } from "./components/TaskBoard/TaskBlock"
 import { TaskCommentSection, TaskDetailDialog, normalizeFileKeys } from "@/components/task"
+import { S3BucketInfoCard } from "@/components/s3-bucket-info-card"
 import { useWorkEditor } from "./hooks/useWorkEditor"
 import { useCommentEditor } from "./hooks/useCommentEditor"
 import { safeStorage } from "@/lib/utils/safeStorage"
@@ -726,41 +727,20 @@ export default function ClientProgressPage() {
                       </div>
                     )
                   })()}
-                  {/* S3 출처 업무일 때 버킷 정보 카드 (task 블록 안) */}
-                  {workTaskS3Update && (
-                    <Card className="bg-muted/30">
-                      <CardHeader className="py-3 px-4">
-                        <CardTitle className="text-base">버킷 정보</CardTitle>
-                      </CardHeader>
-                      <CardContent className="py-0 px-4 pb-4 space-y-1.5 text-sm">
-                        <div>
-                          <span className="text-xs font-medium text-muted-foreground">파일명</span>
-                          <p className="font-medium break-all">{workTaskS3Update.file_name}</p>
-                        </div>
-                        {workTaskS3Update.bucket_name && (
-                          <div>
-                            <span className="text-xs font-medium text-muted-foreground">버킷/경로</span>
-                            <p className="break-all text-muted-foreground">{workTaskS3Update.bucket_name}</p>
-                          </div>
-                        )}
-                        <div>
-                          <span className="text-xs font-medium text-muted-foreground">S3 객체 키</span>
-                          <p className="break-all text-muted-foreground truncate max-w-full" title={workTaskS3Update.s3_key}>{workTaskS3Update.s3_key}</p>
-                        </div>
-                        {(workTaskS3Update.file_size != null && workTaskS3Update.file_size > 0) && (
-                          <div>
-                            <span className="text-xs font-medium text-muted-foreground">파일 크기</span>
-                            <p>{(() => {
-                              const b = workTaskS3Update.file_size!
-                              const k = 1024
-                              const sizes = ["B", "KB", "MB", "GB"]
-                              const i = Math.min(Math.floor(Math.log(b) / Math.log(k)), sizes.length - 1)
-                              return `${Number((b / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`
-                            })()}</p>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
+                  {/* S3 출처 업무일 때 버킷 정보 카드 + presigned 다운로드 */}
+                  {workTaskS3Update && workTaskS3Update.id != null && (
+                    <S3BucketInfoCard
+                      s3Update={{
+                        id: Number(workTaskS3Update.id),
+                        file_name: workTaskS3Update.file_name,
+                        bucket_name: workTaskS3Update.bucket_name,
+                        file_size: workTaskS3Update.file_size,
+                        upload_time: workTaskS3Update.upload_time ?? null,
+                        created_at: workTaskS3Update.created_at ?? "",
+                        s3_key: workTaskS3Update.s3_key,
+                      }}
+                      compact
+                    />
                   )}
                 {/* 제목을 comment와 동일한 너비로 설정 */}
                 <div className="grid grid-cols-2 gap-4 min-w-0 max-w-full">

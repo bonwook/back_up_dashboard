@@ -72,7 +72,11 @@ export async function POST(request: NextRequest) {
         )
         if (row) {
           const r = row as { file_name: string; bucket_name?: string | null }
-          fileKeysForTask = [toS3Key(r)]
+          const s3Key = toS3Key(r)
+          const extraKeys = (Array.isArray(fileKeys) ? fileKeys : [])
+            .filter((k) => typeof k === "string" && k.trim())
+            .filter((k) => k !== s3Key)
+          fileKeysForTask = [s3Key, ...extraKeys]
         }
 
         // 해당 S3 건에 이미 연결된 task가 있으면 새로 만들지 않고 그 task 수정

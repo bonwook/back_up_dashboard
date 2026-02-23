@@ -25,6 +25,7 @@ import { calculateFileExpiry, formatDateShort, parseDateOnly } from "@/lib/utils
 import { Task, TaskStatus, ResolvedFileKey } from "./types"
 import TaskBlock from "./components/TaskBoard/TaskBlock"
 import { TaskCommentSection, TaskDetailDialog, normalizeFileKeys } from "@/components/task"
+import { S3BucketInfoCard } from "@/components/s3-bucket-info-card"
 import { useWorkEditor } from "./hooks/useWorkEditor"
 import { useCommentEditor } from "./hooks/useCommentEditor"
 import { safeStorage } from "@/lib/utils/safeStorage"
@@ -80,10 +81,42 @@ export default function AdminProgressPage() {
   // 작업공간 마감일 수정 팝오버 (undefined=서버 값 그대로, null=해제 선택, Date=선택한 날짜)
   const [workDueDatePopoverOpen, setWorkDueDatePopoverOpen] = useState(false)
   const [workDueDatePickerValue, setWorkDueDatePickerValue] = useState<Date | null | undefined>(undefined)
+  /** 작업공간에 표시 중인 task에 연결된 s3_update (버킷 카드 표시용) */
+  const [workAreaS3Update, setWorkAreaS3Update] = useState<{
+    id: number
+    file_name: string
+    bucket_name?: string | null
+    file_size?: number | null
+    upload_time?: string | null
+    created_at: string
+    s3_key: string
+  } | null>(null)
 
   // 작업 변경 시 마감일 선택 초기화
   useEffect(() => {
     setWorkDueDatePickerValue(undefined)
+  }, [workTaskId])
+
+  // 작업공간 task에 연결된 s3_update 로드 (버킷 카드 표시)
+  useEffect(() => {
+    if (!workTaskId) {
+      setWorkAreaS3Update(null)
+      return
+    }
+    let cancelled = false
+    fetch(`/api/tasks/${workTaskId}`, { credentials: "include" })
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (cancelled) return
+        if (data?.s3Update) setWorkAreaS3Update(data.s3Update)
+        else setWorkAreaS3Update(null)
+      })
+      .catch(() => {
+        if (!cancelled) setWorkAreaS3Update(null)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [workTaskId])
 
   // contentEditable 초기값 설정
@@ -134,6 +167,7 @@ export default function AdminProgressPage() {
   const clearWorkArea = useCallback((taskId?: string) => {
     // 작업공간 상태 초기화
     setWorkTaskId(null)
+    setWorkAreaS3Update(null)
     setWorkDueDatePopoverOpen(false)
     setIsWorkAreaReadOnly(false)
     setWorkForm({ title: "", content: "", priority: "medium" })
@@ -817,6 +851,9 @@ export default function AdminProgressPage() {
                   </div>
                 ) : (
                   <>
+                  {workAreaS3Update && (
+                    <S3BucketInfoCard s3Update={workAreaS3Update} compact />
+                  )}
                   {/* 개별/공동 업무 표시 */}
                   {(() => {
                     const currentTask = tasks.find(t => t.id === workTaskId)

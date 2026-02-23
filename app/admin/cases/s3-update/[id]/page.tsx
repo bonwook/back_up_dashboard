@@ -1,14 +1,23 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Loader2, Download, RefreshCw } from "lucide-react"
+import { ArrowLeft, Loader2, RefreshCw } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Checkbox } from "@/components/ui/checkbox"
 import { TaskRegistrationForm } from "@/app/admin/analytics/components/TaskRegistrationForm"
+import { S3BucketInfoCard } from "@/components/s3-bucket-info-card"
+import {
+  getFileType,
+  getFileTypeIcon,
+  formatFileSize,
+  updateDisplayedFiles,
+  getDisplayPath,
+} from "@/app/admin/analytics/utils/fileUtils"
+import type { S3File } from "@/app/admin/analytics/types"
 
 interface S3Update {
   id: number
@@ -22,14 +31,6 @@ interface S3Update {
   s3_key: string
 }
 
-function formatBytes(bytes: number | null | undefined): string {
-  if (bytes == null || bytes === 0) return "-"
-  const k = 1024
-  const sizes = ["B", "KB", "MB", "GB"]
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${Number((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`
-}
-
 export default function S3UpdateDetailPage({
   params,
 }: {
@@ -37,14 +38,40 @@ export default function S3UpdateDetailPage({
 }) {
   const [s3Update, setS3Update] = useState<S3Update | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [isGettingUrl, setIsGettingUrl] = useState(false)
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
-  const [downloadExpiresAt, setDownloadExpiresAt] = useState<number | null>(null)
   const [id, setId] = useState<string | null>(null)
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set())
   const [isRefreshingFileList, setIsRefreshingFileList] = useState(false)
   const router = useRouter()
   const { toast } = useToast()
+
+  // 현재 세션 S3 파일 목록 (presigned 파일은 목록에 없음, 버킷 카드에서만 다운로드)
+  const [user, setUser] = useState<{ id: string } | null>(null)
+  const [allFiles, setAllFiles] = useState<S3File[]>([])
+  const [files, setFiles] = useState<S3File[]>([])
+  const [currentPath, setCurrentPath] = useState<string>("")
+  const [isLoadingSessionFiles, setIsLoadingSessionFiles] = useState(false)
+
+  const s3Key = s3Update?.s3_key ?? ""
+
+  const loadSessionFiles = useCallback(async () => {
+    setIsLoadingSessionFiles(true)
+    try {
+      const res = await fetch("/api/storage/files", { credentials: "include" })
+      if (!res.ok) throw new Error("파일 목록을 불러올 수 없습니다.")
+      const data = await res.json()
+      const list = data.files ?? []
+      setAllFiles(list)
+      updateDisplayedFiles(list, currentPath, setFiles)
+    } catch (e) {
+      toast({
+        title: "세션 파일 목록 로드 실패",
+        description: e instanceof Error ? e.message : "다시 시도해 주세요.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoadingSessionFiles(false)
+    }
+  }, [currentPath, toast])
 
   const refreshFileList = async () => {
     if (!id) return
@@ -55,7 +82,11 @@ export default function S3UpdateDetailPage({
       const data = await res.json()
       const loaded = data.s3Update as S3Update
       setS3Update(loaded)
-      if (loaded?.s3_key) setSelectedFiles(new Set([loaded.s3_key]))
+      setSelectedFiles((prev) => {
+        const next = new Set(prev)
+        if (loaded?.s3_key) next.add(loaded.s3_key)
+        return next
+      })
       toast({ title: "파일 목록을 새로고침했습니다." })
     } catch {
       toast({ title: "새로고침에 실패했습니다.", variant: "destructive" })
@@ -94,46 +125,68 @@ export default function S3UpdateDetailPage({
     load()
   }, [id, router])
 
-  // presigned URL은 다운로드 버튼 클릭 시에만 발급 (24시간 유효, 한 번만 발급)
-
-  const isDownloadExpired = downloadExpiresAt != null && Date.now() > downloadExpiresAt
-
-  const handleDownload = async () => {
-    if (!id) return
-    if (downloadUrl && !isDownloadExpired) {
-      window.open(downloadUrl, "_blank", "noopener,noreferrer")
-      return
-    }
-    setIsGettingUrl(true)
-    try {
-      const res = await fetch(`/api/s3-updates/${id}/presigned-url`, {
-        credentials: "include",
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error((err as { error?: string }).error || "다운로드 URL 생성 실패")
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const res = await fetch("/api/auth/me", { credentials: "include" })
+        if (res.ok) {
+          const me = await res.json()
+          setUser(me)
+        }
+      } catch {
+        // ignore
       }
-      const data = await res.json() as { url: string; expiresIn: number; fileName?: string }
-      setDownloadUrl(data.url)
-      setDownloadExpiresAt(Date.now() + data.expiresIn * 1000)
-      window.open(data.url, "_blank", "noopener,noreferrer")
-      toast({
-        title: "다운로드 링크 생성됨",
-        description: "24시간 유효한 링크가 새 탭에서 열립니다.",
-      })
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "다운로드 URL을 가져오지 못했습니다."
-      toast({
-        title: "다운로드 실패",
-        description: message,
-        variant: "destructive",
-      })
-    } finally {
-      setIsGettingUrl(false)
     }
+    loadUser()
+  }, [])
+
+  useEffect(() => {
+    if (user) loadSessionFiles()
+  }, [user, loadSessionFiles])
+
+  useEffect(() => {
+    if (allFiles.length > 0) {
+      updateDisplayedFiles(allFiles, currentPath, setFiles)
+    }
+  }, [currentPath, allFiles])
+
+  const handleFolderClick = (folderPath: string) => {
+    setCurrentPath(folderPath)
+    updateDisplayedFiles(allFiles, folderPath, setFiles)
   }
 
-  const displayDate = s3Update?.upload_time || s3Update?.created_at || ""
+  const handleGoUp = () => {
+    if (!currentPath) return
+    const pathParts = currentPath.split("/")
+    pathParts.pop()
+    const newPath = pathParts.join("/")
+    setCurrentPath(newPath)
+    updateDisplayedFiles(allFiles, newPath, setFiles)
+  }
+
+  const handleToggleFile = (fileKey: string, checked: boolean) => {
+    setSelectedFiles((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(fileKey)
+      else next.delete(fileKey)
+      if (s3Key && !next.has(s3Key)) next.add(s3Key)
+      return next
+    })
+  }
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      const allKeys = files.filter((f) => f.fileType !== "folder").map((f) => f.key)
+      setSelectedFiles((prev) => {
+        const next = new Set(prev)
+        allKeys.forEach((k) => next.add(k))
+        if (s3Key) next.add(s3Key)
+        return next
+      })
+    } else {
+      setSelectedFiles(s3Key ? new Set([s3Key]) : new Set())
+    }
+  }
 
   if (isLoading || !s3Update) {
     return (
@@ -154,36 +207,13 @@ export default function S3UpdateDetailPage({
         </Button>
       </div>
 
-      {/* 1. 버킷(S3) 관련 — 제목 옆 다운로드 버튼·설명 한 줄 */}
-      <Card className="mb-4">
-        <CardHeader className="py-2 px-4 space-y-0">
-          <div className="flex flex-row items-center gap-3 flex-wrap">
-            <CardTitle className="text-xl">버킷 정보</CardTitle>
-            <Button variant="outline" size="sm" onClick={handleDownload} disabled={isGettingUrl}>
-              {isGettingUrl ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-              {isDownloadExpired ? "새 링크 발급" : "다운로드 (24시간 유효 링크)"}
-            </Button>
-            <span className="text-xs text-muted-foreground">
-              {isDownloadExpired ? "만료됨 — 다시 클릭하여 새 링크를 발급받으세요." : "※ 링크는 24시간 후 만료됩니다."}
-            </span>
-          </div>
-          <div className="flex flex-row flex-wrap items-baseline gap-x-6 gap-y-1 text-sm mt-1.5">
-            <span><span className="text-xs font-medium text-muted-foreground">파일명</span> <span className="font-medium break-all">{s3Update.file_name}</span></span>
-            {s3Update.bucket_name && (
-              <span><span className="text-xs font-medium text-muted-foreground">버킷/경로</span> <span className="break-all text-muted-foreground">{s3Update.bucket_name}</span></span>
-            )}
-            <span className="min-w-0"><span className="text-xs font-medium text-muted-foreground">S3 객체 키</span> <span className="break-all text-muted-foreground truncate max-w-[200px] sm:max-w-none inline-block align-bottom" title={s3Update.s3_key}>{s3Update.s3_key}</span></span>
-            <span><span className="text-xs font-medium text-muted-foreground">파일 크기</span> <span>{formatBytes(s3Update.file_size)}</span></span>
-            <span><span className="text-xs font-medium text-muted-foreground">업로드일</span> <span>{displayDate ? new Date(displayDate).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-"}</span></span>
-          </div>
-        </CardHeader>
-      </Card>
+      {/* 1. 버킷(S3) — 다른 AWS 쪽 1건, 다운로드는 여기서만 */}
+      <S3BucketInfoCard s3Update={{ ...s3Update, s3_key: s3Key }} />
 
-      {/* 2. 업무 할당 */}
+      {/* 2. 업무 할당 + 현재 세션 S3 파일 목록 (presigned 파일은 목록에 없음) */}
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">업무 할당</CardTitle>
-
         </CardHeader>
         <CardContent>
           <TaskRegistrationForm
@@ -203,50 +233,123 @@ export default function S3UpdateDetailPage({
                   size="sm"
                   variant="outline"
                   className="shrink-0"
-                  onClick={refreshFileList}
-                  disabled={isRefreshingFileList}
+                  onClick={() => {
+                    refreshFileList()
+                    loadSessionFiles()
+                  }}
+                  disabled={isRefreshingFileList || isLoadingSessionFiles}
                 >
-                  <RefreshCw className={`h-3 w-3 sm:h-4 sm:w-4 ${isRefreshingFileList ? "animate-spin" : ""}`} />
+                  <RefreshCw
+                    className={`h-3 w-3 sm:h-4 sm:w-4 ${isRefreshingFileList || isLoadingSessionFiles ? "animate-spin" : ""}`}
+                  />
                   <span className="hidden sm:inline ml-2">새로고침</span>
                 </Button>
               </div>
-              <div className="overflow-x-auto overflow-y-auto border rounded-md flex-1 min-h-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-12 bg-background">
-                        <Checkbox checked={selectedFiles.has(s3Update.s3_key)} disabled />
-                      </TableHead>
-                      <TableHead className="w-[40%] bg-background">파일명</TableHead>
-                      <TableHead className="w-[15%] bg-background">타입</TableHead>
-                      <TableHead className="w-[15%] bg-background">크기</TableHead>
-                      <TableHead className="w-[15%] bg-background">업로드일</TableHead>
-                      <TableHead className="w-[15%] bg-background">작업</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    <TableRow className="hover:bg-muted/50">
-                      <TableCell>
-                        <Checkbox checked={selectedFiles.has(s3Update.s3_key)} disabled />
-                      </TableCell>
-                      <TableCell className="font-medium break-all">{s3Update.file_name}</TableCell>
-                      <TableCell className="text-muted-foreground">-</TableCell>
-                      <TableCell>{formatBytes(s3Update.file_size)}</TableCell>
-                      <TableCell>
-                        {displayDate
-                          ? new Date(displayDate).toLocaleString("ko-KR", {
-                              month: "2-digit",
-                              day: "2-digit",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })
-                          : "-"}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">-</TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
+              <div className="overflow-x-auto overflow-y-auto border rounded-md flex-1 min-h-0" style={{ maxHeight: "400px" }}>
+                {isLoadingSessionFiles ? (
+                  <p className="text-center text-muted-foreground py-8">로딩 중...</p>
+                ) : files.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8">현재 세션 버킷에 파일이 없습니다.</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12 bg-background">
+                          {files.length > 0 && (
+                            <Checkbox
+                              checked={
+                                files.filter((f) => f.fileType !== "folder").length > 0 &&
+                                files.every((f) => f.fileType === "folder" || selectedFiles.has(f.key))
+                              }
+                              onCheckedChange={(c) => handleSelectAll(!!c)}
+                            />
+                          )}
+                        </TableHead>
+                        <TableHead className="w-[40%] bg-background">파일명</TableHead>
+                        <TableHead className="w-[15%] bg-background">타입</TableHead>
+                        <TableHead className="w-[15%] bg-background">크기</TableHead>
+                        <TableHead className="w-[15%] bg-background">업로드일</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {currentPath && (
+                        <TableRow className="cursor-pointer hover:bg-muted/50 bg-muted/30" onClick={handleGoUp}>
+                          <TableCell colSpan={5} className="font-medium">
+                            <span className="flex items-center gap-2">
+                              <ArrowLeft className="h-4 w-4" />
+                              뒤로가기
+                              <span className="text-xs text-muted-foreground truncate" title={getDisplayPath(currentPath)}>
+                                ({currentPath.split("/").pop() || currentPath})
+                              </span>
+                            </span>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {files.map((file, index) => {
+                        if (file.fileType === "folder") {
+                          return (
+                            <TableRow
+                              key={index}
+                              className="cursor-pointer hover:bg-muted/50 bg-blue-50/50 dark:bg-blue-950/20"
+                              onClick={() => handleFolderClick(file.key)}
+                            >
+                              <TableCell onClick={(e) => e.stopPropagation()}>
+                                <Checkbox disabled />
+                              </TableCell>
+                              <TableCell className="font-medium">
+                                <span className="flex items-center gap-2">
+                                  <span className="text-lg">📁</span>
+                                  {file.fileName || file.key.split("/").pop() || file.key}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-xs">폴더</TableCell>
+                              <TableCell>-</TableCell>
+                              <TableCell>-</TableCell>
+                            </TableRow>
+                          )
+                        }
+                        const Icon = getFileTypeIcon(file)
+                        return (
+                          <TableRow key={index} className="hover:bg-muted/50">
+                            <TableCell>
+                              <Checkbox
+                                checked={selectedFiles.has(file.key)}
+                                onCheckedChange={(c) => handleToggleFile(file.key, !!c)}
+                              />
+                            </TableCell>
+                            <TableCell className="font-medium break-all">
+                              {file.fileName || file.key.split("/").pop() || file.key}
+                            </TableCell>
+                            <TableCell>
+                              <span className="text-xs">
+                                {getFileType(file) === "excel"
+                                  ? "Excel"
+                                  : getFileType(file) === "pdf"
+                                    ? "PDF"
+                                    : getFileType(file) === "dicom"
+                                      ? "DICOM"
+                                      : "기타"}
+                              </span>
+                            </TableCell>
+                            <TableCell>{formatFileSize(file.size)}</TableCell>
+                            <TableCell>
+                              {new Date(file.lastModified).toLocaleDateString("ko-KR", {
+                                month: "2-digit",
+                                day: "2-digit",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
               </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                위 목록은 현재 로그인한 세션의 S3 버킷입니다. 상단 버킷 정보의 파일은 다운로드 버튼으로 받으세요.
+              </p>
             </div>
           </TaskRegistrationForm>
         </CardContent>

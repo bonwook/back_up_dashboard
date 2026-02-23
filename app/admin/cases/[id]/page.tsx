@@ -37,6 +37,7 @@ import { getStatusBadge, getStatusColor, getStatusTextColor, getPriorityBadge } 
 import { parseDateOnly } from "@/lib/utils/dateHelpers"
 import { FileListItem } from "./components/FileListItem"
 import { StaffSessionBlock } from "./components/StaffSessionBlock"
+import { S3BucketInfoCard } from "@/components/s3-bucket-info-card"
 import { useSubtaskCompletion } from "@/lib/hooks/useSubtaskCompletion"
 import { useContentEditor } from "@/lib/hooks/useContentEditor"
 import type { Task, Subtask, S3UpdateForTask } from "@/lib/types"
@@ -62,9 +63,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [task, setTask] = useState<Task | null>(null)
   const [s3Update, setS3Update] = useState<S3UpdateForTask | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [isGettingS3Url, setIsGettingS3Url] = useState(false)
-  const [s3DownloadUrl, setS3DownloadUrl] = useState<string | null>(null)
-  const [s3DownloadExpiresAt, setS3DownloadExpiresAt] = useState<number | null>(null)
   const router = useRouter()
   const [taskId, setTaskId] = useState<string | null>(null)
   const { toast } = useToast()
@@ -1100,36 +1098,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const canChangeStatus =
     (userRole === "staff" || userRole === "admin") && me?.id !== task.assigned_by
 
-  const isS3DownloadExpired = s3DownloadExpiresAt != null && Date.now() > s3DownloadExpiresAt
-
-  const handleS3Download = async () => {
-    if (!s3Update?.id) return
-    if (s3DownloadUrl && !isS3DownloadExpired) {
-      window.open(s3DownloadUrl, "_blank", "noopener,noreferrer")
-      return
-    }
-    setIsGettingS3Url(true)
-    try {
-      const res = await fetch(`/api/s3-updates/${s3Update.id}/presigned-url`, { credentials: "include" })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error((err as { error?: string }).error || "다운로드 URL 생성 실패")
-      }
-      const data = await res.json() as { url: string; expiresIn: number; fileName?: string }
-      setS3DownloadUrl(data.url)
-      setS3DownloadExpiresAt(Date.now() + data.expiresIn * 1000)
-      window.open(data.url, "_blank", "noopener,noreferrer")
-      toast({ title: "다운로드 링크 생성됨", description: "24시간 유효한 링크가 새 탭에서 열립니다." })
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "다운로드 URL을 가져오지 못했습니다."
-      toast({ title: "다운로드 실패", description: message, variant: "destructive" })
-    } finally {
-      setIsGettingS3Url(false)
-    }
-  }
-
-  const s3DisplayDate = s3Update?.upload_time || s3Update?.created_at || ""
-
   return (
     <div className="mx-auto max-w-7xl p-6">
       <div className="mb-6">
@@ -1139,56 +1107,10 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         </Button>
       </div>
 
+      {s3Update && <S3BucketInfoCard s3Update={s3Update} />}
+
       <Card className="mb-6">
-        {s3Update && (
-          <div className="px-6 pt-6 pb-4 space-y-2 border-b border-border/50">
-            <CardTitle className="text-xl">버킷 정보</CardTitle>
-            <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
-              <div>
-                <p className="text-xs font-medium text-muted-foreground">파일명</p>
-                <p className="text-sm font-medium break-all">{s3Update.file_name}</p>
-              </div>
-              {s3Update.bucket_name && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">버킷/경로</p>
-                  <p className="text-xs break-all text-muted-foreground">{s3Update.bucket_name}</p>
-                </div>
-              )}
-              <div className={s3Update.bucket_name ? "" : "sm:col-span-2"}>
-                <p className="text-xs font-medium text-muted-foreground">S3 객체 키</p>
-                <p className="text-xs break-all text-muted-foreground">{s3Update.s3_key}</p>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-muted-foreground">파일 크기</p>
-                <p className="text-sm">{formatBytes(s3Update.file_size)}</p>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-muted-foreground">업로드일</p>
-                <p className="text-sm">
-                  {s3DisplayDate
-                    ? new Date(s3DisplayDate).toLocaleString("ko-KR", {
-                        year: "numeric",
-                        month: "2-digit",
-                        day: "2-digit",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })
-                    : "-"}
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 pt-3">
-              <Button variant="outline" size="sm" onClick={handleS3Download} disabled={isGettingS3Url}>
-                {isGettingS3Url ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-                {isS3DownloadExpired ? "새 링크 발급" : "다운로드 (24시간 유효 링크)"}
-              </Button>
-              <span className="text-xs text-muted-foreground">
-                {isS3DownloadExpired ? "만료됨 — 다시 클릭하여 새 링크를 발급받으세요." : "※ 링크는 24시간 후 만료됩니다."}
-              </span>
-            </div>
-          </div>
-        )}
-        <CardHeader className={cn("pb-0.5 pt-3", s3Update && "pt-4")}>
+        <CardHeader className="pb-0.5 pt-3">
           <div className="flex items-start justify-between gap-4 mb-1">
             <CardTitle className="text-xl font-bold">{task.title}</CardTitle>
             {canChangeStatus && task.status !== "completed" && (
