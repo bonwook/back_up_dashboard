@@ -62,6 +62,7 @@ export function TaskRegistrationForm({
   const [currentSubtitle, setCurrentSubtitle] = useState("")
   const [subContent, setSubContent] = useState("")
   const [isUserSelectDialogOpen, setIsUserSelectDialogOpen] = useState(false)
+  const [tableGridHoverMulti, setTableGridHoverMulti] = useState({ row: 0, col: 0, show: false })
   const prioritySelectRef = useRef<HTMLButtonElement>(null)
   const contentEditableRef = useRef<HTMLDivElement>(null)
   const contentEditableMultiRef = useRef<HTMLDivElement>(null)
@@ -363,13 +364,117 @@ export function TaskRegistrationForm({
                   </button>
                 </div>
               </div>
-              <Input value={currentSubtitle} onChange={(e) => setCurrentSubtitle(e.target.value)} placeholder="공동업무의 부제를 입력하세요" />
+              <Input value={currentSubtitle} onChange={(e) => setCurrentSubtitle(e.target.value)} placeholder="공동업무의 부제를 입력하세요" className="focus-visible:ring-0 focus-visible:border-input" />
               <div className="border rounded-md overflow-hidden bg-background flex flex-col" style={{ height: "320px", minHeight: "320px", maxHeight: "320px" }}>
                 <div className="flex items-center justify-between gap-1 p-2 flex-wrap shrink-0 bg-background border-b">
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 flex-wrap">
                     <Button type="button" variant={editorState.bold ? "secondary" : "ghost"} size="sm" className={`h-8 w-8 p-0 ${editorState.bold ? "bg-primary/10" : ""}`} onClick={() => { const el = document.getElementById(EDITOR_MULTI_ID); if (el) { el.focus(); document.execCommand("bold", false); syncEditorToolbarState(); } }} title="굵게"><Bold className={`h-4 w-4 ${editorState.bold ? "text-primary" : ""}`} /></Button>
                     <Button type="button" variant={editorState.italic ? "secondary" : "ghost"} size="sm" className={`h-8 w-8 p-0 ${editorState.italic ? "bg-primary/10" : ""}`} onClick={() => { const el = document.getElementById(EDITOR_MULTI_ID); if (el) { el.focus(); document.execCommand("italic", false); syncEditorToolbarState(); } }} title="기울임"><Italic className={`h-4 w-4 ${editorState.italic ? "text-primary" : ""}`} /></Button>
                     <Button type="button" variant={editorState.underline ? "secondary" : "ghost"} size="sm" className={`h-8 w-8 p-0 ${editorState.underline ? "bg-primary/10" : ""}`} onClick={() => { const el = document.getElementById(EDITOR_MULTI_ID); if (el) { el.focus(); document.execCommand("underline", false); syncEditorToolbarState(); } }} title="밑줄"><Underline className={`h-4 w-4 ${editorState.underline ? "text-primary" : ""}`} /></Button>
+                    <div className="w-px h-6 bg-border mx-1" />
+                    <div className="relative">
+                      <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setTableGridHoverMulti((p) => (p.show ? { row: 0, col: 0, show: false } : { ...p, show: true }))} title="테이블">
+                        <TableIcon className="h-4 w-4" />
+                      </Button>
+                      {tableGridHoverMulti.show && (
+                        <div className="absolute top-full left-0 mt-2 bg-background border rounded-lg shadow-xl p-4 z-50 min-w-[280px]" onMouseLeave={() => setTableGridHoverMulti({ row: 0, col: 0, show: false })}>
+                          <div className="grid grid-cols-10 gap-1 mb-3">
+                            {Array.from({ length: 100 }).map((_, idx) => {
+                              const row = Math.floor(idx / 10) + 1
+                              const col = (idx % 10) + 1
+                              const isSelected = row <= tableGridHoverMulti.row && col <= tableGridHoverMulti.col
+                              return (
+                                <div
+                                  key={idx}
+                                  className={`w-5 h-5 border border-border rounded-sm transition-colors ${isSelected ? "bg-primary border-primary" : "bg-muted hover:bg-muted/80"}`}
+                                  onMouseEnter={() => setTableGridHoverMulti((p) => ({ ...p, row, col }))}
+                                  onClick={() => {
+                                    const editor = document.getElementById(EDITOR_MULTI_ID)
+                                    if (editor) {
+                                      editor.focus()
+                                      const table = document.createElement("table")
+                                      table.style.borderCollapse = "collapse"
+                                      table.style.width = "100%"
+                                      table.style.margin = "10px 0"
+                                      table.style.border = "2px solid #6b7280"
+                                      table.setAttribute("data-resizable", "true")
+                                      const colW = `${100 / col}%`
+                                      for (let r = 0; r < row; r++) {
+                                        const tr = document.createElement("tr")
+                                        for (let c = 0; c < col; c++) {
+                                          const td = document.createElement("td")
+                                          td.style.border = "2px solid #6b7280"
+                                          td.style.padding = "8px"
+                                          td.style.width = colW
+                                          td.contentEditable = "true"
+                                          td.innerHTML = "&nbsp;"
+                                          tr.appendChild(td)
+                                        }
+                                        table.appendChild(tr)
+                                      }
+                                      const sel = window.getSelection()
+                                      if (sel && sel.rangeCount > 0) {
+                                        const range = sel.getRangeAt(0)
+                                        if (editor.contains(range.commonAncestorContainer) || range.commonAncestorContainer === editor) {
+                                          range.deleteContents()
+                                          range.insertNode(table)
+                                          range.setStartAfter(table)
+                                          range.collapse(true)
+                                        } else {
+                                          editor.appendChild(table)
+                                        }
+                                        sel.removeAllRanges()
+                                        sel.addRange(range)
+                                      } else {
+                                        editor.appendChild(table)
+                                      }
+                                      if (contentEditableMultiRef.current) setSubContent(contentEditableMultiRef.current.innerHTML)
+                                    }
+                                    setTableGridHoverMulti({ row: 0, col: 0, show: false })
+                                  }}
+                                />
+                              )
+                            })}
+                          </div>
+                          <div className="text-sm text-center font-medium border-t pt-2">
+                            {tableGridHoverMulti.row > 0 && tableGridHoverMulti.col > 0 ? `${tableGridHoverMulti.row} x ${tableGridHoverMulti.col} 테이블` : "테이블 크기 선택"}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="w-px h-6 bg-border mx-1" />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      title="구분선"
+                      onClick={() => {
+                        const editor = document.getElementById(EDITOR_MULTI_ID)
+                        if (editor) {
+                          editor.focus()
+                          const hr = document.createElement("hr")
+                          hr.style.border = "none"
+                          hr.style.borderTop = "2px solid #6b7280"
+                          hr.style.margin = "10px 0"
+                          const sel = window.getSelection()
+                          if (sel && sel.rangeCount > 0) {
+                            const range = sel.getRangeAt(0)
+                            range.deleteContents()
+                            range.insertNode(hr)
+                            range.setStartAfter(hr)
+                            range.collapse(true)
+                            sel.removeAllRanges()
+                            sel.addRange(range)
+                          } else {
+                            editor.appendChild(hr)
+                          }
+                          if (contentEditableMultiRef.current) setSubContent(contentEditableMultiRef.current.innerHTML)
+                        }
+                      }}
+                    >
+                      <Minus className="h-4 w-4" />
+                    </Button>
                   </div>
                   <Button type="button" variant="outline" size="sm" className="h-8" onClick={() => setIsUserSelectDialogOpen(true)}>
                     <UserPlus className="h-4 w-4 mr-1" />
@@ -398,6 +503,9 @@ export function TaskRegistrationForm({
                 />
                 <style jsx global>{`
                   #${EDITOR_MULTI_ID}:empty:before { content: attr(data-placeholder); color: #9ca3af; pointer-events: none; }
+                  #${EDITOR_MULTI_ID} table { border-collapse: collapse; width: 100%; margin: 10px 0; border: 2px solid #6b7280; }
+                  #${EDITOR_MULTI_ID} table td, #${EDITOR_MULTI_ID} table th { border: 2px solid #6b7280; padding: 8px; }
+                  #${EDITOR_MULTI_ID} hr { border: none; border-top: 2px solid #9ca3af; margin: 10px 0; }
                 `}</style>
               </div>
             </div>

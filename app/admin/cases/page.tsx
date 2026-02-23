@@ -25,7 +25,6 @@ export default function WorklistPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
   const [priorityFilter, setPriorityFilter] = useState<string>("all")
-  const [assignmentFilter, setAssignmentFilter] = useState<"all" | "requested" | "assigned">("all")
   const [bucketFilter, setBucketFilter] = useState<string>("all")
   const [activeTab, setActiveTab] = useState<"worklist" | "completed">("worklist")
   const [completedReports, setCompletedReports] = useState<any[]>([])
@@ -53,7 +52,6 @@ export default function WorklistPage() {
   const handleRefresh = () => {
     setSearchQuery("")
     setPriorityFilter("all")
-    setAssignmentFilter("all")
     setBucketFilter("all")
     loadTasks()
   }
@@ -157,14 +155,6 @@ export default function WorklistPage() {
       filtered = filtered.filter((task) => task.priority === priorityFilter)
     }
 
-    if (me?.id && assignmentFilter !== "all") {
-      if (assignmentFilter === "requested") {
-        filtered = filtered.filter((task) => task.assigned_by === me.id)
-      } else if (assignmentFilter === "assigned") {
-        filtered = filtered.filter((task) => task.assigned_to === me.id)
-      }
-    }
-
     // S3 필터: s3_updates.bucket_name 기준. "s3_only" = S3에서 온 태스크만, 특정 버킷 = 해당 bucket_name으로 연결된 태스크만
     if (bucketFilter === "s3_only") {
       filtered = filtered.filter((task) => taskIdsFromS3.has(task.id))
@@ -176,9 +166,9 @@ export default function WorklistPage() {
 
     setFilteredTasks(filtered)
 
-    // s3_updates 목록: 진행 탭 + 전체일 때만, bucket_name·검색어로 필터
+    // s3_updates 목록: 진행 탭일 때만, bucket_name·검색어로 필터
     let s3Filtered = [...s3Updates]
-    if (activeTab !== "worklist" || assignmentFilter !== "all") {
+    if (activeTab !== "worklist") {
       s3Filtered = []
     } else {
       if (searchQuery) {
@@ -198,7 +188,7 @@ export default function WorklistPage() {
       }
     }
     setFilteredS3Updates(s3Filtered)
-  }, [tasks, s3Updates, searchQuery, priorityFilter, bucketFilter, activeTab, assignmentFilter, me?.id, getBucketName, taskIdsByBucket, taskIdsFromS3])
+  }, [tasks, s3Updates, searchQuery, priorityFilter, bucketFilter, activeTab, getBucketName, taskIdsByBucket, taskIdsFromS3])
 
   useEffect(() => {
     loadTasks()
@@ -240,14 +230,11 @@ export default function WorklistPage() {
 
     const priority = searchParams.get("priority")
     const q = searchParams.get("q")
-    const filter = searchParams.get("filter")
 
     const validPriorities = new Set(["all", "urgent", "high", "medium", "low"])
-    const validFilters = new Set(["all", "requested", "assigned"])
 
     if (priority && validPriorities.has(priority)) setPriorityFilter(priority)
     if (q !== null) setSearchQuery(q)
-    if (filter && validFilters.has(filter)) setAssignmentFilter(filter as "all" | "requested" | "assigned")
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
 
@@ -440,35 +427,6 @@ export default function WorklistPage() {
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="pl-9 h-9"
                   />
-                </div>
-                <div className="flex items-center gap-1">
-                  <Button
-                    type="button"
-                    variant={assignmentFilter === "all" ? "default" : "outline"}
-                    size="sm"
-                    className="h-9"
-                    onClick={() => setAssignmentFilter("all")}
-                  >
-                    전체
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={assignmentFilter === "requested" ? "default" : "outline"}
-                    size="sm"
-                    className="h-9"
-                    onClick={() => setAssignmentFilter("requested")}
-                  >
-                    요청
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={assignmentFilter === "assigned" ? "default" : "outline"}
-                    size="sm"
-                    className="h-9"
-                    onClick={() => setAssignmentFilter("assigned")}
-                  >
-                    담당
-                  </Button>
                 </div>
                 <Select value={priorityFilter} onValueChange={setPriorityFilter}>
                   <SelectTrigger className="w-[110px] h-9">

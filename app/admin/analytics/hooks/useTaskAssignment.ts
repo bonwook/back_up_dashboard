@@ -89,6 +89,7 @@ export function useTaskAssignment(props: UseTaskAssignmentProps) {
           fileKeys: s.fileKeys
         }))
         requestBody.assignmentType = 'individual'
+        if (s3UpdateId) requestBody.s3_update_id = s3UpdateId
       } else {
         requestBody.content = mainContentHtml
         requestBody.fileKeys = Array.from(selectedFiles)

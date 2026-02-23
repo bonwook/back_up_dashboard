@@ -4,12 +4,14 @@ import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Loader2, RefreshCw } from "lucide-react"
+import { ArrowLeft, Loader2, RefreshCw, Trash2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Checkbox } from "@/components/ui/checkbox"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { TaskRegistrationForm } from "@/app/admin/analytics/components/TaskRegistrationForm"
 import { S3BucketInfoCard } from "@/components/s3-bucket-info-card"
+import { useFileManagement } from "@/app/admin/analytics/hooks/useFileManagement"
 import {
   getFileType,
   formatFileSize,
@@ -43,34 +45,42 @@ export default function S3UpdateDetailPage({
   const router = useRouter()
   const { toast } = useToast()
 
-  // 현재 세션 S3 파일 목록 (presigned 파일은 목록에 없음, 버킷 카드에서만 다운로드)
+  // 현재 세션 S3 파일 목록 — 업무 요청(analytics)과 동일한 API·훅 사용
   const [user, setUser] = useState<{ id: string } | null>(null)
   const [allFiles, setAllFiles] = useState<S3File[]>([])
   const [files, setFiles] = useState<S3File[]>([])
   const [currentPath, setCurrentPath] = useState<string>("")
-  const [isLoadingSessionFiles, setIsLoadingSessionFiles] = useState(false)
+  const [selectedFile, setSelectedFile] = useState<S3File | null>(null)
+  const [isBulkDeleteDialogOpen, setIsBulkDeleteDialogOpen] = useState(false)
 
   const s3Key = s3Update?.s3_key ?? ""
 
-  const loadSessionFiles = useCallback(async () => {
-    setIsLoadingSessionFiles(true)
-    try {
-      const res = await fetch("/api/storage/files", { credentials: "include" })
-      if (!res.ok) throw new Error("파일 목록을 불러올 수 없습니다.")
-      const data = await res.json()
-      const list = data.files ?? []
-      setAllFiles(list)
-      updateDisplayedFiles(list, currentPath, setFiles)
-    } catch (e) {
-      toast({
-        title: "세션 파일 목록 로드 실패",
-        description: e instanceof Error ? e.message : "다시 시도해 주세요.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoadingSessionFiles(false)
-    }
-  }, [currentPath, toast])
+  const {
+    isLoading: isLoadingSessionFiles,
+    isDeleting,
+    loadFiles,
+    deleteSelectedItems,
+  } = useFileManagement({
+    user,
+    toast,
+    allFiles,
+    setAllFiles,
+    currentPath,
+    selectedFile,
+    setSelectedFile,
+    setFiles,
+    selectedFiles,
+    setSelectedFiles,
+  })
+
+  /** 업무 요청 페이지와 동일: 선택된 파일/폴더 목록 (세션 스토리지 항목만, presigned s3_key 제외) */
+  const getSelectedFilesForAssignment = useCallback((): S3File[] => {
+    const uniqueItems = new Map<string, S3File>()
+    ;[...allFiles, ...files].forEach((item) => {
+      if (!uniqueItems.has(item.key)) uniqueItems.set(item.key, item)
+    })
+    return Array.from(uniqueItems.values()).filter((f) => selectedFiles.has(f.key))
+  }, [allFiles, files, selectedFiles])
 
   const refreshFileList = async () => {
     if (!id) return
@@ -140,8 +150,8 @@ export default function S3UpdateDetailPage({
   }, [])
 
   useEffect(() => {
-    if (user) loadSessionFiles()
-  }, [user, loadSessionFiles])
+    if (user) loadFiles(true, currentPath)
+  }, [user, loadFiles])
 
   useEffect(() => {
     if (allFiles.length > 0) {
@@ -244,15 +254,32 @@ export default function S3UpdateDetailPage({
               setSelectedFiles={setSelectedFiles}
             >
               <div className="flex flex-col flex-1 overflow-hidden gap-2">
-                <div className="flex items-center justify-end gap-2 shrink-0">
+                <div className="flex items-center justify-end gap-2 shrink-0 flex-wrap">
+                  {selectedFiles.size > 0 && getSelectedFilesForAssignment().length > 0 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="destructive"
+                      className="shrink-0"
+                      disabled={isDeleting}
+                      onClick={() => setIsBulkDeleteDialogOpen(true)}
+                    >
+                      {isDeleting ? (
+                        <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3 w-3 sm:h-4 sm:w-4" />
+                      )}
+                      <span className="hidden sm:inline ml-2">선택 삭제</span>
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
                     className="shrink-0"
-                    onClick={() => {
-                      refreshFileList()
-                      loadSessionFiles()
+                    onClick={async () => {
+                      await refreshFileList()
+                      loadFiles(true, currentPath)
                     }}
                     disabled={isRefreshingFileList || isLoadingSessionFiles}
                   >
@@ -363,6 +390,27 @@ export default function S3UpdateDetailPage({
                     </Table>
                   )}
                 </div>
+                {selectedFiles.size > 0 && (
+                  <div className="space-y-1.5 shrink-0">
+                    <p className="text-xs font-medium text-muted-foreground">선택된 항목 ({selectedFiles.size}개)</p>
+                    <div className="text-xs text-muted-foreground border rounded-md p-2 max-h-[120px] overflow-y-auto space-y-1">
+                      {Array.from(selectedFiles).slice(0, 20).map((key) => {
+                        const displayName =
+                          key === s3Key
+                            ? s3Update?.file_name ?? key.split("/").pop() ?? key
+                            : allFiles.find((f) => f.key === key)?.fileName ?? key.split("/").pop() ?? key
+                        return (
+                          <div key={key} className="truncate" title={key}>
+                            {displayName}
+                          </div>
+                        )
+                      })}
+                      {selectedFiles.size > 20 && (
+                        <div className="text-muted-foreground/80">... 외 {selectedFiles.size - 20}개</div>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <p className="text-xs text-muted-foreground mt-1">
                   위 목록은 현재 로그인한 세션의 S3 버킷입니다. 상단 버킷 정보의 파일은 다운로드 버튼으로 받으세요.
                 </p>
@@ -371,6 +419,30 @@ export default function S3UpdateDetailPage({
           </CardContent>
         </Card>
       )}
+
+      <AlertDialog open={isBulkDeleteDialogOpen} onOpenChange={setIsBulkDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>선택 항목 삭제</AlertDialogTitle>
+            <AlertDialogDescription>
+              선택한 {getSelectedFilesForAssignment().length}개 파일/폴더를 삭제하시겠습니까? 폴더는 그 안의 모든 파일이 함께 삭제되며, 이 작업은 되돌릴 수 없습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const items = getSelectedFilesForAssignment()
+                deleteSelectedItems(items)
+                setIsBulkDeleteDialogOpen(false)
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              삭제
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

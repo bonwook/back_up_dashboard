@@ -44,11 +44,12 @@ export async function POST(request: NextRequest) {
       // 공동 할당 모드: 본인이 책임자가 되고 나머지 사람들에게 공통 과제 부여
       // assignmentType은 항상 'individual'
       const finalAssignmentType = 'individual'
-      
+      const s3_update_id_for_subtask = body.s3_update_id != null ? String(body.s3_update_id) : null
+
       // 메인 task의 담당자는 항상 작성자 본인 (책임자)
       const mainAssignedTo = decoded.id
-      
-      return await handleSubtaskAssignment(decoded.id, mainAssignedTo, title, priority, due_date, subtasks, mainContent, finalAssignmentType)
+
+      return await handleSubtaskAssignment(decoded.id, mainAssignedTo, title, priority, due_date, subtasks, mainContent, finalAssignmentType, s3_update_id_for_subtask)
     }
 
     // 기존 다중 할당 모드 체크 (하위 호환성)
@@ -256,7 +257,8 @@ async function handleSubtaskAssignment(
   due_date: any,
   subtaskBlocks: SubtaskBlock[],
   mainContent?: string,
-  assignmentType: string = 'individual'
+  assignmentType: string = 'individual',
+  s3UpdateId?: string | null
 ) {
   if (!subtaskBlocks || subtaskBlocks.length === 0) {
     return NextResponse.json({ error: "업무 블록이 필요합니다" }, { status: 400 })
@@ -324,6 +326,26 @@ async function handleSubtaskAssignment(
         subtaskId,
         assignedTo: usersMap.get(assigneeId)
       })
+    }
+  }
+
+  // S3 건에서 공동 태스크로 넘긴 경우: 해당 S3에 메인 task 연결 → 워크리스트에서 ㄴ 형태로 표시
+  if (s3UpdateId && typeof s3UpdateId === "string") {
+    try {
+      await query(
+        `UPDATE s3_updates SET task_id = ? WHERE id = ?`,
+        [taskId, s3UpdateId]
+      )
+    } catch {
+      // task_id 컬럼 없으면 무시
+    }
+    try {
+      await query(
+        `UPDATE s3_updates SET status = 'pending' WHERE id = ?`,
+        [s3UpdateId]
+      )
+    } catch {
+      // status 컬럼 없으면 무시
     }
   }
 

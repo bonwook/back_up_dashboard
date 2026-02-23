@@ -364,6 +364,12 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     }
   }, [toast])
 
+  /** S3 연결 건: presigned(s3_key)는 버킷 카드에서만 다운로드 → 첨부파일 목록에서는 제외 */
+  const resolvedFileKeysForDisplay = useMemo(() => {
+    if (!s3Update?.s3_key) return resolvedFileKeys
+    return resolvedFileKeys.filter((f) => f.s3Key !== s3Update.s3_key)
+  }, [resolvedFileKeys, s3Update?.s3_key])
+
   const reloadTask = useCallback(async () => {
     if (!taskId) return
     const res = await fetch(`/api/tasks/${taskId}`, { credentials: "include" })
@@ -1283,13 +1289,13 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             </div>
           )}
           
-          {/* 첨부파일 정보 */}
-          {(resolvedFileKeys.length > 0 || resolvedCommentFileKeys.length > 0) && (
+          {/* 첨부파일 정보 (presigned s3_key는 버킷 카드에서만 표시) */}
+          {(resolvedFileKeysForDisplay.length > 0 || resolvedCommentFileKeys.length > 0) && (
             <div className="flex items-center gap-4 text-xs text-muted-foreground">
-              {resolvedFileKeys.length > 0 && (
+              {resolvedFileKeysForDisplay.length > 0 && (
                 <div className="flex items-center gap-1.5">
                   <FileText className="h-3.5 w-3.5" />
-                  <span>{task.assigned_by_name || "요청자"} 첨부: {resolvedFileKeys.length}개</span>
+                  <span>{task.assigned_by_name || "요청자"} 첨부: {resolvedFileKeysForDisplay.length}개</span>
                 </div>
               )}
               {resolvedCommentFileKeys.length > 0 && (
@@ -1329,7 +1335,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                     size="sm"
                     onClick={() => {
                       setEditingRequesterTitle(task?.title ?? "")
-                      setEditingRequesterFileKeys(resolvedFileKeys.map((f) => f.s3Key))
+                      setEditingRequesterFileKeys(resolvedFileKeysForDisplay.map((f) => f.s3Key))
                       setIsEditingRequesterContent(true)
                     }}
                   >
@@ -1676,7 +1682,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                         onClick={() => {
                           editingSubtitleRef.current = selectedRequesterGroup.subtitle
                           setSelectedSubtitle(selectedRequesterGroup.subtitle)
-                          if (subtasks.length === 0) setEditingRequesterFileKeys(resolvedFileKeys.map((f) => f.s3Key))
+                          if (subtasks.length === 0) setEditingRequesterFileKeys(resolvedFileKeysForDisplay.map((f) => f.s3Key))
                           setIsEditingRequesterContent(true)
                         }}
                       >
@@ -2256,7 +2262,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                           onClick={() => {
                             editingSubtitleRef.current = group.subtitle
                             setSelectedSubtitle(group.subtitle)
-                            if (subtasks.length === 0) setEditingRequesterFileKeys(resolvedFileKeys.map((f) => f.s3Key))
+                            if (subtasks.length === 0) setEditingRequesterFileKeys(resolvedFileKeysForDisplay.map((f) => f.s3Key))
                             setIsEditingRequesterContent(true)
                           }}
                         >
@@ -2812,16 +2818,22 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                   {(() => {
                     const groupSubtaskIds = new Set(group.tasks.map((t) => t.id))
                     const selectedIdInGroup = selectedSubtaskIdBySubtitle[group.subtitle] ?? null
-                    // 요청자 첨부: 담당자 선택 시 해당 담당자(subtask) 것만, 미선택 시 그룹 전체
-                    const groupRequesterFiles = resolvedSubtaskFileKeys.filter((f) => {
+                    // 요청자 첨부: 담당자 선택 시 해당 담당자(subtask) 것만, 미선택 시 그룹 전체. s3Key 기준 중복 제거. presigned(s3_key) 제외
+                    const presignedKey = s3Update?.s3_key ?? null
+                    const groupRequesterFilesRaw = resolvedSubtaskFileKeys.filter((f) => {
+                      if (presignedKey && f.s3Key === presignedKey) return false
                       if (!groupSubtaskIds.has(f.subtaskId) || f.assignedToName !== "요청자") return false
                       if (selectedIdInGroup) return f.subtaskId === selectedIdInGroup
                       return true
                     })
-                    const groupAssigneeFiles = resolvedSubtaskFileKeys.filter(
-                      (f) => groupSubtaskIds.has(f.subtaskId) && f.assignedToName !== "요청자"
+                    const groupRequesterFiles = Array.from(
+                      new Map(groupRequesterFilesRaw.map((f) => [f.s3Key, f])).values()
                     )
-                    const hasRequester = resolvedFileKeys.length > 0
+                    const groupAssigneeFiles = resolvedSubtaskFileKeys.filter((f) => {
+                      if (presignedKey && f.s3Key === presignedKey) return false
+                      return groupSubtaskIds.has(f.subtaskId) && f.assignedToName !== "요청자"
+                    })
+                    const hasRequester = resolvedFileKeysForDisplay.length > 0
                     const hasGroupRequester = groupRequesterFiles.length > 0
                     const hasAssignee = groupAssigneeFiles.length > 0
                     if (!hasRequester && !hasGroupRequester && !hasAssignee) return null
@@ -2848,7 +2860,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                           <div className="space-y-1.5">
                             <p className="text-xs font-medium text-muted-foreground">{task.assigned_by_name || "요청자"} 첨부 (메인)</p>
                             <div className="flex flex-col gap-2 pl-2">
-                              {resolvedFileKeys.map((f, index) => (
+                              {resolvedFileKeysForDisplay.map((f, index) => (
                                 <FileListItem
                                   key={`g-req-${group.subtitle}-${index}`}
                                   fileName={f.fileName}
@@ -3148,9 +3160,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             
             <div className="space-y-2">
               <h4 className="text-sm font-semibold text-foreground/90">요청자 첨부파일</h4>
-              {resolvedFileKeys.length > 0 ? (
+              {resolvedFileKeysForDisplay.length > 0 ? (
                 <div className="flex flex-col gap-2 pl-2">
-                  {resolvedFileKeys.map((f, index) => (
+                  {resolvedFileKeysForDisplay.map((f, index) => (
                     <FileListItem
                       key={`admin-${index}`}
                       fileName={f.fileName}

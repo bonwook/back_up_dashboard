@@ -106,14 +106,19 @@ export default function ClientProgressPage() {
   // 참조자(shared_with) 기능 미사용: profiles 목록 로드 제거
 
   // 작업공간에 올린 task가 S3 출처일 때 버킷 정보 로드 (task 블록 안 S3 카드 표시용)
+  // 공동 업무(서브태스크)일 때는 s3_updates가 메인 task_id에만 연결되므로 메인 task로 조회
   useEffect(() => {
     if (!workTaskId) {
       setWorkTaskS3Update(null)
       return
     }
+    const currentTask = tasks.find((t) => t.id === workTaskId)
+    const idToFetch = currentTask?.is_subtask && currentTask?.task_id
+      ? currentTask.task_id
+      : workTaskId
     const load = async () => {
       try {
-        const res = await fetch(`/api/tasks/${workTaskId}`, { credentials: "include" })
+        const res = await fetch(`/api/tasks/${idToFetch}`, { credentials: "include" })
         if (!res.ok) return
         const data = await res.json()
         const s3 = data.s3Update ?? null
@@ -123,7 +128,7 @@ export default function ClientProgressPage() {
       }
     }
     load()
-  }, [workTaskId])
+  }, [workTaskId, tasks])
 
   const clearWorkArea = useCallback((taskId?: string) => {
     // 작업공간 상태 초기화
@@ -151,6 +156,12 @@ export default function ClientProgressPage() {
       safeStorage.removeItem(`work-comment-temp-${taskId}`)
     }
   }, [])
+
+  /** S3 연결 업무: presigned(s3_key)는 버킷 카드에서만 다운로드 → 요청자 첨부 목록에서는 제외 */
+  const workResolvedFileKeysForDisplay = useMemo(() => {
+    if (!workTaskS3Update?.s3_key) return workResolvedFileKeys
+    return workResolvedFileKeys.filter((r) => r.s3Key !== workTaskS3Update.s3_key)
+  }, [workResolvedFileKeys, workTaskS3Update?.s3_key])
 
   const loadTasks = useCallback(async () => {
     setIsLoading(true)
@@ -947,8 +958,8 @@ export default function ClientProgressPage() {
                         </div>
                       )}
                       
-                      {/* 요청자 첨부파일 표시 - 다운로드 기간은 요청일(작업 생성일) 기준 7일 */}
-                      {workResolvedFileKeys.length > 0 && (() => {
+                      {/* 요청자 첨부파일 표시 - 다운로드 기간은 요청일(작업 생성일) 기준 7일. presigned는 버킷 카드에서만 */}
+                      {workResolvedFileKeysForDisplay.length > 0 && (() => {
                         const workTask = workTaskId ? tasks.find(t => t.id === workTaskId) : null
                         const requestDate = workTask?.created_at ?? null
                         const fileExpiry = calculateFileExpiry(requestDate)
@@ -957,7 +968,7 @@ export default function ClientProgressPage() {
                         <div className="space-y-2">
                           <Label className="text-sm font-semibold">요청자 첨부파일</Label>
                           <div className="flex flex-wrap gap-2 p-2 border border-transparent rounded-md bg-transparent">
-                            {workResolvedFileKeys.map((resolved, idx) => (
+                            {workResolvedFileKeysForDisplay.map((resolved, idx) => (
                               <div key={`main-resolved-${idx}`} className={`flex items-center gap-2 px-2 py-1 rounded border text-sm ${isFileExpired ? 'bg-red-50 border-red-300 dark:bg-red-950/20 dark:border-red-800' : 'bg-transparent'}`}>
                                 <FileText className={`h-4 w-4 shrink-0 ${isFileExpired ? 'text-red-500' : 'text-muted-foreground'}`} />
                                 <span 
@@ -1511,8 +1522,8 @@ export default function ClientProgressPage() {
                         </div>
                       )}
                       
-                      {/* 요청자 첨부파일 표시 - 다운로드 기간은 요청일(작업 생성일) 기준 7일 */}
-                      {workResolvedFileKeys.length > 0 && (() => {
+                      {/* 요청자 첨부파일 표시 - 다운로드 기간은 요청일(작업 생성일) 기준 7일. presigned는 버킷 카드에서만 */}
+                      {workResolvedFileKeysForDisplay.length > 0 && (() => {
                         const workTask = workTaskId ? tasks.find(t => t.id === workTaskId) : null
                         const requestDate = workTask?.created_at ?? null
                         const fileExpiry = calculateFileExpiry(requestDate)
@@ -1521,7 +1532,7 @@ export default function ClientProgressPage() {
                         <div className="space-y-2 mt-2">
                           <Label className="text-sm font-semibold">요청자 첨부파일</Label>
                           <div className="flex flex-wrap gap-2 p-2 border border-transparent rounded-md bg-transparent">
-                            {workResolvedFileKeys.map((resolved, idx) => (
+                            {workResolvedFileKeysForDisplay.map((resolved, idx) => (
                               <div key={`multi-resolved-${idx}`} className={`flex items-center gap-2 px-2 py-1 rounded border text-sm ${isFileExpired ? 'bg-red-50 border-red-300 dark:bg-red-950/20 dark:border-red-800' : 'bg-transparent'}`}>
                                 <FileText className={`h-4 w-4 shrink-0 ${isFileExpired ? 'text-red-500' : 'text-muted-foreground'}`} />
                                 <span 

@@ -503,12 +503,27 @@ export async function PATCH(
       const rawCommentKeys = Array.isArray(comment_file_keys) ? comment_file_keys : []
       const commentSet = new Set(rawCommentKeys.filter((k) => typeof k === "string" && k))
 
-      // file_keys 중복 제거 + comment_file_keys와 겹치는 키 제거(클라이언트 첨부가 file_keys에 섞여 들어가는 것 방지)
+      // 이 task에 연결된 S3 presigned 키는 file_keys에 넣지 않음(버킷 카드에서만 다운로드)
+      let presignedKey: string | null = null
+      try {
+        const s3Row = await query(
+          "SELECT file_name, bucket_name FROM s3_updates WHERE task_id = ? LIMIT 1",
+          [taskId]
+        )
+        if (s3Row && s3Row.length > 0) {
+          presignedKey = toS3Key(s3Row[0] as { file_name: string; bucket_name?: string | null })
+        }
+      } catch {
+        // s3_updates 없거나 컬럼 없으면 무시
+      }
+
+      // file_keys 중복 제거 + comment_file_keys와 겹치는 키 제거 + presigned 키 제외
       const deduped: string[] = []
       const seen = new Set<string>()
       for (const k of rawFileKeys) {
         const key = typeof k === "string" ? k : ""
         if (!key) continue
+        if (presignedKey && key === presignedKey) continue
         if (commentSet.has(key)) continue
         if (seen.has(key)) continue
         seen.add(key)
@@ -750,11 +765,26 @@ async function handleSubtaskUpdate(
     const rawCommentKeys = Array.isArray(comment_file_keys) ? comment_file_keys : []
     const commentSet = new Set(rawCommentKeys.filter((k) => typeof k === "string" && k))
 
+    // 메인 task에 연결된 S3 presigned 키는 file_keys에 넣지 않음
+    let presignedKey: string | null = null
+    try {
+      const s3Row = await query(
+        "SELECT file_name, bucket_name FROM s3_updates WHERE task_id = ? LIMIT 1",
+        [subtask.task_id]
+      )
+      if (s3Row && s3Row.length > 0) {
+        presignedKey = toS3Key(s3Row[0] as { file_name: string; bucket_name?: string | null })
+      }
+    } catch {
+      // ignore
+    }
+
     const deduped: string[] = []
     const seen = new Set<string>()
     for (const k of rawFileKeys) {
       const key = typeof k === "string" ? k : ""
       if (!key) continue
+      if (presignedKey && key === presignedKey) continue
       if (commentSet.has(key)) continue
       if (seen.has(key)) continue
       seen.add(key)
