@@ -149,8 +149,8 @@ export default function AdminFileUploadPage() {
       // 개별 파일 업로드 처리
       const file = files[0]
       
-      // 파일 크기 제한 검증 (모든 파일 타입에 대해 1GB 제한)
-      const MAX_FILE_SIZE = 1 * 1024 * 1024 * 1024 // 1GB
+      // 파일 크기 제한 검증 (모든 파일 타입에 대해 500MB 제한)
+      const MAX_FILE_SIZE = 500 * 1024 * 1024 // 500MB
       
       if (file.size > MAX_FILE_SIZE) {
         const maxSizeMB = (MAX_FILE_SIZE / 1024 / 1024).toFixed(0)
@@ -214,8 +214,8 @@ export default function AdminFileUploadPage() {
         return
       }
       
-      // 폴더 내 개별 파일 크기 제한 확인 (모든 파일 1GB 제한)
-      const MAX_FILE_SIZE = 1 * 1024 * 1024 * 1024 // 1GB
+      // 폴더 내 개별 파일 크기 제한 확인 (모든 파일 500MB 제한)
+      const MAX_FILE_SIZE = 500 * 1024 * 1024 // 500MB
       const oversizedFiles = uploadedFiles.filter(file => file.size > MAX_FILE_SIZE)
       
       if (oversizedFiles.length > 0) {
@@ -234,7 +234,7 @@ export default function AdminFileUploadPage() {
     
     // 개별 파일 업로드 시 크기 제한 재확인
     if (!isFolderUpload && uploadedFile) {
-      const MAX_FILE_SIZE = 1 * 1024 * 1024 * 1024 // 1GB
+      const MAX_FILE_SIZE = 500 * 1024 * 1024 // 500MB
       
       if (uploadedFile.size > MAX_FILE_SIZE) {
         const maxSizeMB = (MAX_FILE_SIZE / 1024 / 1024).toFixed(0)
@@ -531,13 +531,13 @@ export default function AdminFileUploadPage() {
                       <>
                         폴더를 선택하면 모든 파일 형식이 업로드됩니다.
                         <br />
-                        최대 폴더 크기: 5GB, 개별 파일: 1GB
+                        최대 폴더 크기: 5GB, 개별 파일: 500MB
                       </>
                     )
                     : (
                       <>
                         <br />
-                        최대 크기: 1GB
+                        최대 크기: 500MB
                       </>
                     )}
                 </p>

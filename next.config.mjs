@@ -23,13 +23,10 @@ const nextConfig = {
     unoptimized: true,
   },
   experimental: {
-    // 서버 액션의 body size 제한을 500MB로 설정
     serverActions: {
       bodySizeLimit: '500mb',
     },
-    // API 라우트의 클라이언트 요청 body size 제한을 500MB로 설정
-    // 이 설정이 없으면 기본값 10MB로 제한되어 대용량 파일 업로드가 실패합니다
-    proxyClientMaxBodySize: '500mb',
+    proxyClientMaxBodySize: 500 * 1024 * 1024,
   },
   // Turbopack workspace root 설정 (lockfile 경고 해결)
   // Next.js 16에서는 experimental.turbopack이 아닌 최상위 레벨에 설정

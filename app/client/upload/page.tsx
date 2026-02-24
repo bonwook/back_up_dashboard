@@ -382,26 +382,26 @@ export default function ClientUploadPage() {
         return
       }
       
-      // 파일 타입별 크기 제한 검증 (클라이언트 업로드/첨부: 1GB)
+      // 파일 타입별 크기 제한 검증 (클라이언트 업로드/첨부: 500MB)
       const MAX_FILE_SIZES: Record<string, number> = {
-        excel: 1024 * 1024 * 1024, // 1GB
-        pdf: 1024 * 1024 * 1024, // 1GB
-        dicom: 1024 * 1024 * 1024, // 1GB
-        nifti: 1024 * 1024 * 1024, // 1GB
-        other: 1024 * 1024 * 1024, // 1GB
+        excel: 500 * 1024 * 1024, // 500MB
+        pdf: 500 * 1024 * 1024, // 500MB
+        dicom: 500 * 1024 * 1024, // 500MB
+        nifti: 500 * 1024 * 1024, // 500MB
+        other: 500 * 1024 * 1024, // 500MB
       }
       
-      const maxSize = MAX_FILE_SIZES[fileType] || 1024 * 1024 * 1024 // 기본값 1GB
+      const maxSize = MAX_FILE_SIZES[fileType] || 500 * 1024 * 1024 // 기본값 500MB
       
       if (file.size > maxSize) {
         const maxSizeMB = (maxSize / 1024 / 1024).toFixed(0)
         const currentSizeMB = (file.size / 1024 / 1024).toFixed(2)
         
-        alert(`파일 크기 초과 오류\n\n선택한 파일 타입: ${fileTypeName}\n최대 업로드 크기: 1GB\n현재 파일 크기: ${currentSizeMB}MB\n\n파일 크기가 제한을 초과하여 업로드할 수 없습니다.`)
+        alert(`파일 크기 초과 오류\n\n선택한 파일 타입: ${fileTypeName}\n최대 업로드 크기: 500MB\n현재 파일 크기: ${currentSizeMB}MB\n\n파일 크기가 제한을 초과하여 업로드할 수 없습니다.`)
         
         toast({
           title: "파일 크기 초과",
-          description: `${fileTypeName} 파일은 최대 1GB까지 업로드 가능합니다. (현재: ${currentSizeMB}MB)`,
+          description: `${fileTypeName} 파일은 최대 500MB까지 업로드 가능합니다. (현재: ${currentSizeMB}MB)`,
           variant: "destructive",
         })
         // 파일 입력 초기화
@@ -859,14 +859,14 @@ export default function ClientUploadPage() {
                       <>
                         폴더를 선택하면 모든 파일 형식이 표시되며, {fileType === "other" ? "기타 타입을 선택하면 모든 파일이 업로드됩니다." : `선택한 파일 타입(${fileType === "excel" ? "Excel" : fileType === "pdf" ? "PDF" : fileType === "dicom" ? "DICOM" : "NIFTI"})과 일치하는 파일만 업로드됩니다. 폴더 내 모든 파일은 선택한 파일 타입과 일치해야 합니다.`}
                         <br />
-                        최대 폴더 크기: 5GB, 개별 파일: 1GB
+                        최대 폴더 크기: 5GB, 개별 파일: 500MB
                       </>
                     )
                     : (
                       <>
                         {fileType === "other" ? "기타 타입을 선택하면 모든 파일 형식이 업로드 가능합니다." : `모든 파일 형식이 표시되며, 선택한 파일 타입(${fileType === "excel" ? "Excel (.xlsx, .xls, .csv)" : fileType === "pdf" ? "PDF (.pdf)" : fileType === "dicom" ? "DICOM (.dcm, .dicom)" : "NIFTI (.nii, .nii.gz, .nifti)"})과 일치하는 파일만 업로드 가능합니다.`}
                         <br />
-                        최대 크기: 1GB
+                        최대 크기: 500MB
                       </>
                     )}
                 </p>

@@ -17,12 +17,12 @@ const ALLOWED_EXTENSIONS: Record<string, string[]> = {
 
 // 파일 타입별 최대 크기 제한 (bytes)
 const MAX_FILE_SIZES: Record<string, number> = {
-  excel: 1 * 1024 * 1024 * 1024, // 1GB
-  pdf: 1 * 1024 * 1024 * 1024, // 1GB
-  dicom: 1 * 1024 * 1024 * 1024, // 1GB
-  nifti: 1 * 1024 * 1024 * 1024, // 1GB
-  zip: 5 * 1024 * 1024 * 1024, // 5GB
-  other: 1 * 1024 * 1024 * 1024, // 기본값 1GB
+  excel: 500 * 1024 * 1024, // 500MB
+  pdf: 500 * 1024 * 1024, // 500MB
+  dicom: 500 * 1024 * 1024, // 500MB
+  nifti: 500 * 1024 * 1024, // 500MB
+  zip: 500 * 1024 * 1024, // 500MB
+  other: 500 * 1024 * 1024, // 기본값 500MB
 }
 
 // 폴더 업로드 최대 크기 제한 (bytes)

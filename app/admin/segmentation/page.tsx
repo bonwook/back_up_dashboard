@@ -51,12 +51,12 @@ export default function ClientSegmentationPage() {
       return
     }
 
-    // 파일 크기 제한 (1GB)
-    const maxSize = 1024 * 1024 * 1024
+    // 파일 크기 제한 (500MB)
+    const maxSize = 500 * 1024 * 1024
     if (file.size > maxSize) {
       toast({
         title: "파일 크기 초과",
-        description: "파일 크기는 최대 1GB까지 업로드 가능합니다.",
+        description: "파일 크기는 최대 500MB까지 업로드 가능합니다.",
         variant: "destructive",
       })
       return

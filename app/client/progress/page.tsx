@@ -1323,7 +1323,7 @@ export default function ClientProgressPage() {
                                 input.onchange = (e) => {
                                   const files = (e.target as HTMLInputElement).files
                                   if (files && files.length > 0) {
-                                    const maxSize = 1024 * 1024 * 1024 // 1GB
+                                    const maxSize = 500 * 1024 * 1024 // 500MB
                                     const fileArray = Array.from(files)
                                     const validFiles: File[] = []
                                     
@@ -1331,7 +1331,7 @@ export default function ClientProgressPage() {
                                       if (file.size > maxSize) {
                                         toast({
                                           title: '파일 크기 초과',
-                                          description: `${file.name} 파일이 1GB를 초과합니다.`,
+                                          description: `${file.name} 파일이 500MB를 초과합니다.`,
                                           variant: 'destructive',
                                         })
                                         continue
@@ -1456,7 +1456,7 @@ export default function ClientProgressPage() {
                           </div>
                         ) : null}
                       <div className="text-xs text-muted-foreground space-y-1">
-                        <div>* 파일 크기 제한: 각 파일당 최대 1GB</div>
+                        <div>* 파일 크기 제한: 각 파일당 최대 500MB</div>
                       </div>
                     </div>
                     </>
@@ -1887,7 +1887,7 @@ export default function ClientProgressPage() {
                                 input.onchange = (e) => {
                                   const files = (e.target as HTMLInputElement).files
                                   if (files && files.length > 0) {
-                                    const maxSize = 1024 * 1024 * 1024 // 1GB
+                                    const maxSize = 500 * 1024 * 1024 // 500MB
                                     const fileArray = Array.from(files)
                                     const validFiles: File[] = []
                                     
@@ -1895,7 +1895,7 @@ export default function ClientProgressPage() {
                                       if (file.size > maxSize) {
                                         toast({
                                           title: '파일 크기 초과',
-                                          description: `${file.name} 파일이 1GB를 초과합니다.`,
+                                          description: `${file.name} 파일이 500MB를 초과합니다.`,
                                           variant: 'destructive',
                                         })
                                         continue
@@ -2020,7 +2020,7 @@ export default function ClientProgressPage() {
                           </div>
                         ) : null}
                       <div className="text-xs text-muted-foreground space-y-1">
-                        <div>* 파일 크기 제한: 각 파일당 최대 1GB</div>
+                        <div>* 파일 크기 제한: 각 파일당 최대 500MB</div>
                       </div>
                     </div>
                     </>

@@ -41,7 +41,7 @@ export default function RootLayout({
             <ThemeToggle />
           </div>
           {children}
-          <Analytics />
+          {process.env.VERCEL === '1' && <Analytics />}
         </ThemeProvider>
       </body>
     </html>
